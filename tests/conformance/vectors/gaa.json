@@ -1,0 +1,187 @@
+{
+  "_comment": "GAS Protocol Conformance Test Vectors \u2014 v1.0",
+  "_spec": "SPEC.md \u00a74 \u2014 Governance Authorization Artifact (GAA)",
+  "test_key": {
+    "key_id": "conformance-issuer-1",
+    "private_key_seed_hex": "0101010101010101010101010101010101010101010101010101010101010101",
+    "public_key_b64url": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w"
+  },
+  "valid_vectors": [
+    {
+      "id": "gaa-valid-1",
+      "description": "Standard valid GAA with all 7 fields and valid Ed25519 signature",
+      "gaa": {
+        "action_request": {
+          "action": "write_file",
+          "path": "/etc/config.json",
+          "content": "enabled=true"
+        },
+        "decision": {
+          "allow": true,
+          "allowed_actions": [
+            "read_file",
+            "write_file"
+          ],
+          "policy": "default-v1",
+          "policy_digest": "4a5e1e53ab93c390e4f8f5eb5528227d4617546429814686407f0861ab824250",
+          "reason_codes": [],
+          "reasons": [],
+          "request_digest": "f0e4c2f76c58916ec258f246851bea091d14d4247a2fc3e18694461b1816e13b"
+        },
+        "expires_at": 1750000000,
+        "nonce": "gaa-conformance-nonce-001",
+        "replay_frame_ref": "frame-auth-001",
+        "issuer_key_id": "conformance-issuer-1",
+        "signature": "yKLtZnrRbhGQnaCmSlQVij2YNNn3uvGrqtvfzEUNFc_uEAZC_dEmORQUOYortXljOj0Nzkz1kOljQqAckKU8DQ"
+      },
+      "expected_unsigned_canonical_utf8": "{\"action_request\":{\"action\":\"write_file\",\"content\":\"enabled=true\",\"path\":\"/etc/config.json\"},\"decision\":{\"allow\":true,\"allowed_actions\":[\"read_file\",\"write_file\"],\"policy\":\"default-v1\",\"policy_digest\":\"4a5e1e53ab93c390e4f8f5eb5528227d4617546429814686407f0861ab824250\",\"reason_codes\":[],\"reasons\":[],\"request_digest\":\"f0e4c2f76c58916ec258f246851bea091d14d4247a2fc3e18694461b1816e13b\"},\"expires_at\":1750000000,\"issuer_key_id\":\"conformance-issuer-1\",\"nonce\":\"gaa-conformance-nonce-001\",\"replay_frame_ref\":\"frame-auth-001\"}",
+      "expected_unsigned_canonical_sha256": "72bcd759f22e25d15ac36ed45f6673730da0282d680c755e3628254770ce2364",
+      "expected_signature": "yKLtZnrRbhGQnaCmSlQVij2YNNn3uvGrqtvfzEUNFc_uEAZC_dEmORQUOYortXljOj0Nzkz1kOljQqAckKU8DQ"
+    }
+  ],
+  "invalid_vectors": [
+    {
+      "id": "gaa-invalid-extra-field",
+      "description": "Must reject extra unexpected field",
+      "gaa": {
+        "action_request": {
+          "action": "write_file",
+          "path": "/etc/config.json",
+          "content": "enabled=true"
+        },
+        "decision": {
+          "allow": true,
+          "allowed_actions": [
+            "read_file",
+            "write_file"
+          ],
+          "policy": "default-v1",
+          "policy_digest": "4a5e1e53ab93c390e4f8f5eb5528227d4617546429814686407f0861ab824250",
+          "reason_codes": [],
+          "reasons": [],
+          "request_digest": "f0e4c2f76c58916ec258f246851bea091d14d4247a2fc3e18694461b1816e13b"
+        },
+        "expires_at": 1750000000,
+        "nonce": "gaa-conformance-nonce-001",
+        "replay_frame_ref": "frame-auth-001",
+        "issuer_key_id": "conformance-issuer-1",
+        "signature": "yKLtZnrRbhGQnaCmSlQVij2YNNn3uvGrqtvfzEUNFc_uEAZC_dEmORQUOYortXljOj0Nzkz1kOljQqAckKU8DQ",
+        "extra_field": "disallowed"
+      },
+      "expected_error": "extra_fields"
+    },
+    {
+      "id": "gaa-invalid-missing-nonce",
+      "description": "Must reject missing nonce",
+      "gaa": {
+        "action_request": {
+          "action": "write_file",
+          "path": "/etc/config.json",
+          "content": "enabled=true"
+        },
+        "decision": {
+          "allow": true,
+          "allowed_actions": [
+            "read_file",
+            "write_file"
+          ],
+          "policy": "default-v1",
+          "policy_digest": "4a5e1e53ab93c390e4f8f5eb5528227d4617546429814686407f0861ab824250",
+          "reason_codes": [],
+          "reasons": [],
+          "request_digest": "f0e4c2f76c58916ec258f246851bea091d14d4247a2fc3e18694461b1816e13b"
+        },
+        "expires_at": 1750000000,
+        "replay_frame_ref": "frame-auth-001",
+        "issuer_key_id": "conformance-issuer-1",
+        "signature": "yKLtZnrRbhGQnaCmSlQVij2YNNn3uvGrqtvfzEUNFc_uEAZC_dEmORQUOYortXljOj0Nzkz1kOljQqAckKU8DQ"
+      },
+      "expected_error": "missing_field"
+    },
+    {
+      "id": "gaa-invalid-boolean-expires-at",
+      "description": "Must reject boolean expires_at (SPEC \u00a74.4)",
+      "gaa": {
+        "action_request": {
+          "action": "write_file",
+          "path": "/etc/config.json",
+          "content": "enabled=true"
+        },
+        "decision": {
+          "allow": true,
+          "allowed_actions": [
+            "read_file",
+            "write_file"
+          ],
+          "policy": "default-v1",
+          "policy_digest": "4a5e1e53ab93c390e4f8f5eb5528227d4617546429814686407f0861ab824250",
+          "reason_codes": [],
+          "reasons": [],
+          "request_digest": "f0e4c2f76c58916ec258f246851bea091d14d4247a2fc3e18694461b1816e13b"
+        },
+        "expires_at": true,
+        "nonce": "gaa-conformance-nonce-001",
+        "replay_frame_ref": "frame-auth-001",
+        "issuer_key_id": "conformance-issuer-1",
+        "signature": "yKLtZnrRbhGQnaCmSlQVij2YNNn3uvGrqtvfzEUNFc_uEAZC_dEmORQUOYortXljOj0Nzkz1kOljQqAckKU8DQ"
+      },
+      "expected_error": "invalid_expires_at"
+    },
+    {
+      "id": "gaa-invalid-empty-key-id",
+      "description": "Must reject empty issuer_key_id",
+      "gaa": {
+        "action_request": {
+          "action": "write_file",
+          "path": "/etc/config.json",
+          "content": "enabled=true"
+        },
+        "decision": {
+          "allow": true,
+          "allowed_actions": [
+            "read_file",
+            "write_file"
+          ],
+          "policy": "default-v1",
+          "policy_digest": "4a5e1e53ab93c390e4f8f5eb5528227d4617546429814686407f0861ab824250",
+          "reason_codes": [],
+          "reasons": [],
+          "request_digest": "f0e4c2f76c58916ec258f246851bea091d14d4247a2fc3e18694461b1816e13b"
+        },
+        "expires_at": 1750000000,
+        "nonce": "gaa-conformance-nonce-001",
+        "replay_frame_ref": "frame-auth-001",
+        "issuer_key_id": "",
+        "signature": "yKLtZnrRbhGQnaCmSlQVij2YNNn3uvGrqtvfzEUNFc_uEAZC_dEmORQUOYortXljOj0Nzkz1kOljQqAckKU8DQ"
+      },
+      "expected_error": "empty_string"
+    },
+    {
+      "id": "gaa-invalid-tampered-action",
+      "description": "Must reject signature when action_request is modified",
+      "gaa": {
+        "action_request": {
+          "action": "delete_all"
+        },
+        "decision": {
+          "allow": true,
+          "allowed_actions": [
+            "read_file",
+            "write_file"
+          ],
+          "policy": "default-v1",
+          "policy_digest": "4a5e1e53ab93c390e4f8f5eb5528227d4617546429814686407f0861ab824250",
+          "reason_codes": [],
+          "reasons": [],
+          "request_digest": "f0e4c2f76c58916ec258f246851bea091d14d4247a2fc3e18694461b1816e13b"
+        },
+        "expires_at": 1750000000,
+        "nonce": "gaa-conformance-nonce-001",
+        "replay_frame_ref": "frame-auth-001",
+        "issuer_key_id": "conformance-issuer-1",
+        "signature": "yKLtZnrRbhGQnaCmSlQVij2YNNn3uvGrqtvfzEUNFc_uEAZC_dEmORQUOYortXljOj0Nzkz1kOljQqAckKU8DQ"
+      },
+      "expected_error": "invalid_signature"
+    }
+  ]
+}

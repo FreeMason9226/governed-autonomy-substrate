@@ -1,0 +1,5 @@
+image:
+  repository: governed-autonomy-substrate
+  tag: latest
+replicaCount: 2
+bearerTokenSecret: governed-autonomy

@@ -1,0 +1,63 @@
+{
+  "_comment": "GAS Protocol Conformance Test Vectors \u2014 v1.0",
+  "_spec": "SPEC.md \u00a75 \u2014 Signed Approval",
+  "test_key": {
+    "key_id": "conformance-issuer-1",
+    "public_key_b64url": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w"
+  },
+  "valid_vectors": [
+    {
+      "id": "approval-valid-minimal",
+      "description": "Minimal SignedApproval (actor_id omitted, context omitted in wire format)",
+      "approval": {
+        "action": "execute_migration",
+        "request_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "decision_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "issuer_key_id": "conformance-issuer-1",
+        "signature": "HcvTeQD9CFJSZbiRcqVqQJZyyNJ7xBJo7B6_G_27Ax_pUsCYyqjjkU_1Xu_Iv9JbaSltMtDB2YAzkgDR0TwXCQ"
+      },
+      "expected_unsigned_canonical_utf8": "{\"action\":\"execute_migration\",\"actor_id\":null,\"context\":{},\"decision_digest\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"issuer_key_id\":\"conformance-issuer-1\",\"request_digest\":\"1111111111111111111111111111111111111111111111111111111111111111\"}",
+      "expected_signature": "HcvTeQD9CFJSZbiRcqVqQJZyyNJ7xBJo7B6_G_27Ax_pUsCYyqjjkU_1Xu_Iv9JbaSltMtDB2YAzkgDR0TwXCQ"
+    },
+    {
+      "id": "approval-valid-full",
+      "description": "Full SignedApproval with actor_id and context",
+      "approval": {
+        "action": "execute_migration",
+        "actor_id": "security-officer@example.com",
+        "context": {
+          "department": "compliance",
+          "tier": 1
+        },
+        "request_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "decision_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "issuer_key_id": "conformance-issuer-1",
+        "signature": "lvLaJc2CkfscqGe4E4PhueCsOkdtVaAllUty-JOc3rT9QUcVPlUiotM3OAIDfRsOXf_eMHx1IkmlOH1CNJGBDA"
+      },
+      "expected_unsigned_canonical_utf8": "{\"action\":\"execute_migration\",\"actor_id\":\"security-officer@example.com\",\"context\":{\"department\":\"compliance\",\"tier\":1},\"decision_digest\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"issuer_key_id\":\"conformance-issuer-1\",\"request_digest\":\"1111111111111111111111111111111111111111111111111111111111111111\"}",
+      "expected_signature": "lvLaJc2CkfscqGe4E4PhueCsOkdtVaAllUty-JOc3rT9QUcVPlUiotM3OAIDfRsOXf_eMHx1IkmlOH1CNJGBDA"
+    }
+  ],
+  "request_binding_vectors": [
+    {
+      "id": "request-digest-strips-approvals",
+      "description": "Computing request_digest MUST strip 'approvals' key before canonical JSON (SPEC \u00a75.3)",
+      "raw_request": {
+        "action": "execute_migration",
+        "target": "db-prod",
+        "approvals": [
+          {
+            "signature": "mock",
+            "issuer_key_id": "mock"
+          }
+        ]
+      },
+      "expected_stripped_request": {
+        "action": "execute_migration",
+        "target": "db-prod"
+      },
+      "expected_canonical_utf8": "{\"action\":\"execute_migration\",\"target\":\"db-prod\"}",
+      "expected_request_digest": "a80494757aa44d9a03b4edbfdbd75eec2f9d794933020f1cead172e128f3f0c0"
+    }
+  ]
+}

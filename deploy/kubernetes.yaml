@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: governed-autonomy}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: governed-autonomy}}
+  template:
+    metadata: {labels: {app: governed-autonomy}}
+    spec:
+      containers:
+        - name: api
+          image: governed-autonomy-substrate:latest
+          ports: [{containerPort: 8000}]
+          env:
+            - name: GOVERNED_AUTONOMY_BEARER_TOKEN
+              valueFrom: {secretKeyRef: {name: governed-autonomy, key: bearer-token}}
+          readinessProbe: {httpGet: {path: /readyz, port: 8000}}
+          livenessProbe: {httpGet: {path: /livez, port: 8000}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true}

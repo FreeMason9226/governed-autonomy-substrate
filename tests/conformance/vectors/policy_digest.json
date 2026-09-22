@@ -1,0 +1,56 @@
+{
+  "_comment": "GAS Protocol Conformance Test Vectors \u2014 v1.0",
+  "_spec": "SPEC.md \u00a76 \u2014 Policy Definition & Canonical Digest",
+  "vectors": [
+    {
+      "id": "policy-digest-minimal",
+      "description": "Minimal policy with default settings",
+      "policy": {
+        "policy_id": "minimal-policy",
+        "allowed_actions": [
+          "read_file"
+        ],
+        "required_fields": {},
+        "exact_fields": {},
+        "required_context": [],
+        "exact_context": {},
+        "max_request_bytes": 65536,
+        "max_ttl_seconds": 300,
+        "required_approvals": {}
+      },
+      "expected_canonical_utf8": "{\"allowed_actions\":[\"read_file\"],\"exact_context\":{},\"exact_fields\":{},\"max_request_bytes\":65536,\"max_ttl_seconds\":300,\"policy_id\":\"minimal-policy\",\"required_approvals\":{},\"required_context\":[],\"required_fields\":{}}",
+      "expected_digest": "4bfe5d2fc6e9467221db779733e419e8e21fa835709dd57da8f261d92fe0d36c"
+    },
+    {
+      "id": "policy-digest-comprehensive",
+      "description": "Comprehensive policy with required fields, context, approvals, and limits",
+      "policy": {
+        "policy_id": "conformance-v1",
+        "allowed_actions": [
+          "read_file",
+          "write_file"
+        ],
+        "required_fields": {
+          "write_file": [
+            "path",
+            "content"
+          ]
+        },
+        "exact_fields": {},
+        "required_context": [
+          "tenant_id"
+        ],
+        "exact_context": {
+          "environment": "production"
+        },
+        "max_request_bytes": 65536,
+        "max_ttl_seconds": 300,
+        "required_approvals": {
+          "write_file": 2
+        }
+      },
+      "expected_canonical_utf8": "{\"allowed_actions\":[\"read_file\",\"write_file\"],\"exact_context\":{\"environment\":\"production\"},\"exact_fields\":{},\"max_request_bytes\":65536,\"max_ttl_seconds\":300,\"policy_id\":\"conformance-v1\",\"required_approvals\":{\"write_file\":2},\"required_context\":[\"tenant_id\"],\"required_fields\":{\"write_file\":[\"path\",\"content\"]}}",
+      "expected_digest": "5885b7507374bfd8e700476faddd7590b3d9b4386df91b3abbdf184cb9022037"
+    }
+  ]
+}

@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.Python
+pip-wheel-metadata/
+*.whl
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Testing & coverage
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+*.lcov
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# GAS runtime artifacts — never commit these
+replay.jsonl
+*.replay.jsonl
+trust_store.json
+policy_registry.json
+gas_server.db
+*.gas.db
+
+# Secrets
+*.pem
+*.key
+*.p8
+.env
+.env.*
+!.env.example

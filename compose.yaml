@@ -1,0 +1,9 @@
+services:
+  governed-autonomy:
+    build: .
+    ports: ["8000:8000"]
+    environment:
+      GOVERNED_AUTONOMY_BEARER_TOKEN: ${GOVERNED_AUTONOMY_BEARER_TOKEN:?set a secret}
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]

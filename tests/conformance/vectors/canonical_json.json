@@ -1,0 +1,94 @@
+{
+  "_comment": "GAS Protocol Conformance Test Vectors \u2014 v1.0",
+  "_spec": "SPEC.md \u00a73 \u2014 Canonical JSON",
+  "vectors": [
+    {
+      "id": "canonical-1",
+      "description": "Simple object: keys must be sorted alphabetically",
+      "input": {
+        "z": 1,
+        "a": 2,
+        "m": 3
+      },
+      "expected_utf8": "{\"a\":2,\"m\":3,\"z\":1}",
+      "expected_hex": "7b2261223a322c226d223a332c227a223a317d"
+    },
+    {
+      "id": "canonical-2",
+      "description": "Nested object: all levels sorted",
+      "input": {
+        "b": {
+          "y": true,
+          "a": false
+        },
+        "a": null
+      },
+      "expected_utf8": "{\"a\":null,\"b\":{\"a\":false,\"y\":true}}",
+      "expected_hex": "7b2261223a6e756c6c2c2262223a7b2261223a66616c73652c2279223a747275657d7d"
+    },
+    {
+      "id": "canonical-3",
+      "description": "Unicode string must NOT be escaped (ensure_ascii=False)",
+      "input": {
+        "msg": "h\u00e9llo \ud83c\udf0d"
+      },
+      "expected_utf8": "{\"msg\":\"h\u00e9llo \ud83c\udf0d\"}"
+    },
+    {
+      "id": "canonical-4",
+      "description": "Empty object",
+      "input": {},
+      "expected_utf8": "{}"
+    },
+    {
+      "id": "canonical-5",
+      "description": "Array values preserve exact order (arrays are not sorted)",
+      "input": {
+        "actions": [
+          "write",
+          "read",
+          "delete"
+        ]
+      },
+      "expected_utf8": "{\"actions\":[\"write\",\"read\",\"delete\"]}"
+    },
+    {
+      "id": "canonical-6",
+      "description": "Numbers: integer representations and compact separators",
+      "input": {
+        "count": 42,
+        "negative": -10,
+        "zero": 0
+      },
+      "expected_utf8": "{\"count\":42,\"negative\":-10,\"zero\":0}"
+    },
+    {
+      "id": "canonical-7",
+      "description": "Boolean and null primitives",
+      "input": {
+        "f": false,
+        "n": null,
+        "t": true
+      },
+      "expected_utf8": "{\"f\":false,\"n\":null,\"t\":true}"
+    },
+    {
+      "id": "canonical-8",
+      "description": "Deeply nested mixed structures",
+      "input": {
+        "k": [
+          {
+            "z": 9,
+            "a": [
+              1,
+              2
+            ]
+          },
+          {}
+        ],
+        "a": "top"
+      },
+      "expected_utf8": "{\"a\":\"top\",\"k\":[{\"a\":[1,2],\"z\":9},{}]}"
+    }
+  ]
+}

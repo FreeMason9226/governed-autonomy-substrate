@@ -1,0 +1,79 @@
+{
+  "_comment": "GAS Protocol Conformance Test Vectors \u2014 v1.0",
+  "_spec": "SPEC.md \u00a78 \u2014 Replay Frame Hash Chaining",
+  "chain_vectors": [
+    {
+      "frame_id": "frame-001",
+      "previous_hash": "",
+      "event": {
+        "type": "genesis",
+        "status": "initialized"
+      },
+      "expected_canonical_body_utf8": "{\"event\":{\"status\":\"initialized\",\"type\":\"genesis\"},\"frame_id\":\"frame-001\",\"previous_hash\":\"\"}",
+      "expected_frame_hash": "9bbfda1a5d3114d0098c74c4a380f99d4594492776979dcd0c9ee60842cf7216"
+    },
+    {
+      "frame_id": "frame-002",
+      "previous_hash": "9bbfda1a5d3114d0098c74c4a380f99d4594492776979dcd0c9ee60842cf7216",
+      "event": {
+        "type": "authorization",
+        "nonce": "nonce-001",
+        "issued": true
+      },
+      "expected_canonical_body_utf8": "{\"event\":{\"issued\":true,\"nonce\":\"nonce-001\",\"type\":\"authorization\"},\"frame_id\":\"frame-002\",\"previous_hash\":\"9bbfda1a5d3114d0098c74c4a380f99d4594492776979dcd0c9ee60842cf7216\"}",
+      "expected_frame_hash": "412b882f3e3cddd81d4e349a22405f0e432a7f53be637ff068f95874f38ad9db"
+    },
+    {
+      "frame_id": "frame-003",
+      "previous_hash": "412b882f3e3cddd81d4e349a22405f0e432a7f53be637ff068f95874f38ad9db",
+      "event": {
+        "type": "execution",
+        "nonce": "nonce-001",
+        "status": "completed"
+      },
+      "expected_canonical_body_utf8": "{\"event\":{\"nonce\":\"nonce-001\",\"status\":\"completed\",\"type\":\"execution\"},\"frame_id\":\"frame-003\",\"previous_hash\":\"412b882f3e3cddd81d4e349a22405f0e432a7f53be637ff068f95874f38ad9db\"}",
+      "expected_frame_hash": "45fa8e0919bf0f47f8e7b345581bf57090b8a92fd9e5ec50b55d204c4b0c130f"
+    }
+  ],
+  "corruption_vectors": [
+    {
+      "id": "replay-corrupt-previous-hash",
+      "description": "A frame pointing to wrong previous_hash breaks the chain",
+      "frames": [
+        {
+          "frame_id": "frame-001",
+          "previous_hash": "",
+          "event": {
+            "type": "genesis"
+          },
+          "frame_hash": "9bbfda1a5d3114d0098c74c4a380f99d4594492776979dcd0c9ee60842cf7216"
+        },
+        {
+          "frame_id": "frame-002",
+          "previous_hash": "badhash000000000000000000000000000000000000000000000000000000000",
+          "event": {
+            "type": "authorization"
+          },
+          "frame_hash": "412b882f3e3cddd81d4e349a22405f0e432a7f53be637ff068f95874f38ad9db"
+        }
+      ],
+      "expected_valid": false
+    },
+    {
+      "id": "replay-corrupt-body-tamper",
+      "description": "Tampered event without updating frame_hash must fail validation",
+      "frames": [
+        {
+          "frame_id": "frame-001",
+          "previous_hash": "",
+          "event": {
+            "type": "genesis",
+            "tampered": true
+          },
+          "frame_hash": "9bbfda1a5d3114d0098c74c4a380f99d4594492776979dcd0c9ee60842cf7216"
+        }
+      ],
+      "expected_valid": false
+    }
+  ]
+}
