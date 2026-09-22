@@ -94,3 +94,7 @@ The mesh fails closed when highest-priority sources disagree on allow/deny. It c
 `ReplayLog.verify_integrity()` provides deterministic replay evidence for audit and incident response. It rechecks every hash-chain link, detects duplicate frame IDs, and returns a stable replay digest, head hash, frame count, and first integrity error without mutating the log. `events()` and `events_for_nonce()` now return detached event copies, preventing callers from changing retained audit evidence accidentally.
 
 This verifies local evidence only. A production deployment still needs external tamper-evident retention, signed replay attestations, cross-node comparison, and an operational response when divergence is detected.
+
+### Mesh preflight at authorization
+
+`AuthorizationIssuer.authorize(..., mesh_inputs=...)` optionally requires the deterministic governance mesh to preflight the exact canonical request before a GAA is issued. The resulting mesh digest is included in the signed decision and authorization replay frame. A denied or conflicted mesh result is audited as a denied authorization and never produces a GAA. Existing callers that omit `mesh_inputs` retain the original arbitration path; production deployments should supply authenticated governance-source adapters and treat mesh evidence as an additional gate, not a replacement for policy enforcement.

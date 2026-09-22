@@ -6,6 +6,7 @@ from .errors import AuthorizationError
 from .health import health_report
 from .issuer import AuthorizationIssuer
 from .models import GovernanceAuthorizationArtifact, SignedApproval
+from .mesh import GovernanceInput
 from .policy import Policy, PolicyRegistry
 
 
@@ -36,6 +37,7 @@ class GovernedService:
         *,
         ttl_seconds: int = 300,
         approvals: Sequence[SignedApproval | dict[str, Any]] | None = None,
+        mesh_inputs: Sequence[GovernanceInput] | None = None,
     ) -> GovernanceAuthorizationArtifact:
         policy = self.policies.get(policy_id)
         if policy is None:
@@ -45,6 +47,7 @@ class GovernedService:
             policy,
             ttl_seconds=ttl_seconds,
             approvals=approvals,
+            mesh_inputs=mesh_inputs,
         )
 
     def execute(self, artifact: GovernanceAuthorizationArtifact) -> Any:

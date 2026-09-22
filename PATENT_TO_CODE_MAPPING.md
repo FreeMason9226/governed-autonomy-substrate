@@ -249,3 +249,21 @@ Implementation notes:
 - Reports a stable replay digest, head hash, frame count, duplicate IDs, and first detected integrity error.
 - Audit event queries return detached copies so callers cannot mutate retained evidence through a returned object.
 - This is local integrity evidence; external WORM storage, signed attestations, and cross-node comparison remain deployment responsibilities.
+
+### 9. Governance mesh insertion before authorization
+
+Patent concepts:
+- governance-source harmonization before execution authorization
+- canonical decision provenance carried into authorization evidence
+- fail-closed governance conflict handling
+
+Code:
+- `src/governed_autonomy/issuer.py` - optional `mesh_inputs` authorization gate
+- `src/governed_autonomy/service.py` - service facade propagation
+- `tests/test_issuer.py` - allow/deny mesh integration coverage
+
+Implementation notes:
+- The mesh evaluates the exact request after approval evidence is attached and before nonce/artifact issuance.
+- The mesh decision digest is bound into the signed GAA decision and authorization replay frame.
+- Denied or conflicted mesh results are audited and raise `PolicyDeniedError`.
+- The integration is opt-in for compatibility; mandatory deployment policy can require callers to provide mesh inputs at a higher platform layer.
