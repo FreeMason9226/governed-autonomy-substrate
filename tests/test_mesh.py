@@ -1,6 +1,14 @@
 ﻿import pytest
 
-from governed_autonomy import GovernanceInput, GovernanceMesh, GovernanceMeshError, KeyPair, ReplayLog, TrustStore
+from governed_autonomy import (
+    GovernanceInput,
+    GovernanceMesh,
+    GovernanceMeshError,
+    GovernanceSourceRegistry,
+    KeyPair,
+    ReplayLog,
+    TrustStore,
+)
 
 
 def decision(allow, reason=None):
@@ -126,3 +134,21 @@ def test_mesh_accepts_trust_store_key_registry_and_rejects_revoked_keys():
     store.revoke(source.key_id)
     with pytest.raises(GovernanceMeshError):
         GovernanceMesh(trust_store=store).preflight([attested], request_digest="req-digest")
+
+
+def test_mesh_source_registry_supports_registration_and_rotation():
+    source = KeyPair.generate("registry-source")
+    registry = GovernanceSourceRegistry()
+    registry.register("registry-source", source.public_key, metadata={"tenant": "ops"})
+    result = GovernanceMesh(source_registry=registry).preflight(
+        [GovernanceInput("registry-source", decision(True)).attest(source)],
+        request_digest="req-digest",
+    )
+    assert result.allow is True
+
+    registry.revoke("registry-source")
+    with pytest.raises(GovernanceMeshError):
+        GovernanceMesh(source_registry=registry).preflight(
+            [GovernanceInput("registry-source", decision(True)).attest(source)],
+            request_digest="req-digest",
+        )

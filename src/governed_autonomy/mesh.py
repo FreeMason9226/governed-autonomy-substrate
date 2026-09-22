@@ -137,6 +137,52 @@ class GovernancePreflightDecision:
         }
 
 
+class GovernanceSourceRegistry:
+    """Trusted governance-source registry with explicit registration and rotation."""
+
+    def __init__(self, *, trust_store: TrustStore | None = None) -> None:
+        self.trust_store = trust_store
+        self._keys: dict[str, Any] = {}
+        self._metadata: dict[str, Mapping[str, Any]] = {}
+        self._revoked: set[str] = set()
+
+    def register(
+        self,
+        source_id: str,
+        public_key: Any,
+        *,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> None:
+        if not source_id or not isinstance(source_id, str):
+            raise GovernanceMeshError("source_id must be a non-empty string")
+        if public_key is None:
+            raise GovernanceMeshError("public_key must not be null")
+        self._keys[source_id] = public_key
+        self._metadata[source_id] = dict(metadata or {})
+        self._revoked.discard(source_id)
+
+    def revoke(self, source_id: str) -> None:
+        if source_id not in self._keys:
+            raise GovernanceMeshError(f"unknown governance source: {source_id}")
+        self._revoked.add(source_id)
+
+    def resolve(self, source_id: str) -> Any | None:
+        if source_id in self._revoked:
+            return None
+        if self.trust_store is not None:
+            key = self.trust_store.resolve(source_id)
+            if key is not None:
+                return key
+        return self._keys.get(source_id)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "sources": {source_id: {"public_key": public_key, "metadata": self._metadata.get(source_id, {})}
+                for source_id, public_key in sorted(self._keys.items())},
+            "revoked": sorted(self._revoked),
+        }
+
+
 class GovernanceMesh:
     """Aggregate independent governance inputs without hidden state or nondeterminism.
 
@@ -152,11 +198,15 @@ class GovernanceMesh:
         replay_log: ReplayLog | None = None,
         trusted_sources: Mapping[str, Any] | None = None,
         trust_store: TrustStore | None = None,
+        source_registry: GovernanceSourceRegistry | None = None,
     ) -> None:
         if trusted_sources is not None and trust_store is not None:
             raise ValueError("provide either trusted_sources or trust_store, not both")
+        if source_registry is not None and (trusted_sources is not None or trust_store is not None):
+            raise ValueError("provide either a source registry or key map/trust store, not both")
         self.replay_log = replay_log
         self.trust_store = trust_store
+        self.source_registry = source_registry
         self.trusted_sources = dict(trusted_sources or {})
         if self.trust_store is not None:
             self.trusted_sources = {
@@ -164,11 +214,14 @@ class GovernanceMesh:
             }
 
     def _verify_source_attestation(self, item: GovernanceInput) -> None:
-        if not self.trusted_sources and self.trust_store is None:
-            return
-        key = self.trusted_sources.get(item.source_id)
-        if key is None and self.trust_store is not None:
+        if self.source_registry is not None:
+            key = self.source_registry.resolve(item.source_id)
+        elif self.trust_store is not None:
             key = self.trust_store.resolve(item.source_id)
+        else:
+            key = self.trusted_sources.get(item.source_id)
+        if not self.trusted_sources and self.trust_store is None and self.source_registry is None:
+            return
         if key is None or item.source_signature is None or not verify_signature(
             key, item.attestation_payload(), item.source_signature
         ):
