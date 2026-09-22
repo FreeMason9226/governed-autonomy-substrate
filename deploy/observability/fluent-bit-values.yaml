@@ -1,0 +1,39 @@
+config:
+  service: |
+    [SERVICE]
+        Flush        1
+        Daemon       Off
+        Log_Level    info
+        Parsers_File parsers.conf
+  inputs: |
+    [INPUT]
+        Name              tail
+        Path              /var/log/containers/*governed-autonomy*.log
+        Parser            cri
+        Tag               gas.*
+        Mem_Buf_Limit     10MB
+        Skip_Long_Lines   On
+  filters: |
+    [FILTER]
+        Name              kubernetes
+        Match             gas.*
+        Merge_Log         On
+        Keep_Log          Off
+  outputs: |
+    [OUTPUT]
+        Name              forward
+        Match             gas.*
+        Host              ${LOG_FORWARD_HOST}
+        Port              ${LOG_FORWARD_PORT}
+        tls               On
+        tls.verify        On
+env:
+  - name: LOG_FORWARD_HOST
+    valueFrom:
+      secretKeyRef: {name: centralized-logging, key: host}
+  - name: LOG_FORWARD_PORT
+    valueFrom:
+      secretKeyRef: {name: centralized-logging, key: port}
+securityContext:
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
