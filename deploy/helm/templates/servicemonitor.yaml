@@ -1,0 +1,19 @@
+{{- if .Values.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "governed-autonomy.fullname" . }}
+  labels:
+    {{- include "governed-autonomy.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "governed-autonomy.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  endpoints:
+    - port: http
+      path: /admin/metrics
+      bearerTokenSecret:
+        name: {{ .Values.serviceMonitor.bearerTokenSecret }}
+        key: {{ .Values.serviceMonitor.bearerTokenKey }}
+{{- end }}

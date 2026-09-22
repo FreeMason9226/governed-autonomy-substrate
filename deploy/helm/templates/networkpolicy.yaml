@@ -1,0 +1,28 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "governed-autonomy.fullname" . }}
+  labels:
+    {{- include "governed-autonomy.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "governed-autonomy.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - ports: [{protocol: TCP, port: 8000}]
+      {{- if .Values.networkPolicy.ingressNamespaces }}
+      from:
+        {{- range .Values.networkPolicy.ingressNamespaces }}
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: {{ . | quote }}}
+        {{- end }}
+      {{- end }}
+  egress:
+    - to: [{namespaceSelector: {}}]
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+{{- end }}

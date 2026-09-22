@@ -1,0 +1,21 @@
+{{- if .Values.prometheusRule.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "governed-autonomy.fullname" . }}
+  labels:
+    {{- include "governed-autonomy.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: governed-autonomy
+      rules:
+        - alert: GovernedAutonomyNotReady
+          expr: kube_deployment_status_replicas_available{deployment={{ include "governed-autonomy.fullname" . | quote }}} < 1
+          for: 5m
+          labels: {severity: critical}
+          annotations: {summary: Governed Autonomy has no available replicas}
+        - alert: GovernedAutonomyPodRestarts
+          expr: increase(kube_pod_container_status_restarts_total[15m]) > 3
+          labels: {severity: warning}
+          annotations: {summary: Governed Autonomy pods are restarting}
+{{- end }}

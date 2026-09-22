@@ -1,19 +1,53 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: governed-autonomy
+  labels: {app.kubernetes.io/name: governed-autonomy}
+spec:
+  selector: {app.kubernetes.io/name: governed-autonomy}
+  ports: [{name: http, port: 8000, targetPort: http}]
+---
 apiVersion: apps/v1
 kind: Deployment
-metadata: {name: governed-autonomy}
+metadata:
+  name: governed-autonomy
+  labels: {app.kubernetes.io/name: governed-autonomy}
 spec:
   replicas: 2
-  selector: {matchLabels: {app: governed-autonomy}}
+  selector: {matchLabels: {app.kubernetes.io/name: governed-autonomy}}
   template:
-    metadata: {labels: {app: governed-autonomy}}
+    metadata: {labels: {app.kubernetes.io/name: governed-autonomy}}
     spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
       containers:
         - name: api
           image: governed-autonomy-substrate:latest
-          ports: [{containerPort: 8000}]
+          ports: [{name: http, containerPort: 8000}]
           env:
             - name: GOVERNED_AUTONOMY_BEARER_TOKEN
               valueFrom: {secretKeyRef: {name: governed-autonomy, key: bearer-token}}
-          readinessProbe: {httpGet: {path: /readyz, port: 8000}}
-          livenessProbe: {httpGet: {path: /livez, port: 8000}}
-          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true}
+          readinessProbe:
+            exec:
+              command: ["python", "-c", "import os,urllib.request; r=urllib.request.Request('http://127.0.0.1:8000/readyz',headers={'Authorization':'Bearer '+os.environ['GOVERNED_AUTONOMY_BEARER_TOKEN']}); urllib.request.urlopen(r)"]
+          livenessProbe:
+            exec:
+              command: ["python", "-c", "import os,urllib.request; r=urllib.request.Request('http://127.0.0.1:8000/livez',headers={'Authorization':'Bearer '+os.environ['GOVERNED_AUTONOMY_BEARER_TOKEN']}); urllib.request.urlopen(r)"]
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: {name: governed-autonomy}
+spec:
+  minAvailable: 1
+  selector: {matchLabels: {app.kubernetes.io/name: governed-autonomy}}

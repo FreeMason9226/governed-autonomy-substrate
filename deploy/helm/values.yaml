@@ -1,5 +1,56 @@
 image:
-  repository: governed-autonomy-substrate
+  repository: ghcr.io/example/governed-autonomy-substrate
   tag: latest
+  pullPolicy: IfNotPresent
 replicaCount: 2
 bearerTokenSecret: governed-autonomy
+createBearerTokenSecret: false
+bearerToken: ""
+service:
+  type: ClusterIP
+  port: 8000
+resources:
+  requests: {cpu: 100m, memory: 128Mi}
+  limits: {cpu: 500m, memory: 512Mi}
+networkPolicy:
+  enabled: true
+  ingressNamespaces: []
+serviceMonitor:
+  enabled: false
+  bearerTokenSecret: governed-autonomy
+  bearerTokenKey: bearer-token
+prometheusRule:
+  enabled: false
+ingress:
+  enabled: false
+  className: nginx
+  host: gas.example.com
+  clusterIssuer: letsencrypt-prod
+externalSecrets:
+  enabled: false
+  refreshInterval: 1h
+  secretStoreName: gas-secrets
+  secretStoreKind: ClusterSecretStore
+  remoteKey: governed-autonomy/bearer-token
+  remoteProperty: value
+oidc:
+  enabled: false
+  issuer: ""
+  audience: ""
+  jwksUrl: ""
+postgres:
+  enabled: false
+  image: postgres:16.4
+  username: gas
+  password: ""
+  database: gas
+  storage: 20Gi
+  resources:
+    requests: {cpu: 250m, memory: 512Mi}
+    limits: {cpu: 1, memory: 1Gi}
+  backup:
+    enabled: false
+    schedule: "17 2 * * *"
+    image: postgres:16.4
+    pvcName: gas-postgres-backups
+    storage: 50Gi
