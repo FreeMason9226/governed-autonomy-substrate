@@ -11,7 +11,10 @@ from .storage import PostgresReplayLog, PostgresTrustStore
 from .trust import TrustStore
 
 
-def build_demo_service() -> tuple[GovernedService, KeyPair, ReplayLog]:
+def build_demo_service(
+    *,
+    mesh_source_registry=None,
+) -> tuple[GovernedService, KeyPair, ReplayLog]:
     """Build a complete in-process composition for demos and integration tests."""
     issuer = KeyPair.generate("demo-issuer")
     replay_log = ReplayLog()
@@ -28,7 +31,11 @@ def build_demo_service() -> tuple[GovernedService, KeyPair, ReplayLog]:
         )
     )
     service = GovernedService(
-        issuer=AuthorizationIssuer(issuer=issuer, replay_log=replay_log),
+        issuer=AuthorizationIssuer(
+            issuer=issuer,
+            replay_log=replay_log,
+            mesh_source_registry=mesh_source_registry,
+        ),
         boundary=ExecutionBoundary(
             replay_log=replay_log,
             trust_store=trust_store,
@@ -36,6 +43,7 @@ def build_demo_service() -> tuple[GovernedService, KeyPair, ReplayLog]:
         ),
         policies=policy_registry,
         actions={"write_file": lambda request: request["content"]},
+        mesh_source_registry=mesh_source_registry,
     )
     return service, issuer, replay_log
 
@@ -95,9 +103,10 @@ def build_platform_demo(
     environment: str = "prod",
     tenant_id: str | None = None,
     actor_id: str | None = None,
+    mesh_source_registry=None,
 ) -> tuple[GovernancePlatform, GovernedService, KeyPair, ReplayLog]:
     """Build a platform-ready composition with runtime identity and runtime metadata."""
-    service, issuer, replay_log = build_demo_service()
+    service, issuer, replay_log = build_demo_service(mesh_source_registry=mesh_source_registry)
     platform = GovernancePlatform(
         service=service,
         identity=RuntimeIdentity(
@@ -106,5 +115,6 @@ def build_platform_demo(
             tenant_id=tenant_id,
             actor_id=actor_id,
         ),
+        mesh_source_registry=mesh_source_registry,
     )
     return platform, service, issuer, replay_log

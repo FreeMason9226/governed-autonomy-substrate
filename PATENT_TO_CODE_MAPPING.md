@@ -27,12 +27,14 @@ Code:
 - `src/governed_autonomy/issuer.py` — `AuthorizationIssuer`, `PolicyDeniedError`
 - `src/governed_autonomy/models.py` — `GovernanceAuthorizationArtifact`
 - `src/governed_autonomy/trust.py` — `TrustStore`
+- `src/governed_autonomy/mesh.py` — `GovernanceSourceRegistry`
 
 Implementation notes:
 - `ExecutionBoundary._validate()` verifies signature, expiry, nonce, replay reference, policy decision, issuer trust, and request policy compatibility.
 - `ExecutionBoundary.execute()` consumes the nonce before invoking the action.
 - The execution boundary rejects actions without a valid signed GAA.
 - TrustStore enforces issuer registration/revocation and supports rotation.
+- `GovernanceSourceRegistry` provides canonical JSON snapshots for mesh-source trust configuration, allowing a local trusted source map to be persisted and reloaded while keeping public keys in a reproducible, auditable form.
 
 ### 2. Deterministic arbitration and policy evaluation
 
@@ -139,10 +141,14 @@ Patent concepts:
 
 Code:
 - `src/governed_autonomy/service.py` — `GovernedService`
+- `src/governed_autonomy/platform.py` — `GovernancePlatform`
 
 Implementation notes:
 - `GovernedService` binds policy IDs and named executable handlers.
 - It blocks unknown policies and unknown action names before a nonce is consumed.
+- It can bind a shared source registry into the authorization issuer so runtime mesh-preflight trust is configured once and reused across the service boundary.
+- `GovernancePlatform.authorize(..., mesh_inputs=...)` exposes the same trust path at the platform layer, combining runtime policy validation and mesh evidence verification before issuance.
+- `platform_report()` now includes mesh-source registry state and `health_report(..., mesh_source_registry=...)` records source counts and revoked-source state in the runtime health snapshot.
 - It supports `execute_dict()` and `execute_json()` for serialized GAA execution.
 
 ### 9. Federated governance synchronization and reconciliation
@@ -268,4 +274,4 @@ Implementation notes:
 - Denied or conflicted mesh results are audited and raise `PolicyDeniedError`.
 - Issued mesh-enabled authorization frames retain canonical `GovernanceInput` evidence and the request digest; `ExecutionBoundary` reconstructs and compares that evidence before execution, failing closed on malformed, conflicting, tampered, mismatched, or digest-divergent evidence.
 - The integration is opt-in for compatibility; mandatory deployment policy can require callers to provide mesh inputs at a higher platform layer. This execution-side verification is local replay-bound evidence, not external source attestation or tamper-proof storage; legacy artifacts without mesh inputs remain compatible.
-- `GovernanceInput.attest()` and `GovernanceMesh(trusted_sources=...)` add opt-in source signature verification and explicit source-ID-to-key binding. This remains a local trust-registry adapter boundary and does not provide network identity, key rotation, or protected external retention.
+- `GovernanceInput.attest()`, `GovernanceSourceRegistry`, and `GovernanceMesh(trusted_sources=...)` add opt-in source signature verification, explicit registration/revocation semantics, and source-ID-to-key binding. This remains a local trust-registry adapter boundary and does not provide network identity, key rotation, or protected external retention.

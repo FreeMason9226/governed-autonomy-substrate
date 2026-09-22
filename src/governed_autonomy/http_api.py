@@ -15,6 +15,7 @@ from .errors import AuthorizationError
 from .health import health_report
 from .identity import IdentityValidationError, OIDCValidator, UrlJWKSProvider
 from .issuer import PolicyDeniedError
+from .mesh import GovernanceInput
 from .service import GovernedService
 
 
@@ -76,6 +77,7 @@ class AuthenticatedAPI:
                         replay_log=api.service.boundary.replay_log,
                         trust_store=api.service.boundary.trust_store,
                         policy_registry=api.service.policies,
+                        mesh_source_registry=api.service.mesh_source_registry,
                     )
                     if self.path == "/livez":
                         report = {"ok": True, "status": "live"}
@@ -113,11 +115,17 @@ class AuthenticatedAPI:
                 try:
                     payload = api._read_json(self)
                     if self.path in {"/authorize", "/api/v1/authorize"}:
+                        mesh_inputs = payload.get("mesh_inputs")
+                        if mesh_inputs is not None:
+                            mesh_inputs = tuple(
+                                GovernanceInput.from_dict(item) for item in mesh_inputs
+                            )
                         result = api.service.authorize(
                             payload["request"],
                             payload["policy_id"],
                             ttl_seconds=payload.get("ttl_seconds", 300),
                             approvals=payload.get("approvals"),
+                            mesh_inputs=mesh_inputs,
                         ).to_dict()
                         self._send(HTTPStatus.OK, result)
                     elif self.path in {"/execute", "/api/v1/execute"}:

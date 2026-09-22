@@ -43,7 +43,13 @@ from .mcp_gateway import (
     MCPToolDefinition,
     MCPToolResult,
 )
-from .mesh import GovernanceInput, GovernanceMesh, GovernanceMeshError, GovernancePreflightDecision
+from .mesh import (
+    GovernanceInput,
+    GovernanceMesh,
+    GovernanceMeshError,
+    GovernancePreflightDecision,
+    GovernanceSourceRegistry,
+)
 from .models import GovernanceAuthorizationArtifact, SignedApproval
 from .platform import (
     GovernancePlatform,
@@ -84,6 +90,7 @@ __all__ = [
     "GovernanceMesh",
     "GovernanceMeshError",
     "GovernancePreflightDecision",
+    "GovernanceSourceRegistry",
     "DeterministicArbiter",
     "GovernanceRule",
     "GovernanceRuleTranslator",

@@ -5,7 +5,7 @@ from .engine import ExecutionBoundary
 from .errors import AuthorizationError
 from .health import health_report
 from .issuer import AuthorizationIssuer
-from .mesh import GovernanceInput
+from .mesh import GovernanceInput, GovernanceSourceRegistry
 from .models import GovernanceAuthorizationArtifact, SignedApproval
 from .policy import Policy, PolicyRegistry
 
@@ -20,9 +20,11 @@ class GovernedService:
         boundary: ExecutionBoundary,
         policies: PolicyRegistry | dict[str, Policy],
         actions: dict[str, Callable[[dict[str, Any]], Any]],
+        mesh_source_registry: GovernanceSourceRegistry | None = None,
     ) -> None:
         self.issuer = issuer
         self.boundary = boundary
+        self.mesh_source_registry = mesh_source_registry
         self.policies = (
             policies
             if isinstance(policies, PolicyRegistry)
@@ -42,6 +44,8 @@ class GovernedService:
         policy = self.policies.get(policy_id)
         if policy is None:
             raise AuthorizationError(f"unknown policy: {policy_id}")
+        if self.mesh_source_registry is not None and self.issuer.mesh_source_registry is None:
+            self.issuer.mesh_source_registry = self.mesh_source_registry
         return self.issuer.authorize(
             request,
             policy,
@@ -76,5 +80,6 @@ class GovernedService:
                 replay_log=self.boundary.replay_log,
                 trust_store=self.boundary.trust_store,
                 policy_registry=self.policies,
+                mesh_source_registry=self.mesh_source_registry,
             ),
         }
