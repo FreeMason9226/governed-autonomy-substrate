@@ -9,8 +9,9 @@ from .canonical import canonical_json
 from .crypto import verify_signature
 from .errors import AuthorizationError
 from .models import GovernanceAuthorizationArtifact
+from .mesh import GovernanceInput, GovernanceMesh, GovernanceMeshError
 from .policy import DeterministicArbiter, PolicyRegistry
-from .replay import ReplayLog
+from .replay import ReplayFrame, ReplayLog
 from .trust import TrustStore
 
 
@@ -111,6 +112,7 @@ class ExecutionBoundary:
             raise AuthorizationError("nonce does not match authorization frame")
         if frame.event.get("artifact_payload") != artifact.unsigned_payload().decode("utf-8"):
             raise AuthorizationError("authorization frame does not match GAA")
+        self._validate_mesh_evidence(artifact, frame)
         if artifact.decision.get("allow") is not True:
             raise AuthorizationError("policy decision does not allow execution")
         if self.policy_registry is not None:
@@ -134,3 +136,37 @@ class ExecutionBoundary:
         requested_action = artifact.action_request.get("action")
         if not isinstance(allowed_actions, list) or requested_action not in allowed_actions:
             raise AuthorizationError("requested action is outside policy constraints")
+
+    def _validate_mesh_evidence(
+        self, artifact: GovernanceAuthorizationArtifact, frame: ReplayFrame
+    ) -> None:
+        event = frame.event
+        digest = artifact.decision.get("mesh_preflight_digest")
+        evidence_keys = {"mesh_preflight_digest", "mesh_request_digest", "mesh_inputs"}
+        has_evidence = any(key in event for key in evidence_keys)
+        if digest is None:
+            if has_evidence:
+                raise AuthorizationError("mesh evidence is present without a signed mesh digest")
+            return
+        if not isinstance(digest, str) or not digest:
+            raise AuthorizationError("mesh preflight digest is malformed")
+        if not evidence_keys.issubset(event):
+            raise AuthorizationError("mesh evidence is incomplete")
+        if event["mesh_preflight_digest"] != digest:
+            raise AuthorizationError("mesh evidence digest does not match signed decision")
+        request_digest = hashlib.sha256(canonical_json(artifact.action_request)).hexdigest()
+        if event["mesh_request_digest"] != request_digest:
+            raise AuthorizationError("mesh evidence does not match the authorized request")
+        raw_inputs = event["mesh_inputs"]
+        if not isinstance(raw_inputs, list) or not raw_inputs:
+            raise AuthorizationError("mesh evidence inputs are malformed")
+        try:
+            inputs = tuple(GovernanceInput.from_dict(item) for item in raw_inputs)
+            decision = GovernanceMesh().preflight(inputs, request_digest=request_digest)
+        except (GovernanceMeshError, TypeError, ValueError) as exc:
+            raise AuthorizationError("mesh evidence is invalid") from exc
+        if not decision.allow or decision.digest != digest:
+            raise AuthorizationError("mesh evidence does not reconstruct to the signed digest")
+        expected = ReplayFrame.create(frame.frame_id, frame.previous_hash, frame.event)
+        if expected.frame_hash != frame.frame_hash:
+            raise AuthorizationError("mesh authorization replay evidence is tampered")

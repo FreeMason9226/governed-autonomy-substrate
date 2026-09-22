@@ -57,6 +57,24 @@ class GovernanceInput:
             "decision_digest": self.digest(),
         }
 
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "GovernanceInput":
+        if not isinstance(value, Mapping):
+            raise GovernanceMeshError("governance input must be an object")
+        expected = {"source_id", "decision", "weight", "priority", "metadata", "decision_digest"}
+        if set(value) != expected:
+            raise GovernanceMeshError("governance input has an invalid schema")
+        item = cls(
+            source_id=value["source_id"],
+            decision=value["decision"],
+            weight=value["weight"],
+            priority=value["priority"],
+            metadata=value["metadata"],
+        )
+        if value["decision_digest"] != item.digest():
+            raise GovernanceMeshError("governance input digest does not match evidence")
+        return item
+
 
 @dataclass(frozen=True)
 class GovernancePreflightDecision:

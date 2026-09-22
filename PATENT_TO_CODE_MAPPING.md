@@ -266,4 +266,5 @@ Implementation notes:
 - The mesh evaluates the exact request after approval evidence is attached and before nonce/artifact issuance.
 - The mesh decision digest is bound into the signed GAA decision and authorization replay frame.
 - Denied or conflicted mesh results are audited and raise `PolicyDeniedError`.
-- The integration is opt-in for compatibility; mandatory deployment policy can require callers to provide mesh inputs at a higher platform layer.
+- Issued mesh-enabled authorization frames retain canonical `GovernanceInput` evidence and the request digest; `ExecutionBoundary` reconstructs and compares that evidence before execution, failing closed on malformed, conflicting, tampered, mismatched, or digest-divergent evidence.
+- The integration is opt-in for compatibility; mandatory deployment policy can require callers to provide mesh inputs at a higher platform layer. This execution-side verification is local replay-bound evidence, not external source attestation or tamper-proof storage; legacy artifacts without mesh inputs remain compatible.
