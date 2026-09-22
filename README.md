@@ -37,6 +37,10 @@ The service facade is intentionally in-process. A network adapter can translate 
 
 The included HTTP adapter supports bearer authentication, request correlation, security headers, bounded rate limiting, and optional TLS wrapping through `create_server(..., tls=TLSConfig(...))`. It remains a minimal deployment boundary: token rotation, ingress policy, certificate lifecycle, identity federation middleware, WAF controls, and network-level authorization remain deployment responsibilities. The admin UI is a dependency-free operational surface, not a replacement for a full enterprise frontend with SSO, CSRF/session management, and granular operator permissions.
 
+## Patent-to-code traceability
+
+For the patent draft mapping, see [PATENT_TO_CODE_MAPPING.md](PATENT_TO_CODE_MAPPING.md).
+
 ## Run
 
 ```powershell
