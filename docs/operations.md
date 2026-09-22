@@ -61,6 +61,12 @@ an ingress controller before enabling their chart values. The cluster must
 provide a `ClusterSecretStore` named `gas-secrets`; the application chart does
 not create cloud credentials or provider access policies.
 
+The manual workflow [staging-operations.yml](../.github/workflows/staging-operations.yml)
+requires staging variables `GAS_URL`, `CERT_EMAIL`, `LOG_FORWARD_HOST`,
+`LOG_FORWARD_PORT`, and secrets `KUBECONFIG_B64`, `GAS_TOKEN`, and
+`BACKUP_BEARER_TOKEN` when restore testing is enabled. Configure GitHub
+Environment required reviewers on `staging` before using the workflow.
+
 ### Recovery drills
 
 Run `deploy/scripts/rollback-smoke.sh` with an explicitly selected Helm
