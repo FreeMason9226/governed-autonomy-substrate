@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any
 
 from .canonical import canonical_json
 from .crypto import KeyPair, verify_signature
@@ -64,7 +65,7 @@ class GovernanceInput:
             }
         )
 
-    def attest(self, signer: KeyPair) -> "GovernanceInput":
+    def attest(self, signer: KeyPair) -> GovernanceInput:
         return GovernanceInput(
             source_id=self.source_id,
             decision=self.decision,
@@ -88,7 +89,7 @@ class GovernanceInput:
         return value
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, Any]) -> "GovernanceInput":
+    def from_dict(cls, value: Mapping[str, Any]) -> GovernanceInput:
         if not isinstance(value, Mapping):
             raise GovernanceMeshError("governance input must be an object")
         expected = {"source_id", "decision", "weight", "priority", "metadata", "decision_digest"}
@@ -185,7 +186,6 @@ class GovernanceMesh:
         input_digests = {item.source_id: item.digest() for item in sorted(normalized, key=lambda x: x.source_id)}
         top_priority = max(item.priority for item in normalized)
         top_inputs = tuple(item for item in normalized if item.priority == top_priority)
-        top_allow_values = {bool(item.decision["allow"]) for item in top_inputs}
         conflicts: list[dict[str, Any]] = []
         for source in sorted(top_inputs, key=lambda item: item.source_id):
             for other in sorted(top_inputs, key=lambda item: item.source_id):
