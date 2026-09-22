@@ -1,6 +1,6 @@
 ﻿import pytest
 
-from governed_autonomy import GovernanceInput, GovernanceMesh, GovernanceMeshError, ReplayLog
+from governed_autonomy import GovernanceInput, GovernanceMesh, GovernanceMeshError, KeyPair, ReplayLog
 
 
 def decision(allow, reason=None):
@@ -89,3 +89,27 @@ def test_mesh_replay_frame_reference_is_part_of_audited_result():
     assert result.allow is False
     assert result.replay_frame_ref == "authorization-frame-1"
     assert result.reasons == ("denied",)
+
+
+def test_mesh_can_require_authenticated_source_provenance():
+    source = KeyPair.generate("policy-source")
+    item = GovernanceInput("policy", decision(True)).attest(source)
+    result = GovernanceMesh(
+        trusted_sources={"policy": source.public_key},
+    ).preflight([item], request_digest="req-digest")
+    assert result.allow is True
+
+
+def test_mesh_rejects_missing_or_tampered_source_attestation():
+    source = KeyPair.generate("policy-source")
+    item = GovernanceInput("policy", decision(True))
+    with pytest.raises(GovernanceMeshError):
+        GovernanceMesh(trusted_sources={"policy": source.public_key}).preflight(
+            [item], request_digest="req-digest"
+        )
+    tampered = GovernanceInput("policy", decision(False)).attest(source)
+    with pytest.raises(GovernanceMeshError):
+        GovernanceMesh(trusted_sources={"policy": source.public_key}).preflight(
+            [GovernanceInput("policy", decision(True), source_signature=tampered.source_signature)],
+            request_digest="req-digest",
+        )
