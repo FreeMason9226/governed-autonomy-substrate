@@ -72,6 +72,7 @@ readiness timestamp as recovery objectives.
 
 The runtime Secret must provide `url`, `issuer-key-id`, and
 `issuer-private-key`. The issuer private key is raw 32-byte Ed25519 material
-encoded as URL-safe base64. Rotate it by provisioning the new key, adding its
-public key to the trust store, rolling out the new Secret, and revoking the old
-key only after all old artifacts have expired.
+encoded as URL-safe base64. Trust keys and revocations are stored in the
+PostgreSQL `trust_keys` table, so all replicas share rotation state. Rotate a
+key by provisioning the new key, rolling out the new Secret, and revoking the
+old key only after all old artifacts have expired.

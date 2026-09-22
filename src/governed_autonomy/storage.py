@@ -7,7 +7,11 @@ import sqlite3
 import threading
 from typing import Protocol
 
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+from .canonical import b64decode, b64encode
 from .replay import ReplayFrame, ReplayLog
+from .trust import TrustStore
 
 
 class NonceRepository(Protocol):
@@ -63,6 +67,93 @@ POSTGRES_REPLAY_SCHEMA = """CREATE TABLE IF NOT EXISTS replay_frames (
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );"""
 
+POSTGRES_TRUST_SCHEMA = """CREATE TABLE IF NOT EXISTS trust_keys (
+    key_id TEXT PRIMARY KEY,
+    public_key TEXT NOT NULL,
+    revoked BOOLEAN NOT NULL DEFAULT FALSE,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);"""
+
+
+class PostgresTrustStore(TrustStore):
+    """PostgreSQL-backed issuer trust and revocation registry."""
+
+    def __init__(self, connection) -> None:
+        self.connection = connection
+        self._lock = threading.RLock()
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute(POSTGRES_TRUST_SCHEMA)
+            self.connection.commit()
+        finally:
+            cursor.close()
+
+    def add(self, key_id: str, public_key: Ed25519PublicKey) -> None:
+        if not key_id:
+            raise ValueError("key_id must not be empty")
+        with self._lock:
+            cursor = self.connection.cursor()
+            try:
+                cursor.execute("SELECT revoked FROM trust_keys WHERE key_id=%s", (key_id,))
+                row = cursor.fetchone()
+                if row is not None and not row[0]:
+                    raise ValueError(f"issuer key already exists: {key_id}")
+                cursor.execute(
+                    "INSERT INTO trust_keys(key_id, public_key, revoked) VALUES (%s,%s,FALSE) "
+                    "ON CONFLICT (key_id) DO UPDATE SET public_key=EXCLUDED.public_key, "
+                    "revoked=FALSE, updated_at=CURRENT_TIMESTAMP",
+                    (key_id, b64encode(public_key.public_bytes_raw())),
+                )
+                self.connection.commit()
+            except Exception:
+                self.connection.rollback()
+                raise
+            finally:
+                cursor.close()
+
+    def revoke(self, key_id: str) -> None:
+        with self._lock:
+            cursor = self.connection.cursor()
+            try:
+                cursor.execute(
+                    "UPDATE trust_keys SET revoked=TRUE, updated_at=CURRENT_TIMESTAMP "
+                    "WHERE key_id=%s",
+                    (key_id,),
+                )
+                if cursor.rowcount != 1:
+                    raise KeyError(f"unknown issuer key: {key_id}")
+                self.connection.commit()
+            except Exception:
+                self.connection.rollback()
+                raise
+            finally:
+                cursor.close()
+
+    def resolve(self, key_id: str) -> Ed25519PublicKey | None:
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute(
+                "SELECT public_key, revoked FROM trust_keys WHERE key_id=%s", (key_id,)
+            )
+            row = cursor.fetchone()
+            if row is None or row[1]:
+                return None
+            return Ed25519PublicKey.from_public_bytes(b64decode(row[0]))
+        finally:
+            cursor.close()
+
+    def to_dict(self) -> dict[str, object]:
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute("SELECT key_id, public_key, revoked FROM trust_keys ORDER BY key_id")
+            rows = cursor.fetchall()
+        finally:
+            cursor.close()
+        return {
+            "keys": {row[0]: row[1] for row in rows},
+            "revoked": [row[0] for row in rows if row[2]],
+        }
+
 
 class PostgresReplayLog(ReplayLog):
     """PostgreSQL-backed replay log with transactional append and nonce claims."""
@@ -92,12 +183,60 @@ class PostgresReplayLog(ReplayLog):
         if not self.verify_chain():
             raise ValueError("PostgreSQL replay log contains an invalid hash chain")
 
+    def _refresh(self, cursor) -> None:
+        cursor.execute(
+            "SELECT frame_id, previous_hash, frame_json::text, frame_hash "
+            "FROM replay_frames ORDER BY sequence"
+        )
+        self._frames = [
+            ReplayFrame(row[0], row[1] or "", json.loads(row[2]), row[3])
+            for row in cursor.fetchall()
+        ]
+        cursor.execute("SELECT nonce FROM consumed_nonces")
+        self._used_nonces = {row[0] for row in cursor.fetchall()}
+
+    def get(self, frame_id: str) -> ReplayFrame | None:
+        with self._lock:
+            cursor = self.connection.cursor()
+            try:
+                self._refresh(cursor)
+                return super().get(frame_id)
+            finally:
+                cursor.close()
+
+    def nonce_used(self, nonce: str) -> bool:
+        with self._lock:
+            cursor = self.connection.cursor()
+            try:
+                self._refresh(cursor)
+                return super().nonce_used(nonce)
+            finally:
+                cursor.close()
+
+    def audit_summary(self) -> dict[str, object]:
+        with self._lock:
+            cursor = self.connection.cursor()
+            try:
+                self._refresh(cursor)
+                return super().audit_summary()
+            finally:
+                cursor.close()
+
+    def verify_chain(self) -> bool:
+        return super().verify_chain()
+
     def append(
         self,
         frame_id: str,
         event: dict[str, object],
     ) -> ReplayFrame:
         with self._lock:
+            cursor = self.connection.cursor()
+            try:
+                cursor.execute("SELECT pg_advisory_xact_lock(hashtext('gas.replay.append'))")
+                self._refresh(cursor)
+            finally:
+                cursor.close()
             frame = ReplayFrame.create(
                 frame_id,
                 self._frames[-1].frame_hash if self._frames else "",
@@ -131,6 +270,7 @@ class PostgresReplayLog(ReplayLog):
         with self._lock:
             cursor = self.connection.cursor()
             try:
+                cursor.execute("SELECT pg_advisory_xact_lock(hashtext('gas.nonce.claim'))")
                 cursor.execute("INSERT INTO consumed_nonces (nonce) VALUES (%s)", (nonce,))
                 self.connection.commit()
             except Exception as exc:

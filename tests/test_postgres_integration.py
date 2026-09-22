@@ -33,6 +33,7 @@ def test_postgres_runtime_survives_restart_and_rejects_reused_nonce(
         "demo-files-v1",
     )
     assert service.execute(artifact) == "postgres"
+    service.boundary.trust_store.revoke(issuer.key_id)
     replay_log.close()
 
     import psycopg
@@ -41,6 +42,9 @@ def test_postgres_runtime_survives_restart_and_rejects_reused_nonce(
     assert restarted.verify_chain()
     assert restarted.nonce_used(artifact.nonce)
     assert restarted.get(artifact.replay_frame_ref) is not None
+    assert restarted.connection.execute(
+        "SELECT revoked FROM trust_keys WHERE key_id=%s", (issuer.key_id,)
+    ).fetchone()[0] is True
     with pytest.raises(ValueError, match="already consumed"):
         restarted.claim_nonce(artifact.nonce)
     restarted.close()

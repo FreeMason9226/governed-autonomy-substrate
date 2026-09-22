@@ -41,8 +41,6 @@ spec:
             - name: GAS_ISSUER_PRIVATE_KEY
               valueFrom:
                 secretKeyRef: {name: {{ .Values.runtimeSecret }}, key: issuer-private-key}
-            - name: TRUST_STORE_PATH
-              value: {{ .Values.trustStorePath | quote }}
             - name: GOVERNED_AUTONOMY_BEARER_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -70,9 +68,3 @@ spec:
             readOnlyRootFilesystem: true
             runAsNonRoot: true
             runAsUser: 65532
-          volumeMounts:
-            - name: gas-state
-              mountPath: /var/lib/gas
-      volumes:
-        - name: gas-state
-          emptyDir: {}

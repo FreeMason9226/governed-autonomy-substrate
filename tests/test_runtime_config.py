@@ -18,7 +18,6 @@ def test_runtime_postgres_mode_requires_persistent_configuration(monkeypatch):
         "DATABASE_URL",
         "GAS_ISSUER_KEY_ID",
         "GAS_ISSUER_PRIVATE_KEY",
-        "TRUST_STORE_PATH",
     ):
         monkeypatch.delenv(name, raising=False)
     with pytest.raises(RuntimeError, match="required in postgres runtime mode"):

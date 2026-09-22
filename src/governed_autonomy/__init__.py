@@ -60,6 +60,7 @@ from .storage import (
     NonceRepository,
     PostgresNonceRepository,
     PostgresReplayLog,
+    PostgresTrustStore,
     SQLiteNonceRepository,
 )
 from .trust import TrustStore
@@ -113,6 +114,7 @@ __all__ = [
     "PostgresNonceRepository",
     "POSTGRES_NONCE_SCHEMA",
     "PostgresReplayLog",
+    "PostgresTrustStore",
     "POSTGRES_REPLAY_SCHEMA",
     "BoundedRateLimiter",
     "TLSConfig",

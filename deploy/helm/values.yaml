@@ -7,7 +7,6 @@ runtimeMode: postgres
 bearerTokenSecret: governed-autonomy
 databaseUrlSecret: governed-autonomy-runtime
 runtimeSecret: governed-autonomy-runtime
-trustStorePath: /var/lib/gas/trust-store.json
 createBearerTokenSecret: false
 bearerToken: ""
 service:

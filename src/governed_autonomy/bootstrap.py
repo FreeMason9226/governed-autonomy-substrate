@@ -7,7 +7,7 @@ from .platform import GovernancePlatform, RuntimeIdentity
 from .policy import Policy, PolicyRegistry
 from .replay import ReplayLog
 from .service import GovernedService
-from .storage import PostgresReplayLog
+from .storage import PostgresReplayLog, PostgresTrustStore
 from .trust import TrustStore
 
 
@@ -51,11 +51,10 @@ def build_runtime_service() -> tuple[GovernedService, KeyPair, ReplayLog]:
     database_url = os.environ.get("DATABASE_URL")
     key_id = os.environ.get("GAS_ISSUER_KEY_ID")
     private_key = os.environ.get("GAS_ISSUER_PRIVATE_KEY")
-    trust_store_path = os.environ.get("TRUST_STORE_PATH")
-    if not all((database_url, key_id, private_key, trust_store_path)):
+    if not all((database_url, key_id, private_key)):
         raise RuntimeError(
-            "DATABASE_URL, GAS_ISSUER_KEY_ID, GAS_ISSUER_PRIVATE_KEY, and "
-            "TRUST_STORE_PATH are required in postgres runtime mode"
+            "DATABASE_URL, GAS_ISSUER_KEY_ID, and GAS_ISSUER_PRIVATE_KEY "
+            "are required in postgres runtime mode"
         )
     try:
         import psycopg
@@ -64,7 +63,7 @@ def build_runtime_service() -> tuple[GovernedService, KeyPair, ReplayLog]:
 
     issuer = KeyPair.from_private_key_b64(key_id, private_key)
     replay_log = PostgresReplayLog(psycopg.connect(database_url))
-    trust_store = TrustStore(trust_store_path)
+    trust_store = PostgresTrustStore(replay_log.connection)
     if trust_store.resolve(issuer.key_id) is None:
         trust_store.add(issuer.key_id, issuer.public_key)
     policy_registry = PolicyRegistry(
