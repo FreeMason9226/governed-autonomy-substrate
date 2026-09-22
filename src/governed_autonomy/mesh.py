@@ -28,6 +28,10 @@ class GovernanceInput:
             raise GovernanceMeshError("source_id must be a non-empty string")
         if not isinstance(self.decision, Mapping) or not self.decision:
             raise GovernanceMeshError("decision must be a non-empty mapping")
+        try:
+            canonical_json(dict(self.decision))
+        except (TypeError, ValueError) as exc:
+            raise GovernanceMeshError("decision must contain canonical JSON values") from exc
         if not isinstance(self.weight, int) or isinstance(self.weight, bool) or self.weight <= 0:
             raise GovernanceMeshError("weight must be a positive integer")
         if not isinstance(self.priority, int) or isinstance(self.priority, bool) or self.priority < 0:
@@ -135,18 +139,18 @@ class GovernanceMesh:
         ranked = sorted(
             groups.items(),
             key=lambda pair: (
-                -sum(item.weight for item in pair[1]),
                 -max(item.priority for item in pair[1]),
+                -sum(item.weight for item in pair[1]),
                 pair[0],
             ),
         )
         winning_digest, winning_inputs = ranked[0]
         winning_allow = bool(winning_inputs[0].decision["allow"])
-        unresolved = len(ranked) > 1 and len(top_allow_values) > 1
+        unresolved = len({item.digest() for item in top_inputs}) > 1
         if unresolved:
             status = "conflict"
             allow = False
-            reasons = ("highest-priority governance sources disagree on allow/deny",)
+            reasons = ("highest-priority governance sources provide conflicting decisions",)
             selected_digest = None
             selected_source_ids: tuple[str, ...] = ()
         else:

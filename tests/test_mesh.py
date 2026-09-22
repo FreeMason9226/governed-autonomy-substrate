@@ -40,6 +40,19 @@ def test_mesh_fails_closed_on_high_priority_conflict():
     assert result.selected_source_ids == ()
 
 
+def test_mesh_same_priority_divergence_fails_closed_even_when_allow_matches():
+    result = GovernanceMesh().preflight(
+        [
+            GovernanceInput("policy", decision(True, "policy-ok"), weight=5, priority=4),
+            GovernanceInput("risk", decision(True, "risk-ok"), weight=1, priority=4),
+        ],
+        request_digest="req-digest",
+    )
+    assert result.status == "conflict"
+    assert result.allow is False
+    assert result.selected_source_ids == ()
+
+
 def test_mesh_weighted_decision_is_stable_when_priorities_do_not_conflict():
     result = GovernanceMesh().preflight(
         [
@@ -55,6 +68,8 @@ def test_mesh_weighted_decision_is_stable_when_priorities_do_not_conflict():
 def test_mesh_rejects_invalid_or_duplicate_inputs():
     with pytest.raises(GovernanceMeshError):
         GovernanceInput("source", {"allow": "yes"})
+    with pytest.raises(GovernanceMeshError):
+        GovernanceInput("source", {"allow": True, "unsupported": {1, 2}})
     with pytest.raises(GovernanceMeshError):
         GovernanceMesh().preflight(
             [GovernanceInput("same", decision(True)), GovernanceInput("same", decision(True))],
