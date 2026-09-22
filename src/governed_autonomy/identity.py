@@ -34,6 +34,40 @@ class StaticJWKSProvider:
         self._jwks = jwks
 
 
+class UrlJWKSProvider:
+    """Fetch and cache JWKS documents from an operator-approved HTTPS endpoint."""
+
+    def __init__(self, url: str, *, cache_seconds: int = 300, timeout_seconds: int = 5) -> None:
+        if not url.startswith("https://"):
+            raise ValueError("JWKS URL must use HTTPS")
+        if cache_seconds <= 0 or timeout_seconds <= 0:
+            raise ValueError("JWKS cache and timeout must be positive")
+        self.url = url
+        self.cache_seconds = cache_seconds
+        self.timeout_seconds = timeout_seconds
+        self._jwks: dict[str, Any] | None = None
+        self._expires_at = 0.0
+
+    def get_jwks(self) -> dict[str, Any]:
+        if self._jwks is None or time.time() >= self._expires_at:
+            self.refresh()
+        if self._jwks is None:
+            raise IdentityValidationError("JWKS document is unavailable")
+        return self._jwks
+
+    def refresh(self) -> None:
+        request = Request(self.url, headers={"Accept": "application/json"})
+        try:
+            with urlopen(request, timeout=self.timeout_seconds) as response:
+                document = json.loads(response.read())
+        except Exception as exc:
+            raise IdentityValidationError("JWKS endpoint is unavailable") from exc
+        if not isinstance(document, dict) or not isinstance(document.get("keys"), list):
+            raise IdentityValidationError("JWKS document is invalid")
+        self._jwks = document
+        self._expires_at = time.time() + self.cache_seconds
+
+
 def _b64(value: str) -> bytes:
     try:
         return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
