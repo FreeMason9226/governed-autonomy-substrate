@@ -10,6 +10,7 @@ from governed_autonomy import (
     KeyPair,
     PlatformDeploymentPolicy,
     Policy,
+    PolicyDeniedError,
     PolicyRegistry,
     ReplayLog,
     RuntimeIdentity,
@@ -108,6 +109,64 @@ def test_platform_accepts_mesh_preflight_inputs_and_registry():
     assert artifact.decision["mesh_preflight_digest"]
     assert platform.service.issuer.mesh_source_registry is source_registry
     assert platform.platform_report()["mesh_source_registry"]["sources"] == 1
+
+
+def test_platform_and_policy_require_mesh_inputs_for_sensitive_actions():
+    issuer = KeyPair.generate("mesh-required-issuer")
+    source = KeyPair.generate("mesh-required-source")
+    replay_log = ReplayLog()
+    trust_store = TrustStore()
+    trust_store.add(issuer.key_id, issuer.public_key)
+    policy = Policy(
+        policy_id="mesh-gated-v1",
+        allowed_actions=("write_file",),
+        required_fields={"write_file": ("path", "content")},
+        exact_fields={"write_file": {"path": "out.txt"}},
+        required_mesh_inputs={"write_file": 1},
+        required_mesh_sources={"write_file": ("mesh-required-source",)},
+        mesh_required_actions=("write_file",),
+    )
+    registry = PolicyRegistry((policy,), trust_store=trust_store)
+    service = GovernedService(
+        issuer=AuthorizationIssuer(issuer=issuer, replay_log=replay_log),
+        boundary=ExecutionBoundary(
+            replay_log=replay_log,
+            trust_store=trust_store,
+            policy_registry=registry,
+        ),
+        policies=registry,
+        actions={"write_file": lambda request: request["content"]},
+    )
+    platform = GovernancePlatform(
+        service=service,
+        identity=RuntimeIdentity(service="files-api", environment="prod", request_id="mesh-gate-req"),
+        deployment_policy=PlatformDeploymentPolicy(
+            allowed_environments=("prod",),
+            mesh_required_actions=("write_file",),
+            mesh_required_sources=("mesh-required-source",),
+            min_mesh_inputs=1,
+        ),
+    )
+
+    with pytest.raises(PolicyDeniedError):
+        service.authorize(
+            {"action": "write_file", "path": "out.txt", "content": "blocked"},
+            "mesh-gated-v1",
+        )
+
+    with pytest.raises(ValueError, match="mesh_inputs are required"):
+        platform.authorize(
+            {"action": "write_file", "path": "out.txt", "content": "blocked"},
+            "mesh-gated-v1",
+        )
+
+    artifact = platform.authorize(
+        {"action": "write_file", "path": "out.txt", "content": "ok"},
+        "mesh-gated-v1",
+        mesh_inputs=[GovernanceInput("mesh-required-source", {"allow": True}, priority=5).attest(source)],
+    )
+
+    assert artifact.decision["mesh_preflight_digest"]
 
 
 def test_platform_deployment_policy_rejects_unsafe_runtime_context():

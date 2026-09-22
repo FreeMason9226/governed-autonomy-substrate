@@ -24,6 +24,10 @@ class Policy:
     max_request_bytes: int = 64 * 1024
     max_ttl_seconds: int = 300
     required_approvals: dict[str, int] = field(default_factory=dict)
+    required_mesh_inputs: dict[str, int] = field(default_factory=dict)
+    required_mesh_sources: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    mesh_required_actions: tuple[str, ...] = ()
+    mesh_required_environments: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.policy_id:
@@ -38,6 +42,22 @@ class Policy:
             raise ValueError("allowed_actions must be sorted for deterministic output")
         if self.exact_context is None:
             object.__setattr__(self, "exact_context", {})
+        if isinstance(self.mesh_required_actions, list):
+            object.__setattr__(self, "mesh_required_actions", tuple(self.mesh_required_actions))
+        if isinstance(self.mesh_required_environments, list):
+            object.__setattr__(self, "mesh_required_environments", tuple(self.mesh_required_environments))
+        if isinstance(self.required_mesh_sources, list):
+            raise ValueError("required_mesh_sources must map action names to source lists, not a list")
+        normalized_sources = {}
+        for action, sources in self.required_mesh_sources.items():
+            if isinstance(sources, list):
+                normalized_sources[action] = tuple(sources)
+            elif isinstance(sources, tuple):
+                normalized_sources[action] = sources
+            else:
+                raise ValueError("required_mesh_sources must map action names to a list or tuple of source IDs")
+        if normalized_sources != self.required_mesh_sources:
+            object.__setattr__(self, "required_mesh_sources", normalized_sources)
         if tuple(sorted(self.required_context)) != self.required_context:
             raise ValueError("required_context must be sorted for deterministic output")
         if any(not isinstance(field, str) or not field for field in self.required_context):
@@ -59,9 +79,29 @@ class Policy:
                 raise ValueError("required_approvals action names must be non-empty strings")
             if not isinstance(count, int) or isinstance(count, bool) or count < 0:
                 raise ValueError("required_approvals must use non-negative integers")
+        for action, count in self.required_mesh_inputs.items():
+            if not isinstance(action, str) or not action:
+                raise ValueError("required_mesh_inputs action names must be non-empty strings")
+            if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+                raise ValueError("required_mesh_inputs must use non-negative integers")
+        for action, sources in self.required_mesh_sources.items():
+            if not isinstance(action, str) or not action:
+                raise ValueError("required_mesh_sources action names must be non-empty strings")
+            if not isinstance(sources, tuple):
+                raise ValueError("required_mesh_sources must map actions to tuples of source IDs")
+            if any(not isinstance(source, str) or not source for source in sources):
+                raise ValueError("required_mesh_sources must contain only non-empty source IDs")
+        if any(not isinstance(action, str) or not action for action in self.mesh_required_actions):
+            raise ValueError("mesh_required_actions must contain non-empty strings")
+        if tuple(sorted(self.mesh_required_actions)) != self.mesh_required_actions:
+            raise ValueError("mesh_required_actions must be sorted for deterministic output")
+        if any(not isinstance(environment, str) or not environment for environment in self.mesh_required_environments):
+            raise ValueError("mesh_required_environments must contain non-empty strings")
+        if tuple(sorted(self.mesh_required_environments)) != self.mesh_required_environments:
+            raise ValueError("mesh_required_environments must be sorted for deterministic output")
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "policy_id": self.policy_id,
             "allowed_actions": list(self.allowed_actions),
             "required_fields": {
@@ -74,6 +114,18 @@ class Policy:
             "max_ttl_seconds": self.max_ttl_seconds,
             "required_approvals": dict(sorted(self.required_approvals.items())),
         }
+        if self.required_mesh_inputs:
+            result["required_mesh_inputs"] = dict(sorted(self.required_mesh_inputs.items()))
+        if self.required_mesh_sources:
+            result["required_mesh_sources"] = {
+                action: list(sources)
+                for action, sources in sorted(self.required_mesh_sources.items())
+            }
+        if self.mesh_required_actions:
+            result["mesh_required_actions"] = list(self.mesh_required_actions)
+        if self.mesh_required_environments:
+            result["mesh_required_environments"] = list(self.mesh_required_environments)
+        return result
 
     def digest(self) -> str:
         return hashlib.sha256(canonical_json(self.to_dict())).hexdigest()

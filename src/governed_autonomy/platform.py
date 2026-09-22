@@ -102,8 +102,19 @@ class PlatformDeploymentPolicy:
     require_tenant: bool = False
     required_roles: tuple[str, ...] = ()
     max_context_entries: int = 32
+    mesh_required_actions: tuple[str, ...] = ()
+    mesh_required_environments: tuple[str, ...] = ()
+    mesh_required_sources: tuple[str, ...] = ()
+    min_mesh_inputs: int = 0
 
-    def validate_runtime(self, *, identity: RuntimeIdentity, context: dict[str, Any]) -> None:
+    def validate_runtime(
+        self,
+        *,
+        identity: RuntimeIdentity,
+        context: dict[str, Any],
+        action: str | None = None,
+        mesh_inputs: list[GovernanceInput] | None = None,
+    ) -> None:
         environment = context.get("environment", identity.environment)
         if environment not in self.allowed_environments:
             raise ValueError(f"environment is not allowed for this runtime: {environment!r}")
@@ -132,11 +143,25 @@ class PlatformDeploymentPolicy:
             if missing_roles:
                 raise ValueError(f"identity is missing required roles: {missing_roles}")
 
+        if self.mesh_required_actions and action in self.mesh_required_actions:
+            if not mesh_inputs or len(mesh_inputs) < max(1, self.min_mesh_inputs):
+                raise ValueError(f"mesh_inputs are required for action {action!r}")
+        if self.mesh_required_environments and environment in self.mesh_required_environments:
+            if not mesh_inputs or len(mesh_inputs) < max(1, self.min_mesh_inputs):
+                raise ValueError(f"mesh_inputs are required in environment {environment!r}")
+        if self.mesh_required_sources:
+            provided = {item.source_id for item in mesh_inputs or ()}
+            missing_sources = tuple(source_id for source_id in self.mesh_required_sources if source_id not in provided)
+            if missing_sources:
+                raise ValueError(
+                    f"mesh source requirements are not satisfied: {', '.join(missing_sources)}"
+                )
+
         if len(context) > self.max_context_entries:
             raise ValueError("runtime context exceeds the allowed size")
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "allowed_environments": list(self.allowed_environments),
             "allowed_sources": list(self.allowed_sources),
             "require_request_id": self.require_request_id,
@@ -145,6 +170,15 @@ class PlatformDeploymentPolicy:
             "required_roles": list(self.required_roles),
             "max_context_entries": self.max_context_entries,
         }
+        if self.mesh_required_actions:
+            result["mesh_required_actions"] = list(self.mesh_required_actions)
+        if self.mesh_required_environments:
+            result["mesh_required_environments"] = list(self.mesh_required_environments)
+        if self.mesh_required_sources:
+            result["mesh_required_sources"] = list(self.mesh_required_sources)
+        if self.min_mesh_inputs:
+            result["min_mesh_inputs"] = self.min_mesh_inputs
+        return result
 
 
 @dataclass(frozen=True)
@@ -231,7 +265,10 @@ class GovernancePlatform:
                 context=effective_request["context"],
             )
         self.deployment_policy.validate_runtime(
-            identity=self.identity, context=effective_request["context"]
+            identity=self.identity,
+            context=effective_request["context"],
+            action=effective_request.get("action"),
+            mesh_inputs=mesh_inputs,
         )
         try:
             artifact = self.service.authorize(
