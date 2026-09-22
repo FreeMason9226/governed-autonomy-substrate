@@ -233,3 +233,19 @@ Implementation notes:
 - Conflicting allow/deny inputs at the highest priority fail closed with explicit conflict metadata.
 - Optional `ReplayLog` integration appends a `governance_preflight` frame containing request, input, decision, and digest metadata.
 - This is a bounded preflight/harmonization implementation; it does not claim predictive analytics, learned risk scoring, or external source attestation.
+
+### 8. Replay divergence verification
+
+Patent concepts:
+- deterministic replay verification
+- divergence/tamper detection after evidence capture
+- auditable replay state certification
+
+Code:
+- `src/governed_autonomy/replay.py` - `ReplayLog.verify_integrity()`
+
+Implementation notes:
+- Recomputes every frame hash and previous-hash link without mutating the log.
+- Reports a stable replay digest, head hash, frame count, duplicate IDs, and first detected integrity error.
+- Audit event queries return detached copies so callers cannot mutate retained evidence through a returned object.
+- This is local integrity evidence; external WORM storage, signed attestations, and cross-node comparison remain deployment responsibilities.
