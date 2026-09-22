@@ -9,6 +9,7 @@ from typing import Any
 from .canonical import canonical_json
 from .crypto import KeyPair, verify_signature
 from .replay import ReplayLog
+from .trust import TrustStore
 
 
 class GovernanceMeshError(ValueError):
@@ -150,14 +151,24 @@ class GovernanceMesh:
         *,
         replay_log: ReplayLog | None = None,
         trusted_sources: Mapping[str, Any] | None = None,
+        trust_store: TrustStore | None = None,
     ) -> None:
+        if trusted_sources is not None and trust_store is not None:
+            raise ValueError("provide either trusted_sources or trust_store, not both")
         self.replay_log = replay_log
+        self.trust_store = trust_store
         self.trusted_sources = dict(trusted_sources or {})
+        if self.trust_store is not None:
+            self.trusted_sources = {
+                key_id: key for key_id, key in self.trust_store._keys.items() if key_id not in self.trust_store._revoked
+            }
 
     def _verify_source_attestation(self, item: GovernanceInput) -> None:
-        if not self.trusted_sources:
+        if not self.trusted_sources and self.trust_store is None:
             return
         key = self.trusted_sources.get(item.source_id)
+        if key is None and self.trust_store is not None:
+            key = self.trust_store.resolve(item.source_id)
         if key is None or item.source_signature is None or not verify_signature(
             key, item.attestation_payload(), item.source_signature
         ):

@@ -1,6 +1,6 @@
 ﻿import pytest
 
-from governed_autonomy import GovernanceInput, GovernanceMesh, GovernanceMeshError, KeyPair, ReplayLog
+from governed_autonomy import GovernanceInput, GovernanceMesh, GovernanceMeshError, KeyPair, ReplayLog, TrustStore
 
 
 def decision(allow, reason=None):
@@ -113,3 +113,16 @@ def test_mesh_rejects_missing_or_tampered_source_attestation():
             [GovernanceInput("policy", decision(True), source_signature=tampered.source_signature)],
             request_digest="req-digest",
         )
+
+
+def test_mesh_accepts_trust_store_key_registry_and_rejects_revoked_keys():
+    source = KeyPair.generate("stored-source")
+    store = TrustStore()
+    store.add(source.key_id, source.public_key)
+    attested = GovernanceInput("stored-source", decision(True)).attest(source)
+    result = GovernanceMesh(trust_store=store).preflight([attested], request_digest="req-digest")
+    assert result.allow is True
+
+    store.revoke(source.key_id)
+    with pytest.raises(GovernanceMeshError):
+        GovernanceMesh(trust_store=store).preflight([attested], request_digest="req-digest")
