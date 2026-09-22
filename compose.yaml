@@ -4,10 +4,11 @@ services:
     build: .
     environment:
       GOVERNED_AUTONOMY_BEARER_TOKEN: ${GOVERNED_AUTONOMY_BEARER_TOKEN:-local-development-token}
+      GAS_RUNTIME_MODE: memory
     ports:
       - "8000:8000"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/livez')"]
+      test: ["CMD", "python", "-c", "import os,urllib.request; r=urllib.request.Request('http://127.0.0.1:8000/livez',headers={'Authorization':'Bearer '+os.environ['GOVERNED_AUTONOMY_BEARER_TOKEN']}); urllib.request.urlopen(r)"]
       interval: 10s
       timeout: 5s
       retries: 6

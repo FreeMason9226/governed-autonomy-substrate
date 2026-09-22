@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 from typing import Protocol
+
+from .replay import ReplayFrame, ReplayLog
 
 
 class NonceRepository(Protocol):
@@ -61,29 +64,84 @@ POSTGRES_REPLAY_SCHEMA = """CREATE TABLE IF NOT EXISTS replay_frames (
 );"""
 
 
-class PostgresReplayLog:
-    """Small DB-API boundary; deployments own pooling, TLS, and migrations."""
+class PostgresReplayLog(ReplayLog):
+    """PostgreSQL-backed replay log with transactional append and nonce claims."""
 
     def __init__(self, connection) -> None:
         self.connection = connection
+        self._lock = threading.RLock()
+        self._frames: list[ReplayFrame] = []
+        self._used_nonces: set[str] = set()
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute(POSTGRES_NONCE_SCHEMA)
+            cursor.execute(POSTGRES_REPLAY_SCHEMA)
+            self.connection.commit()
+            cursor.execute(
+                "SELECT frame_id, previous_hash, frame_json::text, frame_hash "
+                "FROM replay_frames ORDER BY sequence"
+            )
+            self._frames = [
+                ReplayFrame(row[0], row[1] or "", json.loads(row[2]), row[3])
+                for row in cursor.fetchall()
+            ]
+            cursor.execute("SELECT nonce FROM consumed_nonces")
+            self._used_nonces = {row[0] for row in cursor.fetchall()}
+        finally:
+            cursor.close()
+        if not self.verify_chain():
+            raise ValueError("PostgreSQL replay log contains an invalid hash chain")
 
     def append(
         self,
         frame_id: str,
-        frame_json: str,
-        frame_hash: str,
-        previous_hash: str | None = None,
-        nonce: str | None = None,
-    ) -> None:
-        cursor = self.connection.cursor()
-        try:
-            cursor.execute(
-                "INSERT INTO replay_frames(frame_id,nonce,frame_json,frame_hash,previous_hash) VALUES (%s,%s,%s::jsonb,%s,%s)",
-                (frame_id, nonce, frame_json, frame_hash, previous_hash),
+        event: dict[str, object],
+    ) -> ReplayFrame:
+        with self._lock:
+            frame = ReplayFrame.create(
+                frame_id,
+                self._frames[-1].frame_hash if self._frames else "",
+                event,
             )
-            self.connection.commit()
-        finally:
-            cursor.close()
+            cursor = self.connection.cursor()
+            try:
+                cursor.execute(
+                    "INSERT INTO replay_frames(frame_id,nonce,frame_json,frame_hash,previous_hash) "
+                    "VALUES (%s,%s,%s::jsonb,%s,%s)",
+                    (
+                        frame.frame_id,
+                        event.get("nonce"),
+                        json.dumps(event, sort_keys=True, separators=(",", ":")),
+                        frame.frame_hash,
+                        frame.previous_hash,
+                    ),
+                )
+                self.connection.commit()
+            except Exception:
+                self.connection.rollback()
+                raise
+            finally:
+                cursor.close()
+            self._frames.append(frame)
+            return frame
+
+    def claim_nonce(self, nonce: str) -> None:
+        if not nonce:
+            raise ValueError("nonce must not be empty")
+        with self._lock:
+            cursor = self.connection.cursor()
+            try:
+                cursor.execute("INSERT INTO consumed_nonces (nonce) VALUES (%s)", (nonce,))
+                self.connection.commit()
+            except Exception as exc:
+                self.connection.rollback()
+                raise ValueError(f"nonce already consumed: {nonce}") from exc
+            finally:
+                cursor.close()
+            self._used_nonces.add(nonce)
+
+    def close(self) -> None:
+        self.connection.close()
 
 
 class PostgresNonceRepository:

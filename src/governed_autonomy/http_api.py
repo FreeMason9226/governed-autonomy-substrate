@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from .admin_ui import render_admin_ui
-from .bootstrap import build_demo_service
+from .bootstrap import build_runtime_service
 from .deployment import BoundedRateLimiter, TLSConfig, correlation_id, security_headers
 from .errors import AuthorizationError
 from .health import health_report
@@ -25,6 +25,8 @@ class AuthenticatedAPI:
         *,
         bearer_token: str | None = None,
         oidc_validator: OIDCValidator | None = None,
+        operator_token: str | None = None,
+        operator_role: str = "gas-admin",
         max_body_bytes: int = 64 * 1024,
         rate_limit: int = 120,
     ) -> None:
@@ -32,7 +34,11 @@ class AuthenticatedAPI:
             raise ValueError("bearer_token or oidc_validator is required")
         if max_body_bytes <= 0:
             raise ValueError("positive max_body_bytes is required")
-        self.service, self.bearer_token, self.oidc_validator = service, bearer_token, oidc_validator
+        self.service = service
+        self.bearer_token = bearer_token
+        self.oidc_validator = oidc_validator
+        self.operator_token = operator_token
+        self.operator_role = operator_role
         self.max_body_bytes = max_body_bytes
         self.rate_limiter = BoundedRateLimiter(rate_limit)
 
@@ -48,6 +54,12 @@ class AuthenticatedAPI:
                     return
                 if not api._authenticated(self):
                     self._send(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
+                    return
+                if self.path.startswith("/admin") and not api._operator_authorized(self):
+                    self._send(
+                        HTTPStatus.FORBIDDEN,
+                        {"error": "operator authorization required"},
+                    )
                     return
                 if self.path == "/admin":
                     body = render_admin_ui()
@@ -146,9 +158,30 @@ class AuthenticatedAPI:
                 return False
             return True
         if not self.bearer_token:
-            return False
+            return self.operator_token is not None and hmac.compare_digest(
+                supplied, f"Bearer {self.operator_token}"
+            )
+        if self.operator_token is not None and hmac.compare_digest(
+            supplied, f"Bearer {self.operator_token}"
+        ):
+            return True
         return hmac.compare_digest(supplied, f"Bearer {self.bearer_token}") or hmac.compare_digest(
             supplied, self.bearer_token
+        )
+
+    def _operator_authorized(self, request: BaseHTTPRequestHandler) -> bool:
+        identity = getattr(request, "gas_identity", None)
+        if identity is not None:
+            roles = identity.claims.get("roles", [])
+            if isinstance(roles, str):
+                roles = [roles]
+            scopes = identity.claims.get("scope", "")
+            if isinstance(scopes, str):
+                scopes = scopes.split()
+            return self.operator_role in roles or "gas.admin" in scopes
+        supplied = request.headers.get("Authorization", "")
+        return self.operator_token is not None and hmac.compare_digest(
+            supplied, f"Bearer {self.operator_token}"
         )
 
     def _allowed(self, request: BaseHTTPRequestHandler) -> bool:
@@ -185,6 +218,12 @@ def parse_server_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--oidc-issuer", default=os.environ.get("OIDC_ISSUER"))
     parser.add_argument("--oidc-audience", default=os.environ.get("OIDC_AUDIENCE"))
     parser.add_argument("--oidc-jwks-url", default=os.environ.get("OIDC_JWKS_URL"))
+    parser.add_argument(
+        "--operator-token", default=os.environ.get("GOVERNED_AUTONOMY_OPERATOR_TOKEN")
+    )
+    parser.add_argument(
+        "--operator-role", default=os.environ.get("OIDC_OPERATOR_ROLE", "gas-admin")
+    )
     parser.add_argument("--max-body-bytes", type=int, default=64 * 1024)
     parser.add_argument("--rate-limit", type=int, default=120)
     return parser.parse_args(argv)
@@ -200,6 +239,8 @@ def create_server(
     rate_limit: int = 120,
     tls: TLSConfig | None = None,
     oidc_validator: OIDCValidator | None = None,
+    operator_token: str | None = None,
+    operator_role: str = "gas-admin",
 ) -> ThreadingHTTPServer:
     server = ThreadingHTTPServer(
         (host, port),
@@ -207,6 +248,8 @@ def create_server(
             service,
             bearer_token=bearer_token,
             oidc_validator=oidc_validator,
+            operator_token=operator_token,
+            operator_role=operator_role,
             max_body_bytes=max_body_bytes,
             rate_limit=rate_limit,
         ).handler(),
@@ -244,11 +287,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit(
             "GOVERNED_AUTONOMY_BEARER_TOKEN or complete OIDC configuration is required"
         )
-    service, _, _ = build_demo_service()
+    service, _, _ = build_runtime_service()
     server = create_server(
         service,
         bearer_token=args.bearer_token,
         oidc_validator=oidc_validator,
+        operator_token=args.operator_token,
+        operator_role=args.operator_role,
         host=args.host,
         port=args.port,
         max_body_bytes=args.max_body_bytes,

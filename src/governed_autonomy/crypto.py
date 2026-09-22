@@ -20,6 +20,17 @@ class KeyPair:
     def generate(cls, key_id: str = "issuer-1") -> "KeyPair":
         return cls(Ed25519PrivateKey.generate(), key_id)
 
+    @classmethod
+    def from_private_key_b64(cls, key_id: str, encoded: str) -> "KeyPair":
+        """Load a raw 32-byte Ed25519 private key from URL-safe base64."""
+        if not key_id or not encoded:
+            raise ValueError("key_id and encoded private key are required")
+        try:
+            private_key = Ed25519PrivateKey.from_private_bytes(b64decode(encoded))
+        except (ValueError, TypeError) as exc:
+            raise ValueError("encoded private key is invalid") from exc
+        return cls(private_key, key_id)
+
     @property
     def public_key(self) -> Ed25519PublicKey:
         return self.private_key.public_key()

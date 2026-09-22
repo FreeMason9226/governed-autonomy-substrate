@@ -3,7 +3,11 @@ image:
   tag: latest
   pullPolicy: IfNotPresent
 replicaCount: 2
+runtimeMode: postgres
 bearerTokenSecret: governed-autonomy
+databaseUrlSecret: governed-autonomy-runtime
+runtimeSecret: governed-autonomy-runtime
+trustStorePath: /var/lib/gas/trust-store.json
 createBearerTokenSecret: false
 bearerToken: ""
 service:
@@ -33,6 +37,9 @@ externalSecrets:
   secretStoreKind: ClusterSecretStore
   remoteKey: governed-autonomy/bearer-token
   remoteProperty: value
+  databaseUrlRemoteKey: governed-autonomy/database-url
+  issuerKeyIdRemoteKey: governed-autonomy/issuer-key-id
+  issuerPrivateKeyRemoteKey: governed-autonomy/issuer-private-key
 oidc:
   enabled: false
   issuer: ""

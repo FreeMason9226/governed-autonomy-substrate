@@ -14,6 +14,9 @@ versioned migration tool. Back up replay frames and policy/trust snapshots
 with encryption and retention controls. Restore into an isolated environment,
 verify the hash chain and signatures, then promote only after readiness checks.
 Do not fabricate certificates, keys, or cloud credentials in this repository.
+The initial PostgreSQL migration is also checked in at
+`deploy/postgres/migrations/001_replay_schema.sql`; run it through the
+organization's migration controller before enabling application traffic.
 
 ## Security response
 
@@ -66,3 +69,9 @@ PostgreSQL instance with `deploy/scripts/dr-restore-check.sh`, then run the
 conformance suite and load smoke test before promoting the recovered data.
 Record restore duration, replay-chain verification, and the first successful
 readiness timestamp as recovery objectives.
+
+The runtime Secret must provide `url`, `issuer-key-id`, and
+`issuer-private-key`. The issuer private key is raw 32-byte Ed25519 material
+encoded as URL-safe base64. Rotate it by provisioning the new key, adding its
+public key to the trust store, rolling out the new Secret, and revoking the old
+key only after all old artifacts have expired.

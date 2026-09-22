@@ -83,6 +83,34 @@ def test_http_api_requires_bearer_auth_and_rejects_bad_json(server):
     connection.close()
 
 
+def test_http_api_requires_operator_token_for_admin():
+    service, _, _ = build_demo_service()
+    instance = create_server(
+        service,
+        bearer_token="test-token",
+        operator_token="operator-token",
+    )
+    thread = threading.Thread(target=instance.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, _ = request(instance, "GET", "/admin")
+        assert status == 403
+        connection = HTTPConnection(*instance.server_address)
+        connection.request(
+            "GET",
+            "/admin",
+            headers={"Authorization": "Bearer operator-token"},
+        )
+        response = connection.getresponse()
+        assert response.status == 200
+        assert b"Governance Admin" in response.read()
+        connection.close()
+    finally:
+        instance.shutdown()
+        instance.server_close()
+        thread.join(timeout=2)
+
+
 def test_http_api_parse_server_args_supports_cli_options():
     args = parse_server_args(["--host", "0.0.0.0", "--port", "9000", "--bearer-token", "super-secret"])
 

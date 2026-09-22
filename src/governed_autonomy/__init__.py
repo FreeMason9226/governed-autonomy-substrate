@@ -1,7 +1,7 @@
 """Governed Autonomy Substrate MVP."""
 
 from .a2a import A2AGuard, A2ATaskDelegation
-from .bootstrap import build_demo_service, build_platform_demo
+from .bootstrap import build_demo_service, build_platform_demo, build_runtime_service
 from .compliance import ComplianceAuditor, ComplianceEvaluation
 from .crypto import KeyPair
 from .deployment import (
@@ -86,6 +86,7 @@ __all__ = [
     "health_report",
     "build_demo_service",
     "build_platform_demo",
+    "build_runtime_service",
     "AuthenticatedAPI",
     "create_server",
     "parse_server_args",
