@@ -70,3 +70,11 @@ OpenTelemetry-compatible hooks; versioned `/api/v1` endpoints and
 `docs/operations.md` provide deployment and recovery starting points. They do
 not provision a database, identity provider, certificates, backup system, or
 cloud credentials.
+
+## Multi-organization federation
+
+The `federation` layer synchronizes policy registries without trusting remote state blindly. A `RegistrySnapshot` is a deterministic, canonical summary of policy entries and their individual digests; its content digest is portable across organizations while the source organization remains authenticated by the signed event. `SignedSyncEvent` binds the event type, source and target organizations, snapshot digest, per-policy digests, issuance timestamp, nonce, and signer key. `GovernanceSyncEnvelope` signs the complete event-plus-snapshot payload, preventing an intermediary from swapping either component.
+
+`GovernanceReconciler` requires an explicit organization-to-key mapping and the same `TrustStore` used by the authorization substrate. It rejects unknown organizations, unregistered or revoked keys, invalid signatures, stale events, replayed nonces, snapshot tampering, unstable policy IDs, and policy digest mismatches. Identical content is a no-op; signed unknown policies can be imported; conflicting definitions for an existing `policy_id` produce explicit conflict metadata and are never silently merged. Policy manifests are independently verified before import, so federation signatures do not substitute for policy-authority trust.
+
+This slice provides deterministic single-process reconciliation and an auditable result object. Production deployments still need durable consumed-event nonce storage, organization-key lifecycle/distribution, transport confidentiality, cross-region ordering/leases, and an external audit sink. The reconciler intentionally does not resolve conflicting policy definitions automatically.

@@ -1,4 +1,4 @@
-"""Governed Autonomy Substrate MVP."""
+﻿"""Governed Autonomy Substrate MVP."""
 
 from .a2a import A2AGuard, A2ATaskDelegation
 from .bootstrap import build_demo_service, build_platform_demo, build_runtime_service
@@ -64,6 +64,7 @@ from .storage import (
     SQLiteNonceRepository,
 )
 from .trust import TrustStore
+from .federation import FederationError, GovernanceReconciler, GovernanceSyncEnvelope, ReconciliationResult, RegistrySnapshot, SignedSyncEvent
 
 __all__ = [
     "AuthorizationError",
@@ -83,6 +84,12 @@ __all__ = [
     "ReplayLog",
     "SQLiteReplayLog",
     "TrustStore",
+    "FederationError",
+    "GovernanceReconciler",
+    "GovernanceSyncEnvelope",
+    "ReconciliationResult",
+    "RegistrySnapshot",
+    "SignedSyncEvent",
     "GovernedService",
     "health_report",
     "build_demo_service",
@@ -137,3 +144,4 @@ __all__ = [
     "ComplianceAuditor",
     "ComplianceEvaluation",
 ]
+
