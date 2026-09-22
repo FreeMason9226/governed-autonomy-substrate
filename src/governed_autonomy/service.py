@@ -5,8 +5,8 @@ from .engine import ExecutionBoundary
 from .errors import AuthorizationError
 from .health import health_report
 from .issuer import AuthorizationIssuer
-from .models import GovernanceAuthorizationArtifact, SignedApproval
 from .mesh import GovernanceInput
+from .models import GovernanceAuthorizationArtifact, SignedApproval
 from .policy import Policy, PolicyRegistry
 
 

@@ -8,8 +8,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from .canonical import canonical_json
 from .crypto import verify_signature
 from .errors import AuthorizationError
-from .models import GovernanceAuthorizationArtifact
 from .mesh import GovernanceInput, GovernanceMesh, GovernanceMeshError
+from .models import GovernanceAuthorizationArtifact
 from .policy import DeterministicArbiter, PolicyRegistry
 from .replay import ReplayFrame, ReplayLog
 from .trust import TrustStore
