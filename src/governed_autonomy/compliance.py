@@ -78,9 +78,8 @@ class ComplianceAuditor:
             )
 
         # GV-2.1 (Policy Whitelist & Limit Thresholds)
-        if self.policy_registry and self.policy_registry.policies:
-            policies = self.policy_registry.policies
-            # pyrefly: ignore [not-iterable]
+        if self.policy_registry and self.policy_registry.policies():
+            policies = self.policy_registry.policies()
             actions_count = sum(len(p.allowed_actions) for p in policies)
             results.append(
                 ComplianceEvaluation(
@@ -205,8 +204,7 @@ class ComplianceAuditor:
         # Article 14 (Human Oversight / Approval Quorums)
         has_quorums = False
         if self.policy_registry:
-            # pyrefly: ignore [not-iterable]
-            for p in self.policy_registry.policies:
+            for p in self.policy_registry.policies():
                 if any(count > 0 for count in p.required_approvals.values()):
                     has_quorums = True
                     break
@@ -216,7 +214,9 @@ class ComplianceAuditor:
                 control_id="Article 14",
                 title="Human Oversight & Approval Quorums",
                 status="PASS" if has_quorums else "INFO",
-                details="Multi-party SignedApproval quorums active" if has_quorums else "Approval quorums supported; none currently enforced.",
+                details="Multi-party SignedApproval quorums active"
+                if has_quorums
+                else "Approval quorums supported; none currently enforced.",
             )
         )
 
@@ -233,7 +233,7 @@ class ComplianceAuditor:
         warnings = sum(1 for e in all_evals if e.status in ("WARNING", "INFO"))
 
         return {
-            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
             "compliance_status": "COMPLIANT" if fails == 0 else "NON_COMPLIANT",
             "score": {
                 "total_controls_evaluated": len(all_evals),

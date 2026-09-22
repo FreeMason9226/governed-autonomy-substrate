@@ -113,11 +113,7 @@ class ReplayLog:
     def events_for_nonce(self, nonce: str) -> tuple[dict[str, Any], ...]:
         if not nonce:
             raise ValueError("nonce must not be empty")
-        return tuple(
-            frame.event
-            for frame in self._frames
-            if frame.event.get("nonce") == nonce
-        )
+        return tuple(frame.event for frame in self._frames if frame.event.get("nonce") == nonce)
 
     def reconstruct_decisions(self) -> dict[str, dict[str, Any]]:
         """Deterministically reconstruct the authorization state for each nonce."""
@@ -157,20 +153,14 @@ class ReplayLog:
     def audit_summary(self) -> dict[str, Any]:
         """Return an immutable, deterministic summary of authorization and execution history."""
         decisions = self.reconstruct_decisions()
-        authorizations = [
-            event for event in self.events("authorization") if event.get("nonce")
-        ]
+        authorizations = [event for event in self.events("authorization") if event.get("nonce")]
         executions = [event for event in self.events("execution") if event.get("nonce")]
         return {
             "frame_count": len(self._frames),
             "authorization_count": len(authorizations),
             "execution_count": len(executions),
-            "success_count": sum(
-                1 for event in executions if event.get("status") == "completed"
-            ),
-            "failure_count": sum(
-                1 for event in executions if event.get("status") == "failed"
-            ),
+            "success_count": sum(1 for event in executions if event.get("status") == "completed"),
+            "failure_count": sum(1 for event in executions if event.get("status") == "failed"),
             "nonces": sorted(str(event["nonce"]) for event in authorizations + executions),
             "decisions": decisions,
         }
@@ -225,8 +215,7 @@ class SQLiteReplayLog(ReplayLog):
             )
         ]
         self._used_nonces = {
-            row[0]
-            for row in self._connection.execute("SELECT nonce FROM consumed_nonces")
+            row[0] for row in self._connection.execute("SELECT nonce FROM consumed_nonces")
         }
         if not self.verify_chain():
             self._connection.close()
@@ -263,9 +252,7 @@ class SQLiteReplayLog(ReplayLog):
     def claim_nonce(self, nonce: str) -> None:
         with self._lock:
             try:
-                self._connection.execute(
-                    "INSERT INTO consumed_nonces (nonce) VALUES (?)", (nonce,)
-                )
+                self._connection.execute("INSERT INTO consumed_nonces (nonce) VALUES (?)", (nonce,))
                 self._connection.commit()
             except sqlite3.IntegrityError as exc:
                 self._connection.rollback()

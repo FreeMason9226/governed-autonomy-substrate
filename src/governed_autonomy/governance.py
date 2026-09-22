@@ -92,11 +92,12 @@ class GovernanceRuleTranslator:
             required_approvals_raw = source.get("required_approvals", {})
             if isinstance(required_approvals_raw, Mapping):
                 required_approvals = {
-                    str(action): int(value)
-                    for action, value in required_approvals_raw.items()
+                    str(action): int(value) for action, value in required_approvals_raw.items()
                 }
-            elif isinstance(required_approvals_raw, int) and not isinstance(required_approvals_raw, bool):
-                required_approvals = {action: required_approvals_raw for action in policy.allowed_actions}
+            elif isinstance(required_approvals_raw, int) and not isinstance(
+                required_approvals_raw, bool
+            ):
+                required_approvals = dict.fromkeys(policy.allowed_actions, required_approvals_raw)
             else:
                 required_approvals = {}
             if not required_context and not exact_context and not required_approvals:

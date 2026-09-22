@@ -128,8 +128,7 @@ class AuthorizationIssuer:
         if not failed_nonce:
             raise ValueError("failed_nonce must not be empty")
         failed = any(
-            event.get("type") == "execution"
-            and event.get("status") == "failed"
+            event.get("type") == "execution" and event.get("status") == "failed"
             for event in self.replay_log.events_for_nonce(failed_nonce)
         )
         if not failed:

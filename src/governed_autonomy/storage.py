@@ -16,7 +16,9 @@ class SQLiteNonceRepository:
     def __init__(self, path: str = ":memory:") -> None:
         self.connection = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
         self.connection.execute("PRAGMA busy_timeout=5000")
-        self.connection.execute("CREATE TABLE IF NOT EXISTS consumed_nonces (nonce TEXT PRIMARY KEY)")
+        self.connection.execute(
+            "CREATE TABLE IF NOT EXISTS consumed_nonces (nonce TEXT PRIMARY KEY)"
+        )
         self._lock = threading.RLock()
 
     def claim(self, nonce: str) -> None:
@@ -32,7 +34,12 @@ class SQLiteNonceRepository:
                 raise ValueError(f"nonce already consumed: {nonce}") from exc
 
     def contains(self, nonce: str) -> bool:
-        return self.connection.execute("SELECT 1 FROM consumed_nonces WHERE nonce=?", (nonce,)).fetchone() is not None
+        return (
+            self.connection.execute(
+                "SELECT 1 FROM consumed_nonces WHERE nonce=?", (nonce,)
+            ).fetchone()
+            is not None
+        )
 
     def close(self) -> None:
         self.connection.close()
@@ -56,11 +63,18 @@ POSTGRES_REPLAY_SCHEMA = """CREATE TABLE IF NOT EXISTS replay_frames (
 
 class PostgresReplayLog:
     """Small DB-API boundary; deployments own pooling, TLS, and migrations."""
+
     def __init__(self, connection) -> None:
         self.connection = connection
 
-    def append(self, frame_id: str, frame_json: str, frame_hash: str, previous_hash: str | None = None,
-               nonce: str | None = None) -> None:
+    def append(
+        self,
+        frame_id: str,
+        frame_json: str,
+        frame_hash: str,
+        previous_hash: str | None = None,
+        nonce: str | None = None,
+    ) -> None:
         cursor = self.connection.cursor()
         try:
             cursor.execute(

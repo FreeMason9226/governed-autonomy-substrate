@@ -65,21 +65,14 @@ class Policy:
             "policy_id": self.policy_id,
             "allowed_actions": list(self.allowed_actions),
             "required_fields": {
-                action: list(fields)
-                for action, fields in sorted(self.required_fields.items())
+                action: list(fields) for action, fields in sorted(self.required_fields.items())
             },
-            "exact_fields": {
-                action: values
-                for action, values in sorted(self.exact_fields.items())
-            },
+            "exact_fields": dict(sorted(self.exact_fields.items())),
             "required_context": list(self.required_context),
             "exact_context": self.exact_context,
             "max_request_bytes": self.max_request_bytes,
             "max_ttl_seconds": self.max_ttl_seconds,
-            "required_approvals": {
-                action: count
-                for action, count in sorted(self.required_approvals.items())
-            },
+            "required_approvals": dict(sorted(self.required_approvals.items())),
         }
 
     def digest(self) -> str:
@@ -123,8 +116,11 @@ class DeterministicArbiter:
                 candidate: SignedApproval | None = None
                 if isinstance(approval, SignedApproval):
                     candidate = approval
-                elif isinstance(approval, Mapping):
-                    if "issuer_key_id" in approval and "signature" in approval:
+                elif (
+                    isinstance(approval, Mapping)
+                    and "issuer_key_id" in approval
+                    and "signature" in approval
+                ):
                         try:
                             candidate = SignedApproval.from_dict(dict(approval))
                         except ValueError:
@@ -157,23 +153,23 @@ class DeterministicArbiter:
             reasons.append("action is not allowed by policy")
             reason_codes.append("action_not_allowed")
 
-        for field in policy.required_fields.get(action, ()):
-            if field not in request:
-                reasons.append(f"required field is missing: {field}")
+        for field_name in policy.required_fields.get(action, ()):
+            if field_name not in request:
+                reasons.append(f"required field is missing: {field_name}")
                 reason_codes.append("required_field_missing")
 
-        for field, expected in policy.exact_fields.get(action, {}).items():
-            if request.get(field) != expected:
-                reasons.append(f"field does not match policy: {field}")
+        for field_name, expected in policy.exact_fields.get(action, {}).items():
+            if request.get(field_name) != expected:
+                reasons.append(f"field does not match policy: {field_name}")
                 reason_codes.append("field_mismatch")
 
-        for field in policy.required_context:
-            if field not in context:
-                reasons.append(f"required context is missing: {field}")
+        for context_name in policy.required_context:
+            if context_name not in context:
+                reasons.append(f"required context is missing: {context_name}")
                 reason_codes.append("required_context_missing")
-        for field, expected in policy.exact_context.items():
-            if context.get(field) != expected:
-                reasons.append(f"context does not match policy: {field}")
+        for context_name, expected in policy.exact_context.items():
+            if context.get(context_name) != expected:
+                reasons.append(f"context does not match policy: {context_name}")
                 reason_codes.append("context_mismatch")
 
         required_approvals = policy.required_approvals.get(action, 0)
@@ -232,14 +228,10 @@ class PolicyRegistry:
             raise ValueError("policy manifest signature is invalid or untrusted")
         current = self._policies.get(manifest.policy.policy_id)
         current_version = self._versions.get(manifest.policy.policy_id)
-        if current is not None:
-            if manifest.version <= current_version:
-                if (
-                    manifest.version == current_version
-                    and current.digest() == manifest.policy.digest()
-                ):
-                    return
-                raise ValueError("policy manifest version is stale or conflicting")
+        if current is not None and manifest.version <= current_version:
+            if manifest.version == current_version and current.digest() == manifest.policy.digest():
+                return
+            raise ValueError("policy manifest version is stale or conflicting")
         self.register(manifest.policy)
         self._signed_manifests[manifest.policy.policy_id] = manifest
         self._versions[manifest.policy.policy_id] = manifest.version
@@ -351,10 +343,7 @@ class PolicyRegistry:
         return self._policies.get(policy_id)
 
     def digests(self) -> dict[str, str]:
-        return {
-            policy_id: policy.digest()
-            for policy_id, policy in sorted(self._policies.items())
-        }
+        return {policy_id: policy.digest() for policy_id, policy in sorted(self._policies.items())}
 
     def policies(self) -> tuple[Policy, ...]:
         return tuple(self._policies[policy_id] for policy_id in sorted(self._policies))
@@ -420,8 +409,7 @@ def policy_from_dict(value: dict[str, Any]) -> Policy:
         policy_id=value["policy_id"],
         allowed_actions=tuple(value["allowed_actions"]),
         required_fields={
-            action: tuple(fields)
-            for action, fields in value["required_fields"].items()
+            action: tuple(fields) for action, fields in value["required_fields"].items()
         },
         exact_fields=value["exact_fields"],
         required_context=tuple(value["required_context"]),

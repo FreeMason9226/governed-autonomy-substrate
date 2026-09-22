@@ -64,12 +64,16 @@ class SignedApproval:
     def verify(self, public_key: Any) -> bool:
         return verify_signature(public_key, self.unsigned_payload(), self.signature)
 
-    def matches_request(self, request: dict[str, Any], *, decision: dict[str, Any] | None = None) -> bool:
+    def matches_request(
+        self, request: dict[str, Any], *, decision: dict[str, Any] | None = None
+    ) -> bool:
         if not isinstance(request, dict):
             return False
         if self.action != str(request.get("action")):
             return False
-        request_without_approvals = {key: value for key, value in request.items() if key != "approvals"}
+        request_without_approvals = {
+            key: value for key, value in request.items() if key != "approvals"
+        }
         digest = hashlib.sha256(canonical_json(request_without_approvals)).hexdigest()
         if self.request_digest != digest:
             return False
@@ -223,13 +227,11 @@ class GovernanceAuthorizationArtifact:
             raise ValueError("action_request must be an object")
         if not isinstance(value["decision"], dict):
             raise ValueError("decision must be an object")
-        if not isinstance(value["expires_at"], int) or isinstance(
-            value["expires_at"], bool
-        ):
+        if not isinstance(value["expires_at"], int) or isinstance(value["expires_at"], bool):
             raise ValueError("expires_at must be an integer")
-        for field in ("nonce", "replay_frame_ref", "issuer_key_id", "signature"):
-            if not isinstance(value[field], str) or not value[field]:
-                raise ValueError(f"{field} must be a non-empty string")
+        for field_name in ("nonce", "replay_frame_ref", "issuer_key_id", "signature"):
+            if not isinstance(value[field_name], str) or not value[field_name]:
+                raise ValueError(f"{field_name} must be a non-empty string")
         return cls(
             action_request=value["action_request"],
             decision=value["decision"],

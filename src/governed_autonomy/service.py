@@ -22,8 +22,10 @@ class GovernedService:
     ) -> None:
         self.issuer = issuer
         self.boundary = boundary
-        self.policies = policies if isinstance(policies, PolicyRegistry) else PolicyRegistry(
-            tuple(policies.values())
+        self.policies = (
+            policies
+            if isinstance(policies, PolicyRegistry)
+            else PolicyRegistry(tuple(policies.values()))
         )
         self.actions = dict(actions)
 
