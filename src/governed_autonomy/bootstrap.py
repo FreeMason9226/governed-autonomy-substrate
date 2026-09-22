@@ -103,9 +103,10 @@ def build_platform_demo(
     environment: str = "prod",
     tenant_id: str | None = None,
     actor_id: str | None = None,
+    mesh_source_registry=None,
 ) -> tuple[GovernancePlatform, GovernedService, KeyPair, ReplayLog]:
     """Build a platform-ready composition with runtime identity and runtime metadata."""
-    service, issuer, replay_log = build_demo_service()
+    service, issuer, replay_log = build_demo_service(mesh_source_registry=mesh_source_registry)
     platform = GovernancePlatform(
         service=service,
         identity=RuntimeIdentity(
@@ -114,5 +115,6 @@ def build_platform_demo(
             tenant_id=tenant_id,
             actor_id=actor_id,
         ),
+        mesh_source_registry=mesh_source_registry,
     )
     return platform, service, issuer, replay_log

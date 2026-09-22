@@ -1,7 +1,12 @@
 import pytest
 
 from governed_autonomy import (
+    AuthorizationIssuer,
+    ExecutionBoundary,
+    GovernanceInput,
     GovernancePlatform,
+    GovernanceSourceRegistry,
+    GovernedService,
     KeyPair,
     PlatformDeploymentPolicy,
     Policy,
@@ -11,9 +16,6 @@ from governed_autonomy import (
     ServicePrincipal,
     ServicePrincipalRegistry,
     TrustStore,
-    AuthorizationIssuer,
-    ExecutionBoundary,
-    GovernedService,
 )
 
 
@@ -63,6 +65,48 @@ def test_platform_context_binds_runtime_identity_to_authorization_requests():
     assert artifact.action_request["context"]["environment"] == "prod"
     assert platform.platform_report()["service"] == "files-api"
     assert platform.platform_report()["health"]["ok"] is True
+
+
+def test_platform_accepts_mesh_preflight_inputs_and_registry():
+    issuer = KeyPair.generate("platform-mesh-issuer")
+    source = KeyPair.generate("mesh-source")
+    replay_log = ReplayLog()
+    trust_store = TrustStore()
+    trust_store.add(issuer.key_id, issuer.public_key)
+    policy = Policy(
+        policy_id="mesh-platform-v1",
+        allowed_actions=("write_file",),
+        required_fields={"write_file": ("path", "content")},
+        exact_fields={"write_file": {"path": "out.txt"}},
+    )
+    registry = PolicyRegistry((policy,), trust_store=trust_store)
+    source_registry = GovernanceSourceRegistry()
+    source_registry.register("mesh-source", source.public_key)
+    service = GovernedService(
+        issuer=AuthorizationIssuer(issuer=issuer, replay_log=replay_log),
+        boundary=ExecutionBoundary(
+            replay_log=replay_log,
+            trust_store=trust_store,
+            policy_registry=registry,
+        ),
+        policies=registry,
+        actions={"write_file": lambda request: request["content"]},
+        mesh_source_registry=source_registry,
+    )
+    platform = GovernancePlatform(
+        service=service,
+        identity=RuntimeIdentity(service="files-api", environment="prod", request_id="mesh-req-1"),
+        mesh_source_registry=source_registry,
+    )
+
+    artifact = platform.authorize(
+        {"action": "write_file", "path": "out.txt", "content": "ok"},
+        "mesh-platform-v1",
+        mesh_inputs=[GovernanceInput("mesh-source", {"allow": True}, priority=5).attest(source)],
+    )
+
+    assert artifact.decision["mesh_preflight_digest"]
+    assert platform.service.issuer.mesh_source_registry is source_registry
 
 
 def test_platform_deployment_policy_rejects_unsafe_runtime_context():

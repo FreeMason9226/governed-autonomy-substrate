@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from .mesh import GovernanceInput, GovernanceSourceRegistry
 from .observability import PlatformObservability
 from .service import GovernedService
 
@@ -190,11 +191,17 @@ class GovernancePlatform:
         observability: PlatformObservability | None = None,
         deployment_policy: PlatformDeploymentPolicy | None = None,
         principal_registry: ServicePrincipalRegistry | None = None,
+        mesh_source_registry: GovernanceSourceRegistry | None = None,
     ) -> None:
         self.service = service
         self.identity = identity
         self.deployment_policy = deployment_policy or PlatformDeploymentPolicy()
         self.principal_registry = principal_registry
+        self.mesh_source_registry = mesh_source_registry
+        if self.mesh_source_registry is not None:
+            self.service.mesh_source_registry = self.mesh_source_registry
+            if self.service.issuer.mesh_source_registry is None:
+                self.service.issuer.mesh_source_registry = self.mesh_source_registry
         self.observability = observability or PlatformObservability(
             service=service,
             service_name=identity.service,
@@ -209,6 +216,7 @@ class GovernancePlatform:
         ttl_seconds: int = 300,
         approvals: list[Any] | None = None,
         context: dict[str, Any] | None = None,
+        mesh_inputs: list[GovernanceInput] | None = None,
     ):
         effective_request = dict(request)
         effective_context = dict(self.identity.context())
@@ -231,6 +239,7 @@ class GovernancePlatform:
                 policy_id,
                 ttl_seconds=ttl_seconds,
                 approvals=approvals,
+                mesh_inputs=mesh_inputs,
             )
             self.observability.record_authorized()
             return artifact
