@@ -57,6 +57,7 @@ The package now includes runnable boundaries for the next deployment slice:
 
 * `OIDCValidator` validates compact JWTs fail-closed (issuer, audience, expiry, not-before, algorithm, key id, and signature) against an injectable `JWKSProvider`. A provider can implement `refresh()` to support key rotation without putting network policy in the validator.
 * `LocalEd25519Signer`, `RemoteSigner`, and `KMSSigner` implement the `Signer` protocol. `KMSSigner` is the KMS/HSM adapter boundary: it accepts a KMS backend with a `.sign(key_id, payload)` callback and optional public-key fetch, keeping private keys outside the process and leaving hardware-backed key custody to the deployment environment.
+  `build_runtime_service(signer=...)` can inject that signer into the PostgreSQL runtime; omitting it preserves the explicit local-key environment path.
 * `SQLiteNonceRepository` performs transactional, unique nonce claims. `PostgresNonceRepository` and `POSTGRES_NONCE_SCHEMA` define the managed-database adapter boundary without making a PostgreSQL client a mandatory dependency.
 * `TLSConfig`, bounded rate limiting, correlation IDs, and security headers are available to deployment code. The standard-library API supports `Bearer` authentication (and retains its legacy direct-token form), `/admin`, and read-only admin JSON slices for policies, proposals, and metrics.
 

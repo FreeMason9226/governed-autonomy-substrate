@@ -210,6 +210,12 @@ To further align with the patent draft, the next strongest refinements would be:
 4. replay/rollback certification and verification endpoints
 5. a public `README` architecture diagram matching the patent figures
 
+The deployment boundary now also accepts a generic `Signer` in the PostgreSQL
+runtime composition, so KMS/HSM-backed implementations can be injected without
+placing private key material in this package. This remains an integration
+boundary: provider construction, key rotation, and public-key lifecycle are
+deployment responsibilities.
+
 ## Repository pointers
 
 Key files:
