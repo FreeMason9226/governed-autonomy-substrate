@@ -54,7 +54,9 @@ class RuntimeMetrics:
 class PlatformObservability:
     """Runtime monitoring for the governance barrier and platform shell."""
 
-    def __init__(self, *, service: GovernedService, service_name: str, environment: str = "dev") -> None:
+    def __init__(
+        self, *, service: GovernedService, service_name: str, environment: str = "dev"
+    ) -> None:
         self.service = service
         self.metrics = RuntimeMetrics(service=service_name, environment=environment)
 

@@ -34,7 +34,7 @@ class PolicyApproval:
         policy_id: str,
         policy_digest: str,
         approver: KeyPair,
-    ) -> "PolicyApproval":
+    ) -> PolicyApproval:
         return cls(
             proposal_id=proposal_id,
             policy_id=policy_id,
@@ -95,7 +95,7 @@ class PolicyChangeProposal:
         proposer: KeyPair,
         rationale: str,
         current_policy_digest: str,
-    ) -> "PolicyChangeProposal":
+    ) -> PolicyChangeProposal:
         payload = cls(
             proposal_id=proposal_id,
             policy_id=policy.policy_id,
@@ -164,7 +164,9 @@ class PolicyChangeManager:
             raise ValueError("proposer key is not trusted")
         existing = self.registry.get(new_policy.policy_id)
         current_digest = existing.digest() if existing is not None else ""
-        proposal_id = proposal_id or f"policy-proposal:{new_policy.policy_id}:{current_digest or 'new'}"
+        proposal_id = (
+            proposal_id or f"policy-proposal:{new_policy.policy_id}:{current_digest or 'new'}"
+        )
         proposal = PolicyChangeProposal.propose(
             proposal_id=proposal_id,
             policy=new_policy,

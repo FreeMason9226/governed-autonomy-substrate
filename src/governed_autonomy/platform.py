@@ -38,25 +38,36 @@ class ServicePrincipalRegistry:
     def validate_runtime(
         self,
         *,
-        identity: "RuntimeIdentity",
+        identity: RuntimeIdentity,
         action: str | None,
         context: dict[str, Any],
     ) -> None:
         if identity.principal_id is None:
-            raise ValueError("principal_id is required when a service-principal registry is configured")
+            raise ValueError(
+                "principal_id is required when a service-principal registry is configured"
+            )
 
         principal = self.get(identity.principal_id)
-        if principal.tenant_id is not None and identity.tenant_id is not None:
-            if principal.tenant_id != identity.tenant_id:
-                raise ValueError(
-                    f"principal tenant mismatch for principal {identity.principal_id!r}: "
-                    f"{principal.tenant_id!r} != {identity.tenant_id!r}"
-                )
+        if (
+            principal.tenant_id is not None
+            and identity.tenant_id is not None
+            and principal.tenant_id != identity.tenant_id
+        ):
+            raise ValueError(
+                f"principal tenant mismatch for principal {identity.principal_id!r}: "
+                f"{principal.tenant_id!r} != {identity.tenant_id!r}"
+            )
         if principal.tenant_id is not None and identity.tenant_id is None:
             raise ValueError("runtime identity is missing tenant_id for this service principal")
 
-        if principal.allowed_actions and action is not None and action not in principal.allowed_actions:
-            raise ValueError(f"action {action!r} is not allowed for principal {identity.principal_id!r}")
+        if (
+            principal.allowed_actions
+            and action is not None
+            and action not in principal.allowed_actions
+        ):
+            raise ValueError(
+                f"action {action!r} is not allowed for principal {identity.principal_id!r}"
+            )
 
         environment = context.get("environment", identity.environment)
         if principal.allowed_environments and environment not in principal.allowed_environments:
@@ -65,8 +76,14 @@ class ServicePrincipalRegistry:
             )
 
         source = context.get("source", identity.source)
-        if principal.allowed_sources and source is not None and source not in principal.allowed_sources:
-            raise ValueError(f"source {source!r} is not permitted for principal {identity.principal_id!r}")
+        if (
+            principal.allowed_sources
+            and source is not None
+            and source not in principal.allowed_sources
+        ):
+            raise ValueError(
+                f"source {source!r} is not permitted for principal {identity.principal_id!r}"
+            )
 
         if principal.scope and any(key not in context for key in principal.scope):
             missing = [key for key in principal.scope if key not in context]
@@ -85,7 +102,7 @@ class PlatformDeploymentPolicy:
     required_roles: tuple[str, ...] = ()
     max_context_entries: int = 32
 
-    def validate_runtime(self, *, identity: "RuntimeIdentity", context: dict[str, Any]) -> None:
+    def validate_runtime(self, *, identity: RuntimeIdentity, context: dict[str, Any]) -> None:
         environment = context.get("environment", identity.environment)
         if environment not in self.allowed_environments:
             raise ValueError(f"environment is not allowed for this runtime: {environment!r}")
@@ -205,7 +222,9 @@ class GovernancePlatform:
                 action=effective_request.get("action"),
                 context=effective_request["context"],
             )
-        self.deployment_policy.validate_runtime(identity=self.identity, context=effective_request["context"])
+        self.deployment_policy.validate_runtime(
+            identity=self.identity, context=effective_request["context"]
+        )
         try:
             artifact = self.service.authorize(
                 effective_request,
