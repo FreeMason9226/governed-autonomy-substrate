@@ -4,7 +4,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .canonical import canonical_json
-from .crypto import KeyPair, verify_signature
+from .crypto import verify_signature
+from .signing import Signer
 
 
 @dataclass(frozen=True)
@@ -38,7 +39,7 @@ class SignedApproval:
         action: str,
         request_digest: str,
         decision_digest: str,
-        issuer: KeyPair,
+        issuer: Signer,
         actor_id: str | None = None,
         context: dict[str, Any] | None = None,
     ) -> "SignedApproval":
@@ -87,7 +88,7 @@ class SignedApproval:
         *,
         request: dict[str, Any],
         decision: dict[str, Any],
-        issuer: KeyPair,
+        issuer: Signer,
         actor_id: str | None = None,
         context: dict[str, Any] | None = None,
     ) -> "SignedApproval":
@@ -180,7 +181,7 @@ class GovernanceAuthorizationArtifact:
         expires_at: int,
         nonce: str,
         replay_frame_ref: str,
-        issuer: KeyPair,
+        issuer: Signer,
     ) -> "GovernanceAuthorizationArtifact":
         unsigned = cls(
             action_request,

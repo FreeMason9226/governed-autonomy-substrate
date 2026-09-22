@@ -5,12 +5,12 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 from .canonical import canonical_json
-from .crypto import KeyPair
 from .errors import AuthorizationError
 from .mesh import GovernanceInput, GovernancePreflightDecision
 from .models import GovernanceAuthorizationArtifact, SignedApproval
 from .policy import DeterministicArbiter, Policy
 from .replay import ReplayLog
+from .signing import Signer
 
 
 class PolicyDeniedError(AuthorizationError):
@@ -33,7 +33,7 @@ class AuthorizationIssuer:
     def __init__(
         self,
         *,
-        issuer: KeyPair,
+        issuer: Signer,
         replay_log: ReplayLog,
         arbiter: DeterministicArbiter | None = None,
         clock: Callable[[], int] | None = None,

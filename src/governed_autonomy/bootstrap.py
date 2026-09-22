@@ -1,4 +1,5 @@
 import os
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from .crypto import KeyPair
 from .engine import ExecutionBoundary
@@ -8,6 +9,7 @@ from .policy import Policy, PolicyRegistry
 from .replay import ReplayLog
 from .service import GovernedService
 from .storage import PostgresReplayLog, PostgresTrustStore
+from .signing import Signer
 from .trust import TrustStore
 
 
@@ -48,8 +50,16 @@ def build_demo_service(
     return service, issuer, replay_log
 
 
-def build_runtime_service() -> tuple[GovernedService, KeyPair, ReplayLog]:
-    """Build the server composition from explicit production environment settings."""
+def build_runtime_service(
+    *,
+    signer: Signer | None = None,
+) -> tuple[GovernedService, Signer, ReplayLog]:
+    """Build the server composition from explicit production environment settings.
+
+    A deployment may inject a remote or KMS-backed signer. When omitted, the
+    legacy environment-backed local key path remains available for development
+    and controlled deployments.
+    """
     mode = os.environ.get("GAS_RUNTIME_MODE", "postgres").lower()
     if mode == "memory":
         return build_demo_service()
@@ -59,21 +69,24 @@ def build_runtime_service() -> tuple[GovernedService, KeyPair, ReplayLog]:
     database_url = os.environ.get("DATABASE_URL")
     key_id = os.environ.get("GAS_ISSUER_KEY_ID")
     private_key = os.environ.get("GAS_ISSUER_PRIVATE_KEY")
-    if not all((database_url, key_id, private_key)):
+    if not database_url or signer is None and not all((key_id, private_key)):
         raise RuntimeError(
-            "DATABASE_URL, GAS_ISSUER_KEY_ID, and GAS_ISSUER_PRIVATE_KEY "
-            "are required in postgres runtime mode"
+            "DATABASE_URL and either an injected signer or "
+            "GAS_ISSUER_KEY_ID/GAS_ISSUER_PRIVATE_KEY are required in postgres runtime mode"
         )
     try:
         import psycopg
     except ImportError as exc:
         raise RuntimeError("install the postgres extra to use postgres runtime mode") from exc
 
-    issuer = KeyPair.from_private_key_b64(key_id, private_key)
+    issuer = signer or KeyPair.from_private_key_b64(key_id, private_key)
     replay_log = PostgresReplayLog(psycopg.connect(database_url))
     trust_store = PostgresTrustStore(replay_log.connection)
     if trust_store.resolve(issuer.key_id) is None:
-        trust_store.add(issuer.key_id, issuer.public_key)
+        trust_store.add(
+            issuer.key_id,
+            Ed25519PublicKey.from_public_bytes(issuer.public_key_bytes()),
+        )
     policy_registry = PolicyRegistry(
         (
             Policy(
