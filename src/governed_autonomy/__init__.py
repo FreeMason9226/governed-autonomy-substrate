@@ -13,6 +13,14 @@ from .deployment import (
 )
 from .engine import ExecutionBoundary
 from .errors import AuthorizationError
+from .federation import (
+    FederationError,
+    GovernanceReconciler,
+    GovernanceSyncEnvelope,
+    ReconciliationResult,
+    RegistrySnapshot,
+    SignedSyncEvent,
+)
 from .governance import GovernanceRule, GovernanceRuleTranslator
 from .health import health_report
 from .http_api import AuthenticatedAPI, create_server, parse_server_args
@@ -35,6 +43,7 @@ from .mcp_gateway import (
     MCPToolDefinition,
     MCPToolResult,
 )
+from .mesh import GovernanceInput, GovernanceMesh, GovernanceMeshError, GovernancePreflightDecision
 from .models import GovernanceAuthorizationArtifact, SignedApproval
 from .platform import (
     GovernancePlatform,
@@ -64,7 +73,6 @@ from .storage import (
     SQLiteNonceRepository,
 )
 from .trust import TrustStore
-from .federation import FederationError, GovernanceReconciler, GovernanceSyncEnvelope, ReconciliationResult, RegistrySnapshot, SignedSyncEvent
 
 __all__ = [
     "AuthorizationError",
@@ -72,6 +80,10 @@ __all__ = [
     "ExecutionBoundary",
     "GovernanceAuthorizationArtifact",
     "SignedApproval",
+    "GovernanceInput",
+    "GovernanceMesh",
+    "GovernanceMeshError",
+    "GovernancePreflightDecision",
     "DeterministicArbiter",
     "GovernanceRule",
     "GovernanceRuleTranslator",
@@ -144,4 +156,3 @@ __all__ = [
     "ComplianceAuditor",
     "ComplianceEvaluation",
 ]
-

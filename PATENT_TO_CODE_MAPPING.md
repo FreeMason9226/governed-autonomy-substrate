@@ -214,3 +214,22 @@ Key files:
 - `tests/test_federation.py`
 
 This mapping is intended as a traceability document between the draft claims and the implementation, not as legal advice or an assertion that every claim is fully reduced to production code.
+
+### 7. Governance mesh harmonization and predictive preflight
+
+Patent concepts:
+- multiple governance inputs contributing to a canonical decision
+- weighted or prioritized governance source harmonization
+- conflict detection before execution
+- deterministic governance decision provenance and replay metadata
+
+Code:
+- `src/governed_autonomy/mesh.py` - `GovernanceInput`, `GovernanceMesh`, `GovernancePreflightDecision`
+
+Implementation notes:
+- Inputs require unique source IDs, positive weights, non-negative priorities, and a boolean `allow` decision.
+- Exact canonical decision digests make equivalent inputs group deterministically.
+- Weighted decision ranking uses stable weight, priority, and digest ordering.
+- Conflicting allow/deny inputs at the highest priority fail closed with explicit conflict metadata.
+- Optional `ReplayLog` integration appends a `governance_preflight` frame containing request, input, decision, and digest metadata.
+- This is a bounded preflight/harmonization implementation; it does not claim predictive analytics, learned risk scoring, or external source attestation.
