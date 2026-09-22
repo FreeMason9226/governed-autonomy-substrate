@@ -8,7 +8,7 @@ from typing import Any
 
 from .canonical import canonical_json
 from .crypto import KeyPair, verify_signature
-from .policy import PolicyRegistry, SignedPolicyManifest, signed_policy_manifest_from_dict
+from .policy import PolicyRegistry, signed_policy_manifest_from_dict
 from .trust import TrustStore
 
 
@@ -58,7 +58,7 @@ class SignedSyncEvent:
         nonce: str,
         signer: KeyPair,
         issued_at: int | None = None,
-    ) -> "SignedSyncEvent":
+    ) -> SignedSyncEvent:
         if not event_type or not source_org or not target_org or not snapshot_digest or not nonce:
             raise ValueError("event type, organizations, snapshot digest, and nonce are required")
         unsigned = cls(
@@ -69,7 +69,7 @@ class SignedSyncEvent:
         return cls(**{**unsigned.__dict__, "signature": signer.sign(unsigned.unsigned_payload())})
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "SignedSyncEvent":
+    def from_dict(cls, value: dict[str, Any]) -> SignedSyncEvent:
         required = {
             "event_type", "source_org", "target_org", "snapshot_digest", "policy_digests",
             "issued_at", "nonce", "signer_key_id", "signature",
@@ -123,7 +123,7 @@ class RegistrySnapshot:
         return {**self.unsigned_dict(), "snapshot_digest": self.snapshot_digest}
 
     @classmethod
-    def from_registry(cls, registry: PolicyRegistry, *, source_org: str, version: int = 1) -> "RegistrySnapshot":
+    def from_registry(cls, registry: PolicyRegistry, *, source_org: str, version: int = 1) -> RegistrySnapshot:
         policies = {entry["policy"]["policy_id"]: entry for entry in registry.to_dict()["policies"]}
         digests = registry.digests()
         unsigned = {
@@ -134,7 +134,7 @@ class RegistrySnapshot:
         return cls(source_org, version, policies, digests, hashlib.sha256(canonical_json(unsigned)).hexdigest())
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "RegistrySnapshot":
+    def from_dict(cls, value: dict[str, Any]) -> RegistrySnapshot:
         required = {"source_org", "version", "policies", "policy_digests", "snapshot_digest"}
         if not isinstance(value, dict) or set(value) != required or not isinstance(value["policies"], dict) or not isinstance(value["policy_digests"], dict):
             raise FederationError("registry snapshot has an invalid schema")
@@ -163,12 +163,12 @@ class GovernanceSyncEnvelope:
         return {"event": self.event.to_dict(), "snapshot": self.snapshot.to_dict(), "signature": self.signature}
 
     @classmethod
-    def issue(cls, event: SignedSyncEvent, snapshot: RegistrySnapshot, signer: KeyPair) -> "GovernanceSyncEnvelope":
+    def issue(cls, event: SignedSyncEvent, snapshot: RegistrySnapshot, signer: KeyPair) -> GovernanceSyncEnvelope:
         unsigned = cls(event, snapshot, "")
         return cls(event, snapshot, signer.sign(unsigned.unsigned_payload()))
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "GovernanceSyncEnvelope":
+    def from_dict(cls, value: dict[str, Any]) -> GovernanceSyncEnvelope:
         if not isinstance(value, dict) or set(value) != {"event", "snapshot", "signature"}:
             raise FederationError("sync envelope has an invalid schema")
         if not isinstance(value["signature"], str) or not value["signature"]:
@@ -258,4 +258,3 @@ class GovernanceReconciler:
         if self.registry.path is not None:
             self.registry.save()
         return ReconciliationResult("adopted", tuple(sorted(imports)), metadata={"source_org": envelope.event.source_org, "snapshot_digest": envelope.snapshot.snapshot_digest})
-

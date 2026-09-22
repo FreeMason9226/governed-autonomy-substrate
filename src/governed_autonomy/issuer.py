@@ -7,8 +7,8 @@ from typing import Any
 from .canonical import canonical_json
 from .crypto import KeyPair
 from .errors import AuthorizationError
-from .models import GovernanceAuthorizationArtifact, SignedApproval
 from .mesh import GovernanceInput, GovernancePreflightDecision
+from .models import GovernanceAuthorizationArtifact, SignedApproval
 from .policy import DeterministicArbiter, Policy
 from .replay import ReplayLog
 
