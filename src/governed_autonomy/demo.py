@@ -38,9 +38,7 @@ def main() -> None:
         replay_frame_ref=frame.frame_id,
         issuer=issuer,
     )
-    boundary = ExecutionBoundary(
-        replay_log=log, issuer_keys={issuer.key_id: issuer.public_key}
-    )
+    boundary = ExecutionBoundary(replay_log=log, issuer_keys={issuer.key_id: issuer.public_key})
     print(boundary.execute(artifact, lambda action: f"executed {action['action']}"))
 
 

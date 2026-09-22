@@ -1,8 +1,8 @@
 import hashlib
 import json
 from collections.abc import Mapping
-from pathlib import Path
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from .canonical import canonical_json
@@ -387,9 +387,7 @@ class SignedPolicyManifest:
         if self.version <= 0:
             return False
         key = trust_store.resolve(self.issuer_key_id)
-        return key is not None and verify_signature(
-            key, self.unsigned_payload(), self.signature
-        )
+        return key is not None and verify_signature(key, self.unsigned_payload(), self.signature)
 
     def to_dict(self) -> dict[str, Any]:
         return {

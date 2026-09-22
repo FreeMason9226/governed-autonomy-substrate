@@ -3,13 +3,15 @@
 Execution remains behind the governance barrier; this module only persists
 delivery state and provides bounded retry/dead-letter semantics.
 """
+
 from __future__ import annotations
 
 import sqlite3
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 
 @dataclass(frozen=True)

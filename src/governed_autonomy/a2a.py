@@ -12,7 +12,6 @@ between autonomous AI agents. When Agent A delegates an action to Agent B:
 
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -166,7 +165,9 @@ class A2AGuard:
         # 2. Verify delegator key in trust store
         delegator_key = self.trust_store.resolve(delegation.delegator_id)
         if delegator_key is None:
-            raise AuthorizationError(f"unknown or revoked delegator key: {delegation.delegator_id!r}")
+            raise AuthorizationError(
+                f"unknown or revoked delegator key: {delegation.delegator_id!r}"
+            )
 
         # 3. Verify delegator signature on delegation envelope
         if not delegation.verify(delegator_key):

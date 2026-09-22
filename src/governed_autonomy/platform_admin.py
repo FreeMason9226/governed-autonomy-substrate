@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
-from typing import Any
+from dataclasses import dataclass, replace
 
 from .canonical import canonical_json
 from .crypto import KeyPair, verify_signature

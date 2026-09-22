@@ -60,14 +60,10 @@ class ReplayLog:
                 )
             except (KeyError, TypeError, json.JSONDecodeError) as exc:
                 raise ValueError(f"invalid replay frame at line {line_number}") from exc
-            expected = ReplayFrame.create(
-                frame.frame_id, frame.previous_hash, frame.event
-            )
+            expected = ReplayFrame.create(frame.frame_id, frame.previous_hash, frame.event)
             if frame.frame_hash != expected.frame_hash:
                 raise ValueError(f"invalid frame hash at line {line_number}")
-            if frame.previous_hash != (
-                log._frames[-1].frame_hash if log._frames else ""
-            ):
+            if frame.previous_hash != (log._frames[-1].frame_hash if log._frames else ""):
                 raise ValueError(f"broken replay chain at line {line_number}")
             log._frames.append(frame)
             if frame.event.get("type") == "execution":

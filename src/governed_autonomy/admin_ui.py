@@ -4,7 +4,9 @@ The page deliberately contains no inline script or secrets.  It is a set of
 links to authenticated, read-only JSON resources, which keeps the CSP strict
 and leaves session/SSO concerns to the deployment edge.
 """
+
 from __future__ import annotations
+
 
 def render_admin_ui() -> bytes:
     body = """<!doctype html><html><head><meta charset="utf-8"><title>Governance Admin</title>

@@ -1,17 +1,17 @@
-import time
 import hashlib
+import time
 from collections.abc import Callable
 from typing import Any
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-from .crypto import verify_signature
 from .canonical import canonical_json
+from .crypto import verify_signature
 from .errors import AuthorizationError
 from .models import GovernanceAuthorizationArtifact
+from .policy import DeterministicArbiter, PolicyRegistry
 from .replay import ReplayLog
 from .trust import TrustStore
-from .policy import DeterministicArbiter, PolicyRegistry
 
 
 class ExecutionBoundary:

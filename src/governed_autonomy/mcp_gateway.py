@@ -59,7 +59,6 @@ from .policy import DeterministicArbiter, Policy, PolicyRegistry
 from .replay import ReplayLog
 from .trust import TrustStore
 
-
 # ---------------------------------------------------------------------------
 # Public data types
 # ---------------------------------------------------------------------------
@@ -279,6 +278,7 @@ class GASMCPGateway:
             def read_file(request: dict) -> str:
                 return open(request["path"]).read()
         """
+
         def decorator(
             fn: Callable[[dict[str, Any]], Any],
         ) -> Callable[[dict[str, Any]], Any]:

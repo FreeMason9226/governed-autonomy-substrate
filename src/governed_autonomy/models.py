@@ -87,7 +87,9 @@ class SignedApproval:
         actor_id: str | None = None,
         context: dict[str, Any] | None = None,
     ) -> "SignedApproval":
-        request_without_approvals = {key: value for key, value in request.items() if key != "approvals"}
+        request_without_approvals = {
+            key: value for key, value in request.items() if key != "approvals"
+        }
         return cls.issue(
             action=str(request.get("action")),
             request_digest=hashlib.sha256(canonical_json(request_without_approvals)).hexdigest(),

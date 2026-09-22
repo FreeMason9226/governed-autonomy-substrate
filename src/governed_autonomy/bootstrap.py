@@ -1,5 +1,3 @@
-from typing import Any
-
 from .crypto import KeyPair
 from .engine import ExecutionBoundary
 from .issuer import AuthorizationIssuer

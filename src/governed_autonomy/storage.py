@@ -1,4 +1,5 @@
 """Small repository boundaries for distributed nonce coordination."""
+
 from __future__ import annotations
 
 import sqlite3
@@ -73,6 +74,7 @@ class PostgresReplayLog:
 
 class PostgresNonceRepository:
     """Adapter boundary for psycopg/asyncpg-like connections; dependency stays optional."""
+
     def __init__(self, connection) -> None:
         self.connection = connection
 
