@@ -79,9 +79,63 @@ class AuthorizationIssuer:
                 effective_request["approvals"] = [*list(existing), *serialized]
             else:
                 raise ValueError("request approvals must be a list when present")
+
+        action = str(effective_request.get("action")) if effective_request.get("action") is not None else None
+        mesh_values = tuple(mesh_inputs or ())
+        required_mesh_count = getattr(policy, "required_mesh_inputs", {}).get(action, 0)
+        required_mesh_sources = getattr(policy, "required_mesh_sources", {}).get(action, ())
+        environment = (
+            effective_request.get("context", {}).get("environment")
+            if isinstance(effective_request.get("context"), dict)
+            else None
+        )
+        active_mesh_requirement = (
+            action in getattr(policy, "mesh_required_actions", ())
+            or environment in getattr(policy, "mesh_required_environments", ())
+        )
+        if active_mesh_requirement or required_mesh_count or required_mesh_sources:
+            provided = {item.source_id for item in mesh_values}
+            if active_mesh_requirement and not mesh_values:
+                denied = self.arbiter.decide(effective_request, policy)
+                denied["allow"] = False
+                denied["reason_codes"] = [
+                    *denied.get("reason_codes", []),
+                    "mesh_inputs_required",
+                ]
+                denied["reasons"] = [
+                    *denied.get("reasons", []),
+                    f"mesh inputs required for action {action!r}",
+                ]
+                raise PolicyDeniedError(denied)
+            if len(mesh_values) < required_mesh_count:
+                denied = self.arbiter.decide(effective_request, policy)
+                denied["allow"] = False
+                denied["reason_codes"] = [
+                    *denied.get("reason_codes", []),
+                    "mesh_inputs_required",
+                ]
+                denied["reasons"] = [
+                    *denied.get("reasons", []),
+                    f"mesh inputs required for action {action!r}",
+                ]
+                raise PolicyDeniedError(denied)
+            missing_sources = tuple(source for source in required_mesh_sources if source not in provided)
+            if missing_sources:
+                denied = self.arbiter.decide(effective_request, policy)
+                denied["allow"] = False
+                denied["reason_codes"] = [
+                    *denied.get("reason_codes", []),
+                    "mesh_sources_missing",
+                ]
+                denied["reasons"] = [
+                    *denied.get("reasons", []),
+                    f"mesh source requirements unmet: {', '.join(missing_sources)}",
+                ]
+                raise PolicyDeniedError(denied)
+
         decision = self.arbiter.decide(effective_request, policy)
         mesh_decision: GovernancePreflightDecision | None = None
-        if mesh_inputs is not None:
+        if mesh_values:
             request_digest = hashlib.sha256(canonical_json(effective_request)).hexdigest()
             mesh = self.mesh
             if mesh is None:
@@ -90,7 +144,7 @@ class AuthorizationIssuer:
                     replay_log=self.replay_log,
                     source_registry=self.mesh_source_registry,
                 )
-            mesh_decision = mesh.preflight(mesh_inputs, request_digest=request_digest)
+            mesh_decision = mesh.preflight(mesh_values, request_digest=request_digest)
             if not mesh_decision.allow:
                 denied = dict(decision)
                 denied["allow"] = False

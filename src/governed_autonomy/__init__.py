@@ -3,7 +3,7 @@
 from .a2a import A2AGuard, A2ATaskDelegation
 from .bootstrap import build_demo_service, build_platform_demo, build_runtime_service
 from .compliance import ComplianceAuditor, ComplianceEvaluation
-from .crypto import KeyPair
+from .crypto import KeyPair, verify_signature
 from .deployment import (
     BoundedRateLimiter,
     TLSConfig,
@@ -68,7 +68,7 @@ from .policy import (
 )
 from .replay import ReplayLog, SQLiteReplayLog
 from .service import GovernedService
-from .signing import LocalEd25519Signer, RemoteSigner, Signer
+from .signing import KMSSigner, LocalEd25519Signer, RemoteSigner, Signer
 from .storage import (
     POSTGRES_NONCE_SCHEMA,
     POSTGRES_REPLAY_SCHEMA,
@@ -95,6 +95,7 @@ __all__ = [
     "GovernanceRule",
     "GovernanceRuleTranslator",
     "KeyPair",
+    "verify_signature",
     "Policy",
     "PolicyRegistry",
     "SignedPolicyManifest",
@@ -132,6 +133,7 @@ __all__ = [
     "JWTValidator",
     "StaticJWKSProvider",
     "UrlJWKSProvider",
+    "KMSSigner",
     "LocalEd25519Signer",
     "RemoteSigner",
     "Signer",

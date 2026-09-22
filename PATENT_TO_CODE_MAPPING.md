@@ -148,6 +148,8 @@ Implementation notes:
 - It blocks unknown policies and unknown action names before a nonce is consumed.
 - It can bind a shared source registry into the authorization issuer so runtime mesh-preflight trust is configured once and reused across the service boundary.
 - `GovernancePlatform.authorize(..., mesh_inputs=...)` exposes the same trust path at the platform layer, combining runtime policy validation and mesh evidence verification before issuance.
+- `Policy.required_mesh_inputs`, `Policy.required_mesh_sources`, `Policy.mesh_required_actions`, and `Policy.mesh_required_environments` allow a policy to require signed mesh provenance for selected actions or runtime environments without changing the legacy non-mesh execution path for policies that omit the requirement.
+- `PlatformDeploymentPolicy.mesh_required_actions`, `mesh_required_environments`, and `mesh_required_sources` enforce those constraints at the runtime boundary before a GAA is issued.
 - `platform_report()` now includes mesh-source registry state and `health_report(..., mesh_source_registry=...)` records source counts and revoked-source state in the runtime health snapshot.
 - It supports `execute_dict()` and `execute_json()` for serialized GAA execution.
 
