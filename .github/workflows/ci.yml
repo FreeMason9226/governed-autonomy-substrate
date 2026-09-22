@@ -1,1 +1,199 @@
-# (paste the CI YAML content from above here)
+name: CI-CD
+
+on:
+  push:
+    branches: [ main, develop ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  PYTHONPATH: .
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      has_node: ${{ steps.check_node.outputs.exists }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check for package.json
+        id: check_node
+        run: |
+          if [ -f package.json ]; then echo "exists=true" > out; else echo "exists=false" > out; fi
+          cat out
+        continue-on-error: false
+        shell: bash
+      - name: Set outputs
+        id: setout
+        run: echo "::set-output name=exists::$(cat out | sed 's/.*=//')"
+
+  system-deps:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install apt packages required for building wheels
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libssl-dev libffi-dev libpq-dev cargo
+      - name: Cache pip wheelhouse
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt','**/pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+  test:
+    needs: [prepare, system-deps]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: [3.11, 3.12, 3.13]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ matrix.python }}-${{ hashFiles('**/pyproject.toml','**/requirements.txt') }}
+      - name: Install dev deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ."[dev]"
+      - name: Ruff lint
+        run: ruff check .
+      - name: Mypy
+        run: mypy .
+      - name: Run tests
+        run: pytest -q
+      - name: Upload coverage (only for 3.12)
+        if: matrix.python == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.12
+      - name: Install build tools
+        run: pip install build
+      - name: Build wheel
+        run: python -m build --wheel --outdir dist
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-wheel
+          path: dist/*.whl
+      - name: Build Docker image
+        run: |
+          IMAGE_NAME=ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:${{ github.sha }}
+          docker build -t $IMAGE_NAME .
+          echo "IMAGE=$IMAGE_NAME" >> $GITHUB_ENV
+      - name: Save docker image as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image-name
+          path: /tmp/imageref || true
+
+  integration:
+    needs: build
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test" --health-interval 10s --health-timeout 5s --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Docker Compose
+        run: docker-compose -f docker-compose.test.yml up -d --build
+      - name: Wait for services
+        run: |
+          for i in {1..30}; do
+            curl --fail http://localhost:8000/health && break || sleep 2
+          done
+      - name: Run integration smoke tests
+        run: pytest tests/integration -q
+      - name: Tear down
+        run: docker-compose -f docker-compose.test.yml down --volumes --remove-orphans
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref_type == 'tag' || github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to GHCR
+        if: secrets.GHCR_TOKEN != ''
+        run: echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+      - name: Log in to Docker Hub
+        if: secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != ''
+        run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u ${{ secrets.DOCKERHUB_USERNAME }} --password-stdin
+      - name: Tag and push image
+        run: |
+          IMAGE=ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:${{ github.sha }}
+          docker tag $IMAGE $IMAGE
+          docker push $IMAGE
+          # push also as latest on main
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            docker tag $IMAGE ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:latest
+            docker push ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:latest
+          fi
+
+  security-scan:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install scanners
+        run: |
+          pip install pip-audit bandit
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+          curl -sSfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+      - name: Python dependency audit
+        run: pip-audit --format=plain || true
+      - name: Bandit security scan
+        run: bandit -r .
+      - name: Container scan (trivy)
+        run: |
+          IMAGE=ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:${{ github.sha }}
+          trivy image --exit-code 1 --severity HIGH,CRITICAL $IMAGE || true
+      - name: Generate SBOM (syft)
+        run: syft -o cyclonedx-json:sbom.json .
+
+  node-lint:
+    needs: prepare
+    runs-on: ubuntu-latest
+    if: needs.prepare.outputs.has_node == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+      - name: Install and run npm lint
+        run: |
+          npm ci
+          npm run lint
