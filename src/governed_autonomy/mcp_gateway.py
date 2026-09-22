@@ -445,14 +445,15 @@ class GASMCPServer:
         try:
             # pyrefly: ignore [missing-import]
             import mcp.server as _mcp_server
+
             # pyrefly: ignore [missing-import]
             import mcp.server.stdio as _mcp_stdio
+
             # pyrefly: ignore [missing-import]
             import mcp.types as _mcp_types
         except ImportError as exc:
             raise ImportError(
-                "GASMCPServer requires the 'mcp' package. "
-                "Install it with: pip install mcp"
+                "GASMCPServer requires the 'mcp' package. Install it with: pip install mcp"
             ) from exc
 
         self._gateway = gateway
@@ -473,7 +474,8 @@ class GASMCPServer:
                 mcp_types.Tool(
                     name=defn.name,
                     description=defn.description,
-                    inputSchema=defn.input_schema or {
+                    inputSchema=defn.input_schema
+                    or {
                         "type": "object",
                         "properties": {},
                     },
@@ -482,9 +484,7 @@ class GASMCPServer:
             ]
 
         @self._server.call_tool()
-        async def call_tool(
-            name: str, arguments: dict[str, Any] | None
-        ) -> list[Any]:
+        async def call_tool(name: str, arguments: dict[str, Any] | None) -> list[Any]:
             args = arguments or {}
             try:
                 result = gateway.call(name, args)
