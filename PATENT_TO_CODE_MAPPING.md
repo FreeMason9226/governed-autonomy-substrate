@@ -145,6 +145,7 @@ Code:
 Implementation notes:
 - `GovernedService` binds policy IDs and named executable handlers.
 - It blocks unknown policies and unknown action names before a nonce is consumed.
+- It can bind a shared source registry into the authorization issuer so runtime mesh-preflight trust is configured once and reused across the service boundary.
 - It supports `execute_dict()` and `execute_json()` for serialized GAA execution.
 
 ### 9. Federated governance synchronization and reconciliation

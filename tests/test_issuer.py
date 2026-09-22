@@ -2,16 +2,18 @@ import pytest
 
 from governed_autonomy import (
     AuthorizationIssuer,
+    AuthorizationError,
     DeterministicArbiter,
     ExecutionBoundary,
+    GovernanceInput,
+    GovernanceMesh,
+    GovernanceSourceRegistry,
+    GovernedService,
     KeyPair,
     Policy,
     PolicyDeniedError,
     ReplayLog,
     SignedApproval,
-    AuthorizationError,
-    GovernanceInput,
-    GovernanceMesh,
 )
 
 
@@ -186,8 +188,6 @@ def test_execution_reconstructs_mesh_evidence_before_running_action():
 
 
 def test_issuer_accepts_mesh_source_registry_for_preflight_verified_authorization():
-    from governed_autonomy import GovernanceSourceRegistry
-
     issuer = KeyPair.generate("mesh-registry-issuer")
     source = KeyPair.generate("policy-source")
     registry = GovernanceSourceRegistry()
@@ -205,6 +205,33 @@ def test_issuer_accepts_mesh_source_registry_for_preflight_verified_authorizatio
     )
 
     assert artifact.decision["mesh_preflight_digest"]
+
+
+def test_governed_service_binds_mesh_source_registry_for_runtime_authorization():
+    issuer = KeyPair.generate("mesh-service-issuer")
+    source = KeyPair.generate("runtime-source")
+    registry = GovernanceSourceRegistry()
+    registry.register("runtime-source", source.public_key)
+    replay = ReplayLog()
+    service = GovernedService(
+        issuer=AuthorizationIssuer(issuer=issuer, replay_log=replay),
+        boundary=ExecutionBoundary(
+            replay_log=replay,
+            issuer_keys={issuer.key_id: issuer.public_key},
+            clock=lambda: 100,
+        ),
+        policies={"files-v1": policy()},
+        actions={"write_file": lambda request: request["content"]},
+        mesh_source_registry=registry,
+    )
+
+    artifact = service.authorize(
+        {"action": "write_file", "path": "out.txt", "content": "ok"},
+        "files-v1",
+        mesh_inputs=[GovernanceInput("runtime-source", {"allow": True}, priority=5).attest(source)],
+    )
+    assert artifact.decision["mesh_preflight_digest"]
+    assert service.issuer.mesh_source_registry is registry
 
 
 @pytest.mark.parametrize(
