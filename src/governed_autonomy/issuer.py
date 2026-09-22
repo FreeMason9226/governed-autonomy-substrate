@@ -39,6 +39,7 @@ class AuthorizationIssuer:
         clock: Callable[[], int] | None = None,
         nonce_factory: Callable[[], str] | None = None,
         mesh: Any | None = None,
+        mesh_source_registry: Any | None = None,
     ) -> None:
         self.issuer = issuer
         self.replay_log = replay_log
@@ -46,6 +47,7 @@ class AuthorizationIssuer:
         self.clock = clock or (lambda: int(time.time()))
         self.nonce_factory = nonce_factory or (lambda: secrets.token_urlsafe(24))
         self.mesh = mesh
+        self.mesh_source_registry = mesh_source_registry
 
     def authorize(
         self,
@@ -84,7 +86,10 @@ class AuthorizationIssuer:
             mesh = self.mesh
             if mesh is None:
                 from .mesh import GovernanceMesh
-                mesh = GovernanceMesh(replay_log=self.replay_log)
+                mesh = GovernanceMesh(
+                    replay_log=self.replay_log,
+                    source_registry=self.mesh_source_registry,
+                )
             mesh_decision = mesh.preflight(mesh_inputs, request_digest=request_digest)
             if not mesh_decision.allow:
                 denied = dict(decision)

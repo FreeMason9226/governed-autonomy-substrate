@@ -27,12 +27,14 @@ Code:
 - `src/governed_autonomy/issuer.py` — `AuthorizationIssuer`, `PolicyDeniedError`
 - `src/governed_autonomy/models.py` — `GovernanceAuthorizationArtifact`
 - `src/governed_autonomy/trust.py` — `TrustStore`
+- `src/governed_autonomy/mesh.py` — `GovernanceSourceRegistry`
 
 Implementation notes:
 - `ExecutionBoundary._validate()` verifies signature, expiry, nonce, replay reference, policy decision, issuer trust, and request policy compatibility.
 - `ExecutionBoundary.execute()` consumes the nonce before invoking the action.
 - The execution boundary rejects actions without a valid signed GAA.
 - TrustStore enforces issuer registration/revocation and supports rotation.
+- `GovernanceSourceRegistry` provides canonical JSON snapshots for mesh-source trust configuration, allowing a local trusted source map to be persisted and reloaded while keeping public keys in a reproducible, auditable form.
 
 ### 2. Deterministic arbitration and policy evaluation
 

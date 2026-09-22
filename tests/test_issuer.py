@@ -185,6 +185,28 @@ def test_execution_reconstructs_mesh_evidence_before_running_action():
     assert result == "ok"
 
 
+def test_issuer_accepts_mesh_source_registry_for_preflight_verified_authorization():
+    from governed_autonomy import GovernanceSourceRegistry
+
+    issuer = KeyPair.generate("mesh-registry-issuer")
+    source = KeyPair.generate("policy-source")
+    registry = GovernanceSourceRegistry()
+    registry.register("policy-source", source.public_key)
+
+    artifact = AuthorizationIssuer(
+        issuer=issuer,
+        replay_log=ReplayLog(),
+        nonce_factory=lambda: "mesh-registry-nonce",
+        mesh_source_registry=registry,
+    ).authorize(
+        {"action": "write_file", "path": "out.txt", "content": "ok"},
+        policy(),
+        mesh_inputs=[GovernanceInput("policy-source", {"allow": True}, priority=5).attest(source)],
+    )
+
+    assert artifact.decision["mesh_preflight_digest"]
+
+
 @pytest.mark.parametrize(
     "tamper",
     [

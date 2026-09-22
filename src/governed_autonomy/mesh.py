@@ -2,11 +2,15 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
-from .canonical import canonical_json
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+from .canonical import b64decode, b64encode, canonical_json
 from .crypto import KeyPair, verify_signature
 from .replay import ReplayLog
 from .trust import TrustStore
@@ -140,11 +144,30 @@ class GovernancePreflightDecision:
 class GovernanceSourceRegistry:
     """Trusted governance-source registry with explicit registration and rotation."""
 
-    def __init__(self, *, trust_store: TrustStore | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        trust_store: TrustStore | None = None,
+        path: str | Path | None = None,
+    ) -> None:
         self.trust_store = trust_store
+        self.path = Path(path) if path else None
         self._keys: dict[str, Any] = {}
         self._metadata: dict[str, Mapping[str, Any]] = {}
         self._revoked: set[str] = set()
+        if self.path and self.path.exists():
+            self._load()
+
+    @staticmethod
+    def _coerce_public_key(public_key: Any) -> Ed25519PublicKey:
+        if isinstance(public_key, Ed25519PublicKey):
+            return public_key
+        if isinstance(public_key, str):
+            try:
+                return Ed25519PublicKey.from_public_bytes(b64decode(public_key))
+            except Exception as exc:  # pragma: no cover - defensive conversion
+                raise GovernanceMeshError("public_key string is not valid base64 Ed25519 bytes") from exc
+        raise GovernanceMeshError("public_key must be an Ed25519 public key or a base64-encoded string")
 
     def register(
         self,
@@ -157,14 +180,16 @@ class GovernanceSourceRegistry:
             raise GovernanceMeshError("source_id must be a non-empty string")
         if public_key is None:
             raise GovernanceMeshError("public_key must not be null")
-        self._keys[source_id] = public_key
+        self._keys[source_id] = self._coerce_public_key(public_key)
         self._metadata[source_id] = dict(metadata or {})
         self._revoked.discard(source_id)
+        self._save()
 
     def revoke(self, source_id: str) -> None:
         if source_id not in self._keys:
             raise GovernanceMeshError(f"unknown governance source: {source_id}")
         self._revoked.add(source_id)
+        self._save()
 
     def resolve(self, source_id: str) -> Any | None:
         if source_id in self._revoked:
@@ -175,12 +200,74 @@ class GovernanceSourceRegistry:
                 return key
         return self._keys.get(source_id)
 
+    def _save(self) -> None:
+        if not self.path:
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        payload = self.to_dict()
+        temporary = self.path.with_suffix(self.path.suffix + ".tmp")
+        temporary.write_text(
+            json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False),
+            encoding="utf-8",
+        )
+        temporary.replace(self.path)
+
+    def _load(self) -> None:
+        try:
+            payload = json.loads(self.path.read_text(encoding="utf-8"))
+            reloaded = self.from_dict(payload, trust_store=self.trust_store)
+        except (OSError, json.JSONDecodeError, GovernanceMeshError, TypeError, ValueError) as exc:
+            raise GovernanceMeshError("source registry could not be loaded safely") from exc
+        self._keys = reloaded._keys
+        self._metadata = reloaded._metadata
+        self._revoked = reloaded._revoked
+
     def to_dict(self) -> dict[str, Any]:
         return {
-            "sources": {source_id: {"public_key": public_key, "metadata": self._metadata.get(source_id, {})}
-                for source_id, public_key in sorted(self._keys.items())},
+            "sources": {
+                source_id: {
+                    "public_key": b64encode(public_key.public_bytes_raw()),
+                    "metadata": dict(self._metadata.get(source_id, {})),
+                }
+                for source_id, public_key in sorted(self._keys.items())
+            },
             "revoked": sorted(self._revoked),
         }
+
+    @classmethod
+    def from_dict(
+        cls,
+        value: Mapping[str, Any],
+        *,
+        trust_store: TrustStore | None = None,
+    ) -> GovernanceSourceRegistry:
+        if not isinstance(value, Mapping):
+            raise GovernanceMeshError("source registry must be an object")
+        if not {"sources", "revoked"}.issubset(value):
+            raise GovernanceMeshError("source registry has an invalid schema")
+        registry = cls(trust_store=trust_store)
+        if not isinstance(value["sources"], Mapping):
+            raise GovernanceMeshError("source registry sources must be an object")
+        if not isinstance(value["revoked"], list):
+            raise GovernanceMeshError("source registry revoked must be a list")
+        for source_id, metadata in value["sources"].items():
+            if not isinstance(source_id, str) or not source_id:
+                raise GovernanceMeshError("source registry contains an invalid source ID")
+            if not isinstance(metadata, Mapping):
+                raise GovernanceMeshError("source registry source metadata must be an object")
+            public_key = metadata.get("public_key")
+            if public_key is None:
+                raise GovernanceMeshError(f"source {source_id} is missing a public key")
+            try:
+                key = registry._coerce_public_key(public_key)
+            except GovernanceMeshError as exc:
+                raise GovernanceMeshError(f"source {source_id} has an invalid public key") from exc
+            registry.register(source_id, key, metadata=metadata.get("metadata", {}))
+        for source_id in value["revoked"]:
+            if not isinstance(source_id, str) or not source_id:
+                raise GovernanceMeshError("source registry contains an invalid revoked source ID")
+            registry.revoke(source_id)
+        return registry
 
 
 class GovernanceMesh:

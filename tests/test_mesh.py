@@ -152,3 +152,22 @@ def test_mesh_source_registry_supports_registration_and_rotation():
             [GovernanceInput("registry-source", decision(True)).attest(source)],
             request_digest="req-digest",
         )
+
+
+def test_mesh_source_registry_round_trips_through_canonical_snapshot(tmp_path):
+    source = KeyPair.generate("registry-roundtrip")
+    registry = GovernanceSourceRegistry(path=tmp_path / "source-registry.json")
+    registry.register("registry-roundtrip", source.public_key, metadata={"tenant": "ops"})
+
+    payload = registry.to_dict()
+    assert isinstance(payload["sources"]["registry-roundtrip"]["public_key"], str)
+
+    reloaded = GovernanceSourceRegistry.from_dict(payload)
+    result = GovernanceMesh(source_registry=reloaded).preflight(
+        [GovernanceInput("registry-roundtrip", decision(True)).attest(source)],
+        request_digest="req-digest",
+    )
+    assert result.allow is True
+
+    reopened = GovernanceSourceRegistry(path=tmp_path / "source-registry.json")
+    assert reopened.resolve("registry-roundtrip") is not None
