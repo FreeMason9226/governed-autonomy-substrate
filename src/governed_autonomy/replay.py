@@ -1,3 +1,4 @@
+import copy
 import hashlib
 import json
 import sqlite3
@@ -105,7 +106,7 @@ class ReplayLog:
         if event_type is not None and not event_type:
             raise ValueError("event_type must not be empty")
         return tuple(
-            frame.event
+            copy.deepcopy(frame.event)
             for frame in self._frames
             if event_type is None or frame.event.get("type") == event_type
         )
@@ -113,7 +114,11 @@ class ReplayLog:
     def events_for_nonce(self, nonce: str) -> tuple[dict[str, Any], ...]:
         if not nonce:
             raise ValueError("nonce must not be empty")
-        return tuple(frame.event for frame in self._frames if frame.event.get("nonce") == nonce)
+        return tuple(
+            copy.deepcopy(frame.event)
+            for frame in self._frames
+            if frame.event.get("nonce") == nonce
+        )
 
     def reconstruct_decisions(self) -> dict[str, dict[str, Any]]:
         """Deterministically reconstruct the authorization state for each nonce."""
@@ -173,6 +178,34 @@ class ReplayLog:
                 return False
             previous_hash = frame.frame_hash
         return True
+
+    def verify_integrity(self) -> dict[str, Any]:
+        """Return deterministic integrity evidence for replay/divergence audits."""
+        previous_hash = ""
+        seen_frame_ids: set[str] = set()
+        duplicate_frame_ids: list[str] = []
+        first_error: dict[str, Any] | None = None
+        for index, frame in enumerate(self._frames):
+            if frame.frame_id in seen_frame_ids:
+                duplicate_frame_ids.append(frame.frame_id)
+            seen_frame_ids.add(frame.frame_id)
+            expected = ReplayFrame.create(frame.frame_id, previous_hash, frame.event)
+            if first_error is None and frame.previous_hash != previous_hash:
+                first_error = {"index": index, "frame_id": frame.frame_id, "reason": "previous_hash_mismatch"}
+            if first_error is None and frame.frame_hash != expected.frame_hash:
+                first_error = {"index": index, "frame_id": frame.frame_id, "reason": "frame_hash_mismatch"}
+            previous_hash = frame.frame_hash
+        content = [frame.to_dict() for frame in self._frames]
+        replay_digest = hashlib.sha256(canonical_json(content)).hexdigest()
+        ok = first_error is None and not duplicate_frame_ids
+        return {
+            "ok": ok,
+            "frame_count": len(self._frames),
+            "head_hash": previous_hash,
+            "replay_digest": replay_digest,
+            "duplicate_frame_ids": sorted(duplicate_frame_ids),
+            "first_error": first_error,
+        }
 
 
 class SQLiteReplayLog(ReplayLog):

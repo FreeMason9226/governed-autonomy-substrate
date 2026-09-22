@@ -116,3 +116,45 @@ def test_issuer_accepts_signed_approvals_for_quorum_and_rejects_tampered_evidenc
             quorum_policy,
             approvals=[approvals[0], {**approvals[1].to_dict(), "signature": "not-valid"}],
         )
+
+
+def test_issuer_binds_allow_mesh_preflight_into_signed_decision_and_replay():
+    from governed_autonomy import GovernanceInput, GovernanceMesh
+
+    issuer = KeyPair.generate("mesh-issuer")
+    log = ReplayLog()
+    artifact = AuthorizationIssuer(
+        issuer=issuer,
+        replay_log=log,
+        nonce_factory=lambda: "mesh-nonce",
+        mesh=GovernanceMesh(replay_log=log),
+    ).authorize(
+        {"action": "write_file", "path": "out.txt", "content": "ok"},
+        policy(),
+        mesh_inputs=[GovernanceInput("policy-source", {"allow": True}, priority=5)],
+    )
+
+    assert artifact.decision["mesh_preflight_digest"]
+    assert log.events("governance_preflight")[0]["decision_digest"] == artifact.decision["mesh_preflight_digest"]
+    assert log.get("authorization:mesh-nonce").event["artifact_payload"] == artifact.unsigned_payload().decode()
+
+
+def test_issuer_rejects_denied_mesh_preflight_before_issuing_gaa():
+    from governed_autonomy import GovernanceInput, GovernanceMesh
+
+    log = ReplayLog()
+    with pytest.raises(PolicyDeniedError) as raised:
+        AuthorizationIssuer(
+            issuer=KeyPair.generate("mesh-deny"),
+            replay_log=log,
+            nonce_factory=lambda: "mesh-denied-nonce",
+            mesh=GovernanceMesh(replay_log=log),
+        ).authorize(
+            {"action": "write_file", "path": "out.txt", "content": "ok"},
+            policy(),
+            mesh_inputs=[GovernanceInput("risk-source", {"allow": False, "reasons": ["risk"]})],
+        )
+
+    assert "governance_mesh_denied" in raised.value.decision["reason_codes"]
+    assert raised.value.decision["mesh_preflight_digest"]
+    assert log.get("authorization:mesh-denied-nonce").event["issued"] is False

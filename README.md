@@ -88,3 +88,13 @@ This slice provides deterministic single-process reconciliation and an auditable
 `GovernanceMesh` is the bounded governance-harmonization layer between independent governance sources and authorization. Each typed `GovernanceInput` carries a unique source ID, canonical decision, weight, priority, and optional metadata. The mesh groups equivalent decisions by SHA-256 of canonical JSON, ranks groups deterministically by total weight, priority, and digest, and returns a stable `GovernancePreflightDecision` with selected sources, input digests, reasons, and conflict metadata.
 
 The mesh fails closed when highest-priority sources disagree on allow/deny. It can append a `governance_preflight` replay frame containing the request digest, input provenance, decision digest, and optional authorization-frame reference. This provides deterministic preflight evidence without replacing the signed GAA execution boundary. It is not predictive machine learning or an attestation system: production deployments still need authenticated source adapters, durable replay storage, source health/quality policy, and explicit handling for stale or unavailable external governance feeds.
+
+## Replay divergence verification
+
+`ReplayLog.verify_integrity()` provides deterministic replay evidence for audit and incident response. It rechecks every hash-chain link, detects duplicate frame IDs, and returns a stable replay digest, head hash, frame count, and first integrity error without mutating the log. `events()` and `events_for_nonce()` now return detached event copies, preventing callers from changing retained audit evidence accidentally.
+
+This verifies local evidence only. A production deployment still needs external tamper-evident retention, signed replay attestations, cross-node comparison, and an operational response when divergence is detected.
+
+### Mesh preflight at authorization
+
+`AuthorizationIssuer.authorize(..., mesh_inputs=...)` optionally requires the deterministic governance mesh to preflight the exact canonical request before a GAA is issued. The resulting mesh digest is included in the signed decision and authorization replay frame. A denied or conflicted mesh result is audited as a denied authorization and never produces a GAA. Existing callers that omit `mesh_inputs` retain the original arbitration path; production deployments should supply authenticated governance-source adapters and treat mesh evidence as an additional gate, not a replacement for policy enforcement.
