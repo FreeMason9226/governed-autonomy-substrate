@@ -128,6 +128,17 @@ class AuthorizationIssuer:
                 "artifact_payload": unsigned.unsigned_payload().decode("utf-8"),
                 "decision": decision,
                 "issued": True,
+                **(
+                    {
+                        "mesh_preflight_digest": mesh_decision.digest,
+                        "mesh_request_digest": hashlib.sha256(
+                            canonical_json(effective_request)
+                        ).hexdigest(),
+                        "mesh_inputs": [item.to_dict() for item in mesh_inputs or ()],
+                    }
+                    if mesh_decision is not None
+                    else {}
+                ),
             },
         )
         return GovernanceAuthorizationArtifact.issue(
@@ -158,4 +169,3 @@ class AuthorizationIssuer:
             raise AuthorizationError("compensation requires an audited failed execution")
         compensated_request = {**request, "compensation_for": failed_nonce}
         return self.authorize(compensated_request, policy, ttl_seconds=ttl_seconds)
-
