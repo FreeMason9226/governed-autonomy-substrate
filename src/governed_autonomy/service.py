@@ -80,5 +80,6 @@ class GovernedService:
                 replay_log=self.boundary.replay_log,
                 trust_store=self.boundary.trust_store,
                 policy_registry=self.policies,
+                mesh_source_registry=self.mesh_source_registry,
             ),
         }

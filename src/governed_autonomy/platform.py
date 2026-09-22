@@ -271,4 +271,9 @@ class GovernancePlatform:
             "metrics": self.observability.snapshot()["metrics"],
             "deployment": self.deployment_policy.to_dict(),
         }
+        if self.mesh_source_registry is not None:
+            report["mesh_source_registry"] = {
+                "sources": len(self.mesh_source_registry._keys),
+                "revoked": len(self.mesh_source_registry._revoked),
+            }
         return report

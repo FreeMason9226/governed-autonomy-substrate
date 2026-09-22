@@ -148,6 +148,7 @@ Implementation notes:
 - It blocks unknown policies and unknown action names before a nonce is consumed.
 - It can bind a shared source registry into the authorization issuer so runtime mesh-preflight trust is configured once and reused across the service boundary.
 - `GovernancePlatform.authorize(..., mesh_inputs=...)` exposes the same trust path at the platform layer, combining runtime policy validation and mesh evidence verification before issuance.
+- `platform_report()` now includes mesh-source registry state and `health_report(..., mesh_source_registry=...)` records source counts and revoked-source state in the runtime health snapshot.
 - It supports `execute_dict()` and `execute_json()` for serialized GAA execution.
 
 ### 9. Federated governance synchronization and reconciliation

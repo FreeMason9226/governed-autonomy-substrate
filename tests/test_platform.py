@@ -107,6 +107,7 @@ def test_platform_accepts_mesh_preflight_inputs_and_registry():
 
     assert artifact.decision["mesh_preflight_digest"]
     assert platform.service.issuer.mesh_source_registry is source_registry
+    assert platform.platform_report()["mesh_source_registry"]["sources"] == 1
 
 
 def test_platform_deployment_policy_rejects_unsafe_runtime_context():
