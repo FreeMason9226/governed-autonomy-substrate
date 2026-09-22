@@ -4,7 +4,14 @@ from http.client import HTTPConnection
 
 import pytest
 
-from governed_autonomy import build_demo_service, create_server, parse_server_args
+from governed_autonomy import (
+    GovernanceInput,
+    GovernanceSourceRegistry,
+    KeyPair,
+    build_demo_service,
+    create_server,
+    parse_server_args,
+)
 
 
 @pytest.fixture
@@ -61,6 +68,41 @@ def test_http_api_authorizes_executes_reports_health_and_audit(server):
     assert status == 200
     assert audit["actions"] == ["write_file"]
     assert audit["audit_summary"]["execution_count"] == 1
+
+
+def test_http_api_accepts_mesh_inputs_for_runtime_preflight():
+    source = KeyPair.generate("http-mesh-source")
+    registry = GovernanceSourceRegistry()
+    registry.register("http-mesh-source", source.public_key)
+    service, _, _ = build_demo_service(mesh_source_registry=registry)
+    instance = create_server(service, bearer_token="test-token")
+    thread = threading.Thread(target=instance.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, artifact = request(
+            instance,
+            "POST",
+            "/authorize",
+            {
+                "policy_id": "demo-files-v1",
+                "request": {
+                    "action": "write_file",
+                    "path": "out.txt",
+                    "content": "mesh-http",
+                },
+                "mesh_inputs": [
+                    GovernanceInput("http-mesh-source", {"allow": True}, priority=5)
+                    .attest(source)
+                    .to_dict()
+                ],
+            },
+        )
+        assert status == 200
+        assert artifact["decision"]["mesh_preflight_digest"]
+    finally:
+        instance.shutdown()
+        instance.server_close()
+        thread.join(timeout=2)
 
 
 def test_http_api_requires_bearer_auth_and_rejects_bad_json(server):
