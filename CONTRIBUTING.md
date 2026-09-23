@@ -19,18 +19,21 @@ All tests must pass before submitting a pull request.
 ## Development Standards
 
 ### Code
+
 - Python ≥ 3.11
 - Type annotations on all public interfaces (`mypy --strict` clean)
 - `ruff` for linting — run `ruff check src/ tests/` before committing
 - No new runtime dependencies without an RFC (see below)
 
 ### Tests
+
 - Every new behavior needs a test in `tests/`
 - Concurrency, replay recovery, and boundary invariants are first-class concerns
 - If your change affects the wire format, add or update a conformance vector in
   `tests/conformance/vectors/`
 
 ### Wire Format Changes
+
 Any change to the GAA wire format, replay frame schema, or policy definition
 schema is a **protocol change** and requires an RFC. See [RFC Process](#rfc-process).
 
