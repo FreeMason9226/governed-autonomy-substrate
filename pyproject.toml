@@ -38,6 +38,7 @@ dev = [
 [project.scripts]
 gas-demo = "governed_autonomy.demo:main"
 gas-server = "governed_autonomy.http_api:main"
+verify-replay = "governed_autonomy.verify_replay:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

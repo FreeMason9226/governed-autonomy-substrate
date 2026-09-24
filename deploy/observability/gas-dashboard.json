@@ -1,0 +1,10 @@
+{
+  "title": "GAS Governance Integrity",
+  "panels": [
+    {"title": "Agency Risk Index", "metric": "governed_autonomy_agency_risk_index"},
+    {"title": "CAM drift alerts", "metric": "governed_autonomy_drift_alerts"},
+    {"title": "ATS score", "metric": "governed_autonomy_ats_score"},
+    {"title": "Replay verification failures", "metric": "governed_autonomy_replay_verification_failures"},
+    {"title": "Unauthorized signing attempts", "metric": "governed_autonomy_unauthorized_signing_attempts"}
+  ]
+}

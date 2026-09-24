@@ -1,0 +1,9 @@
+{
+  "event": {
+    "nonce": "n-1",
+    "type": "authorization"
+  },
+  "frame_id": "frame-1",
+  "frame_uuid": "00000000-0000-0000-0000-000000000001",
+  "previous_hash": ""
+}

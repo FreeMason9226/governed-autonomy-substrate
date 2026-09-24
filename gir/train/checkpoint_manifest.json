@@ -1,0 +1,6 @@
+{
+  "checkpoint_uri": "artifact://gas-gir/distilbert-base-uncased",
+  "checkpoint_sha256": "5ddc5b955d27af16fd4098684b8d9200809452bf2498bfec269d26f9aeb4ef6e",
+  "smoke_checkpoint": "gir/train/checkpoint_smoke.json",
+  "status": "transformer-weights-require-licensed-training-run"
+}

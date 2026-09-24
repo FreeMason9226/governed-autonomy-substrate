@@ -1,0 +1,4 @@
+{"text":"Authorized principals may access the service.","label":"access-control"}
+{"text":"Keep records for audit review.","label":"retention"}
+{"text":"A human may override the action.","label":"human-oversight"}
+{"text":"Produce traceable evidence.","label":"auditability"}

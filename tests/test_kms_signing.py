@@ -47,3 +47,20 @@ def test_kms_rotation_scheduler_is_idempotent_and_append_only():
     )
     assert [entry.operation for entry in audit.entries] == ["kms.rotate"]
     assert signer.key_id == second.key_id
+
+
+def test_newly_signed_payload_verifies_after_rotation():
+    first = KeyPair.generate("first")
+    second = KeyPair.generate("second")
+    current = {"key": first}
+    signer = KMSHSMBackedSigner(
+        first.key_id,
+        lambda payload: current["key"].private_key.sign(payload),
+        first.public_key_bytes(),
+    )
+    signer.rotate(public_key=second.public_key_bytes(), key_id=second.key_id)
+    current["key"] = second
+    signature = signer.sign(b"rotated-payload")
+    from governed_autonomy.crypto import verify_signature
+
+    assert verify_signature(second.public_key, b"rotated-payload", signature)

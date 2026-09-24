@@ -1,0 +1,7 @@
+{
+  "artifact_type": "deterministic-smoke-checkpoint-metadata",
+  "base_model": "distilbert-base-uncased",
+  "seed": 20260923,
+  "dataset_manifest": "gir/train/dataset_manifest.json",
+  "weights": "not-vendored"
+}

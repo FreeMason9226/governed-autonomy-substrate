@@ -28,6 +28,17 @@ commit, CI run, and environment metadata for every cited result.
 5. Operational enforceability is addressed by signed attestations, registry quorum,
    resilience modes, telemetry, and CI gates.
 
+## Claim-level reproduction index
+
+| Claim or section | Reproduction |
+| --- | --- |
+| Claim 1A / GAA bottleneck | `$env:PYTHONPATH='src'; python -m pytest tests/test_governance_bottleneck_e2e.py` |
+| Claim 1A / replay evidence | `$env:PYTHONPATH='src'; python -m pytest tests/test_replay_recovery.py tests/test_verify_replay.py` |
+| Section 5.4A / GIR | `$env:PYTHONPATH='src'; python -m pytest tests/test_gir_inference.py tests/test_gir_provenance.py` |
+| Claim 51A / scoring | `$env:PYTHONPATH='src'; python -m pytest tests/test_anchoring_claim51a.py` |
+| Section 5.7 / anchoring | `python scripts/split_anchor_vector.py; python -m governed_autonomy.verify_replay --record evidence/anchor-sample/record.json --frame evidence/anchor-sample/frame.json --selection evidence/anchor-sample/selection.json` |
+| Key separation / access control | `$env:PYTHONPATH='src'; python -m pytest tests/test_kms_signing.py tests/test_governance_service.py tests/test_registry_acl.py` |
+
 ## Counsel memo
 
 The implementation evidence supports a technical narrative in which a governance layer

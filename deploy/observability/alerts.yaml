@@ -1,0 +1,23 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: gas-integrity-alerts
+spec:
+  groups:
+    - name: gas-integrity
+      rules:
+        - alert: GASReplayVerificationMismatch
+          expr: increase(governed_autonomy_replay_verification_failures[5m]) > 0
+          for: 1m
+          labels: {severity: critical, route: pagerduty}
+          annotations: {summary: "GAS replay verification mismatch"}
+        - alert: GASFailedAnchoring
+          expr: increase(governed_autonomy_failed_anchors[5m]) > 0
+          for: 1m
+          labels: {severity: critical, route: pagerduty}
+          annotations: {summary: "GAS ledger anchoring failed"}
+        - alert: GASUnauthorizedSigningAttempt
+          expr: increase(governed_autonomy_unauthorized_signing_attempts[5m]) > 0
+          for: 1m
+          labels: {severity: critical, route: pagerduty}
+          annotations: {summary: "Unauthorized GAS signing attempt"}

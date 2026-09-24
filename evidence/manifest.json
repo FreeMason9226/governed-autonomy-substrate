@@ -1,10 +1,11 @@
 {
   "anchoring_exit_code": 0,
   "artifacts": {
-    "checkpoint_manifest": "6bd9a770ccceaeddb9529df969b41b31aac07c73428631b0fc6e1d4dae912c27",
+    "checkpoint_manifest": "d3511e2f4fe3d7ce252c6a1802c437abfd7490dad96f2a20ef5a13bbfa874955",
     "cryptographic_vectors": "efce061fbc7b8add8389c30e57375c3702049e62151598f4ab4c3571fa0e4bc8",
     "dataset_manifest": "c6a247df02758c701f59c3bbbbcae06b6a23962c7b41c91659754b6fa3dd211b",
     "inference_regression": "20c4b585c4a4a602691ad47dae87816875dce510c4da00cdcd79062be3df4903"
   },
+  "full_test_exit_code": 0,
   "test_exit_code": 0
 }

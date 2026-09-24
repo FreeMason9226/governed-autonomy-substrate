@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0",
+  "task": "governance-obligation-classification",
+  "data_files": {
+    "train": "gir/train/data/synthetic_train.jsonl",
+    "validation": "gir/train/data/synthetic_validation.jsonl"
+  },
+  "preprocessing": "Unicode casefold, whitespace collapse, tokenizer truncation at 256 tokens, sorted labels",
+  "seed": 20260923,
+  "hyperparameters": {
+    "base_model": "distilbert-base-uncased",
+    "learning_rate": 0.00002,
+    "batch_size": 8,
+    "epochs": 3
+  },
+  "checkpoint": "gir/train/checkpoint_manifest.json"
+}

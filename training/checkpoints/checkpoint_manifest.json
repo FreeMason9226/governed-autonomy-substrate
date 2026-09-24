@@ -1,10 +1,10 @@
 {
   "schema_version": "1.0",
   "checkpoint_uri": "artifact://gas-gir/distilbert-base-uncased",
-  "checkpoint_sha256": "PENDING_REPRODUCIBLE_TRAINING_RUN",
+  "checkpoint_sha256": "5ddc5b955d27af16fd4098684b8d9200809452bf2498bfec269d26f9aeb4ef6e",
   "base_model": "distilbert-base-uncased",
   "dataset_manifest": "training/dataset_manifest.json",
   "inference_fixture": "training/inference_regression.jsonl",
-  "status": "reference-only-until-weights-are-published",
-  "verification": "Replace checkpoint_sha256 with the SHA-256 of the published model directory before counsel or examiner submission."
+  "status": "smoke-metadata-hash; transformer-weights-not-vendored",
+  "verification": "This hash covers the deterministic smoke metadata, not transformer weights. Replace it with the published model-directory SHA-256 before counsel or examiner submission."
 }

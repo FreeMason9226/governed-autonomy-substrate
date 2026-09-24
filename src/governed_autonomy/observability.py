@@ -20,6 +20,9 @@ class RuntimeMetrics:
     agency_risk_index: float = 0.0
     drift_alerts: int = 0
     ats_score: float = 1.0
+    replay_verification_failures: int = 0
+    failed_anchors: int = 0
+    unauthorized_signing_attempts: int = 0
     last_updated_at: int = field(default_factory=lambda: int(time.time()))
 
     def record_authorized(self) -> None:
@@ -56,6 +59,18 @@ class RuntimeMetrics:
         self.ats_score = value
         self.last_updated_at = int(time.time())
 
+    def record_replay_verification_failure(self) -> None:
+        self.replay_verification_failures += 1
+        self.last_updated_at = int(time.time())
+
+    def record_failed_anchor(self) -> None:
+        self.failed_anchors += 1
+        self.last_updated_at = int(time.time())
+
+    def record_unauthorized_signing_attempt(self) -> None:
+        self.unauthorized_signing_attempts += 1
+        self.last_updated_at = int(time.time())
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "service": self.service,
@@ -69,6 +84,9 @@ class RuntimeMetrics:
             "agency_risk_index": self.agency_risk_index,
             "drift_alerts": self.drift_alerts,
             "ats_score": self.ats_score,
+            "replay_verification_failures": self.replay_verification_failures,
+            "failed_anchors": self.failed_anchors,
+            "unauthorized_signing_attempts": self.unauthorized_signing_attempts,
             "last_updated_at": self.last_updated_at,
         }
 
@@ -99,6 +117,15 @@ class PlatformObservability:
 
     def set_ats_score(self, value: float) -> None:
         self.metrics.set_ats_score(value)
+
+    def record_replay_verification_failure(self) -> None:
+        self.metrics.record_replay_verification_failure()
+
+    def record_failed_anchor(self) -> None:
+        self.metrics.record_failed_anchor()
+
+    def record_unauthorized_signing_attempt(self) -> None:
+        self.metrics.record_unauthorized_signing_attempt()
 
     def snapshot(self) -> dict[str, Any]:
         return {
@@ -131,6 +158,9 @@ class PlatformObservability:
             "agency_risk_index",
             "drift_alerts",
             "ats_score",
+            "replay_verification_failures",
+            "failed_anchors",
+            "unauthorized_signing_attempts",
         ):
             lines.append(
                 f'governed_autonomy_{key}{{service="{self.metrics.service}",environment="{self.metrics.environment}"}} {values[key]}'

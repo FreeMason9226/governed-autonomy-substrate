@@ -60,9 +60,26 @@ jobs:
           tests/test_governance_bottleneck_e2e.py
           tests/test_anchoring_claim51a.py
           tests/test_gir_inference.py
+          tests/test_gir_provenance.py
+          tests/test_verify_replay.py
+          tests/test_provenance_artifacts.py
           tests/test_resilience_observability.py
       - name: Verify independent anchoring vector
         run: python scripts/verify_anchor.py
+      - name: Verify replay compact record
+        shell: bash
+        run: |
+          python scripts/split_anchor_vector.py
+          python -m governed_autonomy.verify_replay \
+            --record evidence/anchor-sample/record.json \
+            --frame evidence/anchor-sample/frame.json \
+            --selection evidence/anchor-sample/selection.json
+      - name: Require patent and browser provenance artifacts
+        shell: bash
+        run: |
+          test -s PATENT_SUPPORT.md
+          test -s tools/browser_context.json
+          python -c "import json; d=json.load(open('tools/browser_context.json')); assert d['edge_all_open_tabs'] and d['note']"
       - name: Verify execution images do not receive private signing keys
         shell: bash
         run: '! grep -R "GAS_ISSUER_PRIVATE_KEY\|issuer-private-key" deploy/helm deploy/governance-separation.yaml'

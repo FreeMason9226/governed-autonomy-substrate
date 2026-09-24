@@ -39,9 +39,18 @@ def main() -> None:
     (OUT / "anchoring-verification.log").write_text(
         vector_result.stdout + vector_result.stderr, encoding="utf-8"
     )
+    full = subprocess.run(
+        ["python", "-m", "pytest", "--cov=governed_autonomy", "--cov-report=term-missing"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    (OUT / "full-test-output.log").write_text(full.stdout + full.stderr, encoding="utf-8")
     manifest = {
         "test_exit_code": result.returncode,
         "anchoring_exit_code": vector_result.returncode,
+        "full_test_exit_code": full.returncode,
         "artifacts": {
             "dataset_manifest": sha256(ROOT / "training/dataset_manifest.json"),
             "inference_regression": sha256(ROOT / "training/inference_regression.jsonl"),
