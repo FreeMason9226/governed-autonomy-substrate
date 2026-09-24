@@ -17,6 +17,9 @@ class RuntimeMetrics:
     total_executions: int = 0
     successful_executions: int = 0
     failed_executions: int = 0
+    agency_risk_index: float = 0.0
+    drift_alerts: int = 0
+    ats_score: float = 1.0
     last_updated_at: int = field(default_factory=lambda: int(time.time()))
 
     def record_authorized(self) -> None:
@@ -37,6 +40,22 @@ class RuntimeMetrics:
             self.failed_executions += 1
         self.last_updated_at = int(time.time())
 
+    def record_risk(self, value: float) -> None:
+        if not 0 <= value <= 1:
+            raise ValueError("agency risk index must be between 0 and 1")
+        self.agency_risk_index = value
+        self.last_updated_at = int(time.time())
+
+    def record_drift_alert(self) -> None:
+        self.drift_alerts += 1
+        self.last_updated_at = int(time.time())
+
+    def set_ats_score(self, value: float) -> None:
+        if not 0 <= value <= 1:
+            raise ValueError("ATS score must be between 0 and 1")
+        self.ats_score = value
+        self.last_updated_at = int(time.time())
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "service": self.service,
@@ -47,6 +66,9 @@ class RuntimeMetrics:
             "total_executions": self.total_executions,
             "successful_executions": self.successful_executions,
             "failed_executions": self.failed_executions,
+            "agency_risk_index": self.agency_risk_index,
+            "drift_alerts": self.drift_alerts,
+            "ats_score": self.ats_score,
             "last_updated_at": self.last_updated_at,
         }
 
@@ -68,6 +90,15 @@ class PlatformObservability:
 
     def record_execution(self, *, ok: bool) -> None:
         self.metrics.record_execution(ok=ok)
+
+    def record_risk(self, value: float) -> None:
+        self.metrics.record_risk(value)
+
+    def record_drift_alert(self) -> None:
+        self.metrics.record_drift_alert()
+
+    def set_ats_score(self, value: float) -> None:
+        self.metrics.set_ats_score(value)
 
     def snapshot(self) -> dict[str, Any]:
         return {
@@ -97,6 +128,9 @@ class PlatformObservability:
             "total_executions",
             "successful_executions",
             "failed_executions",
+            "agency_risk_index",
+            "drift_alerts",
+            "ats_score",
         ):
             lines.append(
                 f'governed_autonomy_{key}{{service="{self.metrics.service}",environment="{self.metrics.environment}"}} {values[key]}'

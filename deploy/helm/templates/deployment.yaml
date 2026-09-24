@@ -38,9 +38,15 @@ spec:
             - name: GAS_ISSUER_KEY_ID
               valueFrom:
                 secretKeyRef: {name: {{ .Values.runtimeSecret }}, key: issuer-key-id}
-            - name: GAS_ISSUER_PRIVATE_KEY
+            - name: GAS_KMS_SIGN_ENDPOINT
               valueFrom:
-                secretKeyRef: {name: {{ .Values.runtimeSecret }}, key: issuer-private-key}
+                secretKeyRef: {name: {{ .Values.runtimeSecret }}, key: kms-sign-endpoint}
+            - name: GAS_ISSUER_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef: {name: {{ .Values.runtimeSecret }}, key: issuer-public-key}
+            - name: GAS_KMS_SIGN_TOKEN
+              valueFrom:
+                secretKeyRef: {name: {{ .Values.runtimeSecret }}, key: kms-sign-token}
             - name: GOVERNED_AUTONOMY_BEARER_TOKEN
               valueFrom:
                 secretKeyRef:

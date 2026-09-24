@@ -91,6 +91,8 @@ class ExecutionBoundary:
         return result
 
     def _validate(self, artifact: GovernanceAuthorizationArtifact) -> None:
+        if not isinstance(artifact, GovernanceAuthorizationArtifact):
+            raise AuthorizationError("execution requires a Governance Authorization Artifact")
         key = (
             self.trust_store.resolve(artifact.issuer_key_id)
             if self.trust_store

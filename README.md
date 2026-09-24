@@ -26,6 +26,8 @@ This repository contains the first working slice of a governance authorization a
 20. `health_report` provides a readiness-oriented structured check for replay integrity and configured trust/policy components.
 21. `build_demo_service` wires the complete issuer, trust store, policy registry, boundary, replay log, and named action handler for integration use.
 22. `AuthenticatedAPI` and `create_server` expose an authenticated standard-library HTTP boundary with `/health`, `/authorize`, and `/execute`, strict body limits, and JSON-only transport.
+23. `GovernanceService` separates GAA signing and replay writes behind role-bound Ed25519 attestations; execution code receives only an explicitly scoped execution capability and cannot invoke governance endpoints with a node attestation.
+24. `anchoring.py` provides UUID-bound frame hashes, CIDv1 generation, and independent verification vectors; `claim51a.py` provides the deterministic entropy-normalized confidence metric.
 
 ## Threat model and limitations
 
@@ -40,6 +42,8 @@ The included HTTP adapter supports bearer authentication, request correlation, s
 ## Patent-to-code traceability
 
 For the patent draft mapping, see [PATENT_TO_CODE_MAPPING.md](PATENT_TO_CODE_MAPPING.md).
+
+Reproducible GIR training and cryptographic verification instructions are in [docs/reproducibility.md](docs/reproducibility.md).
 
 ## Run
 

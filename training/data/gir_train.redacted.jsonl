@@ -1,0 +1,4 @@
+{"text":"[REDACTED GOVERNANCE SOURCE: access must be restricted to authorized actors]","label":"access-control"}
+{"text":"[REDACTED GOVERNANCE SOURCE: records must be retained for audit]","label":"retention"}
+{"text":"[REDACTED GOVERNANCE SOURCE: a human may review and override the decision]","label":"human-oversight"}
+{"text":"[REDACTED GOVERNANCE SOURCE: decisions must produce traceable evidence]","label":"auditability"}

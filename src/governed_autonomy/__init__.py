@@ -23,6 +23,16 @@ from .federation import (
 )
 from .governance import GovernanceRule, GovernanceRuleTranslator
 from .health import health_report
+from .anchoring import (
+    LedgerAnchor,
+    LedgerCompactRecord,
+    anchor_frame,
+    cid_for_hash,
+    compact_record,
+    uuid_frame_hash,
+    verify_anchor,
+    verify_compact_record,
+)
 from .http_api import AuthenticatedAPI, create_server, parse_server_args
 from .identity import (
     ExternalIdentity,
@@ -34,6 +44,8 @@ from .identity import (
     UrlJWKSProvider,
 )
 from .issuer import AuthorizationIssuer, PolicyDeniedError
+from .claim51a import entropy_normalized_confidence
+from .governance_service import GovernanceAttestation, GovernanceReplayWriter, GovernanceService
 from .jobs import Job, SQLiteJobStore, run_once
 from .langchain_adapter import GASCallbackHandler, GASExecutionBarrierTool, GASToolOutput
 from .mcp_gateway import (
@@ -61,8 +73,16 @@ from .policy import (
     signed_policy_manifest_from_dict,
 )
 from .replay import ReplayLog, SQLiteReplayLog
+from .resilience import ModeTransition, ResilienceController, ResilienceMode
 from .service import GovernedService
-from .signing import LocalEd25519Signer, RemoteSigner, Signer
+from .signing import (
+    ImmutableKeyAuditLog,
+    KMSHSMBackedSigner,
+    KeyOperation,
+    LocalEd25519Signer,
+    RemoteSigner,
+    Signer,
+)
 from .storage import (
     POSTGRES_NONCE_SCHEMA,
     POSTGRES_REPLAY_SCHEMA,
@@ -78,6 +98,18 @@ __all__ = [
     "AuthorizationError",
     "AuthorizationIssuer",
     "ExecutionBoundary",
+    "GovernanceAttestation",
+    "GovernanceReplayWriter",
+    "GovernanceService",
+    "LedgerAnchor",
+    "LedgerCompactRecord",
+    "anchor_frame",
+    "cid_for_hash",
+    "compact_record",
+    "uuid_frame_hash",
+    "verify_anchor",
+    "verify_compact_record",
+    "entropy_normalized_confidence",
     "GovernanceAuthorizationArtifact",
     "SignedApproval",
     "GovernanceInput",
@@ -95,6 +127,9 @@ __all__ = [
     "PolicyDeniedError",
     "ReplayLog",
     "SQLiteReplayLog",
+    "ModeTransition",
+    "ResilienceController",
+    "ResilienceMode",
     "TrustStore",
     "FederationError",
     "GovernanceReconciler",
@@ -126,6 +161,9 @@ __all__ = [
     "StaticJWKSProvider",
     "UrlJWKSProvider",
     "LocalEd25519Signer",
+    "KMSHSMBackedSigner",
+    "ImmutableKeyAuditLog",
+    "KeyOperation",
     "RemoteSigner",
     "Signer",
     "NonceRepository",

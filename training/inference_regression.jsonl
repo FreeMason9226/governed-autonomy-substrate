@@ -1,0 +1,3 @@
+{"text":"Only authorized principals may access the system.","expected_obligations":["access-control"]}
+{"text":"The decision must produce traceable audit evidence and retain the record.","expected_obligations":["auditability","retention"]}
+{"text":"A human reviewer may override the operation.","expected_obligations":["human-oversight"]}

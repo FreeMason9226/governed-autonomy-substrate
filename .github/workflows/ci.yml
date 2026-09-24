@@ -51,6 +51,21 @@ jobs:
           --cov=governed_autonomy
           --cov-report=term-missing
           --cov-report=xml
+      - name: Security and evidence gates
+        run: >-
+          python -m pytest
+          tests/test_governance_service.py
+          tests/test_kms_signing.py
+          tests/test_registry_acl.py
+          tests/test_governance_bottleneck_e2e.py
+          tests/test_anchoring_claim51a.py
+          tests/test_gir_inference.py
+          tests/test_resilience_observability.py
+      - name: Verify independent anchoring vector
+        run: python scripts/verify_anchor.py
+      - name: Verify execution images do not receive private signing keys
+        shell: bash
+        run: '! grep -R "GAS_ISSUER_PRIVATE_KEY\|issuer-private-key" deploy/helm deploy/governance-separation.yaml'
       - name: Validate Helm chart
         uses: azure/setup-helm@v4
       - name: Render Helm chart

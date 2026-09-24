@@ -200,18 +200,39 @@ class PolicyRegistry:
         policies: tuple[Policy, ...] = (),
         path: str | Path | None = None,
         trust_store: TrustStore | None = None,
+        governance_admin_only: bool = False,
+        required_admin_approvals: int = 2,
     ) -> None:
+        if required_admin_approvals <= 0:
+            raise ValueError("required_admin_approvals must be positive")
         self.path = Path(path) if path else None
         self.trust_store = trust_store
+        self.governance_admin_only = governance_admin_only
+        self.required_admin_approvals = required_admin_approvals
         self._policies: dict[str, Policy] = {}
         self._versions: dict[str, int] = {}
         self._signed_manifests: dict[str, SignedPolicyManifest] = {}
         for policy in policies:
-            self.register(policy)
+            self.register(
+                policy,
+                actor_role="governance-admin",
+                approval_count=required_admin_approvals,
+            )
         if self.path and self.path.exists():
             self._load()
 
-    def register(self, policy: Policy) -> None:
+    def register(
+        self,
+        policy: Policy,
+        *,
+        actor_role: str | None = None,
+        approval_count: int = 0,
+    ) -> None:
+        if self.governance_admin_only:
+            if actor_role != "governance-admin":
+                raise PermissionError("policy registry mutation requires governance-admin role")
+            if approval_count < self.required_admin_approvals:
+                raise PermissionError("policy registry mutation approval quorum not met")
         existing = self._policies.get(policy.policy_id)
         if existing is not None and existing.digest() != policy.digest():
             raise ValueError(f"policy ID is already registered: {policy.policy_id}")
@@ -232,7 +253,11 @@ class PolicyRegistry:
             if manifest.version == current_version and current.digest() == manifest.policy.digest():
                 return
             raise ValueError("policy manifest version is stale or conflicting")
-        self.register(manifest.policy)
+        self.register(
+            manifest.policy,
+            actor_role="governance-admin" if self.governance_admin_only else None,
+            approval_count=self.required_admin_approvals if self.governance_admin_only else 0,
+        )
         self._signed_manifests[manifest.policy.policy_id] = manifest
         self._versions[manifest.policy.policy_id] = manifest.version
         if self.path is not None:

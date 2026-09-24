@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "algorithm": "sha256(canonical-json({frame_uuid,frame_id,previous_hash,event}))",
+  "frame_uuid": "00000000-0000-0000-0000-000000000001",
+  "frame_id": "frame-1",
+  "previous_hash": "",
+  "event": {"nonce": "n-1", "type": "authorization"},
+  "frame_hash": "d7e6bece85acc27f692a2d5554ca7605a7c65ea60cac0c99fb0ec440fa3d1a57",
+  "cid": "bafkreigx427m5bnmyj7wskrnkvkmu5qfu7df5jqmvqgjt6yoyrapupi2k4",
+  "verification": "Recompute canonical JSON with sorted keys and compact separators; SHA-256 must equal frame_hash. Encode CIDv1 raw codec 0x55, sha2-256 multihash 0x12 0x20, then lowercase base32 with b prefix."
+}

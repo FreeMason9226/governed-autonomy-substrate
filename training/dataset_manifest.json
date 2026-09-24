@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0",
+  "task": "governance-obligation-classification",
+  "data_files": {
+    "train": "training/data/gir_train.redacted.jsonl",
+    "validation": "training/data/gir_validation.redacted.jsonl"
+  },
+  "redaction": "Source documents are omitted; replace redacted text only with data you are licensed to use.",
+  "labels": ["access-control", "auditability", "human-oversight", "retention"],
+  "split_seed": 20260923,
+  "base_model": "distilbert-base-uncased",
+  "training_script": "training/train_gir.py"
+}

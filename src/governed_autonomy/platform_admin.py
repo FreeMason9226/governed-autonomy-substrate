@@ -227,7 +227,11 @@ class PolicyChangeManager:
             raise ValueError("proposal signature is invalid")
         if proposal.approval_count() < self.required_approvals:
             raise ValueError("approval quorum not met")
-        self.registry.register(proposal.proposed_policy)
+        self.registry.register(
+            proposal.proposed_policy,
+            actor_role="governance-admin",
+            approval_count=proposal.approval_count(),
+        )
         updated = replace(proposal, status="activated")
         self._proposals[proposal_id] = updated
         if self.audit_hook is not None:

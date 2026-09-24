@@ -11,6 +11,7 @@ from .models import GovernanceAuthorizationArtifact, SignedApproval
 from .mesh import GovernanceInput, GovernancePreflightDecision
 from .policy import DeterministicArbiter, Policy
 from .replay import ReplayLog
+from .governance_service import GovernanceService
 
 
 class PolicyDeniedError(AuthorizationError):
@@ -33,15 +34,26 @@ class AuthorizationIssuer:
     def __init__(
         self,
         *,
-        issuer: KeyPair,
-        replay_log: ReplayLog,
+        issuer: KeyPair | None = None,
+        replay_log: ReplayLog | None = None,
+        governance_service: GovernanceService | None = None,
         arbiter: DeterministicArbiter | None = None,
         clock: Callable[[], int] | None = None,
         nonce_factory: Callable[[], str] | None = None,
         mesh: Any | None = None,
     ) -> None:
+        if governance_service is None and (issuer is None or replay_log is None):
+            raise ValueError("issuer and replay_log or governance_service are required")
+        if governance_service is not None:
+            if issuer is not None and issuer.key_id != governance_service.signer.key_id:
+                raise ValueError("issuer does not match governance service signer")
+            if replay_log is not None and replay_log is not governance_service.replay_log:
+                raise ValueError("replay_log does not match governance service")
+            issuer = governance_service.signer
+            replay_log = governance_service.replay_log
         self.issuer = issuer
         self.replay_log = replay_log
+        self.governance_service = governance_service
         self.arbiter = arbiter or DeterministicArbiter()
         self.clock = clock or (lambda: int(time.time()))
         self.nonce_factory = nonce_factory or (lambda: secrets.token_urlsafe(24))
@@ -98,7 +110,7 @@ class AuthorizationIssuer:
         nonce = self.nonce_factory()
         frame_id = f"authorization:{nonce}"
         if not decision["allow"]:
-            self.replay_log.append(
+            self._append_replay(
                 frame_id,
                 {
                     "type": "authorization",
@@ -120,7 +132,7 @@ class AuthorizationIssuer:
             self.issuer.key_id,
             "",
         )
-        self.replay_log.append(
+        self._append_replay(
             frame_id,
             {
                 "type": "authorization",
@@ -130,13 +142,48 @@ class AuthorizationIssuer:
                 "issued": True,
             },
         )
-        return GovernanceAuthorizationArtifact.issue(
-            action_request=effective_request,
-            decision=decision,
-            expires_at=expires_at,
+        unsigned = GovernanceAuthorizationArtifact(
+            effective_request,
+            decision,
+            expires_at,
+            nonce,
+            frame_id,
+            self.issuer.key_id,
+            "",
+        )
+        signature = self._sign_gaa(unsigned.unsigned_payload(), nonce)
+        return GovernanceAuthorizationArtifact(**{**unsigned.__dict__, "signature": signature})
+
+    def _append_replay(self, frame_id: str, event: dict[str, Any]) -> None:
+        if self.governance_service is None:
+            self.replay_log.append(frame_id, event)
+            return
+        attestation = self.governance_service._internal_attestation(
+            subject=self.issuer.key_id,
+            role="governance-writer",
+            operation="append-replay",
+            evidence={"frame_id": frame_id, "event": event},
+            nonce=frame_id,
+        )
+        self.governance_service.append_replay(
+            subject=self.issuer.key_id,
+            frame_id=frame_id,
+            event=event,
+            attestation=attestation,
+        )
+
+    def _sign_gaa(self, payload: bytes, nonce: str) -> str:
+        if self.governance_service is None:
+            return self.issuer.sign(payload)
+        attestation = self.governance_service._internal_attestation(
+            subject=self.issuer.key_id,
+            role="governance-signer",
+            operation="issue-gaa",
+            evidence=payload.decode("utf-8"),
             nonce=nonce,
-            replay_frame_ref=frame_id,
-            issuer=self.issuer,
+        )
+        return self.governance_service.sign_gaa(
+            subject=self.issuer.key_id, payload=payload, attestation=attestation
         )
 
     def authorize_compensation(
