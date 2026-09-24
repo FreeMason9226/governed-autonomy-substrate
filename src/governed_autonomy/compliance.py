@@ -145,7 +145,7 @@ class ComplianceAuditor:
         results: list[ComplianceEvaluation] = []
 
         # Article 9 (Risk Management & Pre-Execution Filter)
-        if self.policy_registry and self.policy_registry.policies:
+        if self.policy_registry and self.policy_registry.policies():
             results.append(
                 ComplianceEvaluation(
                     framework="EU AI Act",

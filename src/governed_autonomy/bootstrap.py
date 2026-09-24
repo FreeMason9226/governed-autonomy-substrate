@@ -1,4 +1,5 @@
 import os
+
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from .crypto import KeyPair
@@ -8,8 +9,8 @@ from .platform import GovernancePlatform, RuntimeIdentity
 from .policy import Policy, PolicyRegistry
 from .replay import ReplayLog
 from .service import GovernedService
-from .storage import PostgresReplayLog, PostgresTrustStore
 from .signing import Signer
+from .storage import PostgresReplayLog, PostgresTrustStore
 from .trust import TrustStore
 
 

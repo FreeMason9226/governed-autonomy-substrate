@@ -32,14 +32,24 @@ class Policy:
     def __post_init__(self) -> None:
         if not self.policy_id:
             raise ValueError("policy_id must not be empty")
-        if self.max_request_bytes <= 0:
+        if (
+            not isinstance(self.max_request_bytes, int)
+            or isinstance(self.max_request_bytes, bool)
+            or self.max_request_bytes <= 0
+        ):
             raise ValueError("max_request_bytes must be positive")
-        if self.max_ttl_seconds <= 0:
+        if (
+            not isinstance(self.max_ttl_seconds, int)
+            or isinstance(self.max_ttl_seconds, bool)
+            or self.max_ttl_seconds <= 0
+        ):
             raise ValueError("max_ttl_seconds must be positive")
         if any(not isinstance(action, str) or not action for action in self.allowed_actions):
             raise ValueError("allowed_actions must contain non-empty strings")
         if tuple(sorted(self.allowed_actions)) != self.allowed_actions:
             raise ValueError("allowed_actions must be sorted for deterministic output")
+        if len(set(self.allowed_actions)) != len(self.allowed_actions):
+            raise ValueError("allowed_actions must not contain duplicates")
         if self.exact_context is None:
             object.__setattr__(self, "exact_context", {})
         if isinstance(self.mesh_required_actions, list):
@@ -155,10 +165,6 @@ class DeterministicArbiter:
         for container in (request, context):
             if not isinstance(container, dict):
                 continue
-            for key in ("approval_count", "approvals_count"):
-                value = container.get(key)
-                if isinstance(value, int) and not isinstance(value, bool):
-                    return value
             approvals = container.get("approvals")
             if approvals is None:
                 continue

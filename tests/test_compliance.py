@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import pytest
-
 from governed_autonomy import (
     ComplianceAuditor,
     KeyPair,
@@ -68,3 +66,23 @@ def test_compliance_auditor_detects_chain_break() -> None:
     # Both NIST MS-3.2 and EU AI Act Article 12 should fail
     nist_failures = [e for e in report["nist_ai_rmf"] if e["status"] == "FAIL"]
     assert any(e["control_id"] == "MS-3.2" for e in nist_failures)
+
+
+def test_empty_policy_registry_is_not_reported_as_active() -> None:
+    key = KeyPair.generate("test-key")
+    trust = TrustStore()
+    trust.add(key.key_id, key.public_key)
+    replay = ReplayLog()
+
+    auditor = ComplianceAuditor(
+        replay_log=replay,
+        trust_store=trust,
+        policy_registry=PolicyRegistry(),
+    )
+
+    article_nine = next(
+        result
+        for result in auditor.evaluate_eu_ai_act()
+        if result.control_id == "Article 9"
+    )
+    assert article_nine.status == "WARNING"
