@@ -264,6 +264,8 @@ def create_server(
     )
     if tls is not None:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.options |= ssl.OP_NO_TLSv1
+        context.options |= ssl.OP_NO_TLSv1_1
         minimum_version = {
             "TLSv1.2": ssl.TLSVersion.TLSv1_2,
             "TLSv1.3": ssl.TLSVersion.TLSv1_3,
