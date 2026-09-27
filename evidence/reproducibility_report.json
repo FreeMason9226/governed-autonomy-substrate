@@ -1,0 +1,78 @@
+{
+  "checkpoint_hashes": {
+    "COUNSEL_MEMO.md": "87b9b6a1b215e7ff842860511415036f31ad7fe202031f5d0c4a995e84705bcf",
+    "PATENT_SUPPORT.md": "7e3bbb0385827a2120b856aa026bcebc318cfdcd43c8c215ab55dfb56fc5a5bf",
+    "docs/CANONICAL_SERIALIZATION.md": "017bdacb40fb6212e58a3547e99794db4b7267b0d61db637e3f39482d3f67001",
+    "gir/train/checkpoint_manifest.json": "1a8eeb804cccf15682b53f4a17d8789dfb509570d6a9f1e7e3e1205fd5ec34b6",
+    "gir/train/checkpoint_smoke.json": "5ddc5b955d27af16fd4098684b8d9200809452bf2498bfec269d26f9aeb4ef6e",
+    "replay/tests/anchoring_vectors.json": "63f7a52eb72eb895edc91d0f82f9a5ea60ed77c35f65e696d4f2373b4f242521",
+    "training/dataset_manifest.json": "c6a247df02758c701f59c3bbbbcae06b6a23962c7b41c91659754b6fa3dd211b"
+  },
+  "checks": [
+    {
+      "command": [
+        "C:\\Python314\\python.exe",
+        "-m",
+        "pytest"
+      ],
+      "exit_code": 0,
+      "label": "full-tests"
+    },
+    {
+      "command": [
+        "C:\\Python314\\python.exe",
+        "examples/governance_bottleneck_demo.py"
+      ],
+      "exit_code": 0,
+      "label": "demo"
+    },
+    {
+      "command": [
+        "C:\\Python314\\python.exe",
+        "scripts/verify_anchor.py"
+      ],
+      "exit_code": 0,
+      "label": "anchor"
+    },
+    {
+      "command": [
+        "C:\\Python314\\python.exe",
+        "tools/verify-replay/verify_replay.py",
+        "--record",
+        "evidence/anchor-sample/record.json",
+        "--frame",
+        "evidence/anchor-sample/frame.json",
+        "--selection",
+        "evidence/anchor-sample/selection.json"
+      ],
+      "exit_code": 0,
+      "label": "verify-replay"
+    },
+    {
+      "command": [
+        "C:\\Python314\\python.exe",
+        "-m",
+        "pytest",
+        "tests/test_gir_inference.py",
+        "tests/test_gir_provenance.py"
+      ],
+      "exit_code": 0,
+      "label": "gir-smoke"
+    }
+  ],
+  "dependency_lock": "356524f58a79800b379574035132bb0094c29182f608882574d2b71c4b64053c",
+  "environment": {
+    "cwd": "C:\\Users\\fathe\\OneDrive\\Documents\\Copilot\\Created\\governed-autonomy-substrate",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "python": "3.14.7 (tags/v3.14.7:823f032, Aug  5 2026, 10:51:32) [MSC v.1944 64 bit (AMD64)]"
+  },
+  "generated_at": "2026-09-24T05:03:10.771806+00:00",
+  "limitations": [
+    "Transformer weights are not vendored; the checkpoint hash covers deterministic smoke metadata.",
+    "External KMS/HSM attestation and trusted timestamp notarization require provider credentials."
+  ],
+  "seeds": {
+    "gir": 20260923,
+    "simulation": 20260923
+  }
+}

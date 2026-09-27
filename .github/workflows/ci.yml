@@ -64,6 +64,8 @@ jobs:
           tests/test_verify_replay.py
           tests/test_provenance_artifacts.py
           tests/test_resilience_observability.py
+          monitoring/tests/synthetic_alerts.py
+          federation/tests/integration_federation.py
       - name: Verify independent anchoring vector
         run: python scripts/verify_anchor.py
       - name: Verify replay compact record

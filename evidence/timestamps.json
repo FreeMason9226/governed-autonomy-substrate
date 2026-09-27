@@ -1,0 +1,49 @@
+{
+  "generated_at": "2026-09-24T05:03:10.771806+00:00",
+  "method": "local-sha256-receipt",
+  "receipts": [
+    {
+      "anchor_txid": null,
+      "artifact": "gir/train/checkpoint_smoke.json",
+      "sha256": "5ddc5b955d27af16fd4098684b8d9200809452bf2498bfec269d26f9aeb4ef6e",
+      "status": "local receipt"
+    },
+    {
+      "anchor_txid": null,
+      "artifact": "gir/train/checkpoint_manifest.json",
+      "sha256": "1a8eeb804cccf15682b53f4a17d8789dfb509570d6a9f1e7e3e1205fd5ec34b6",
+      "status": "local receipt"
+    },
+    {
+      "anchor_txid": null,
+      "artifact": "replay/tests/anchoring_vectors.json",
+      "sha256": "63f7a52eb72eb895edc91d0f82f9a5ea60ed77c35f65e696d4f2373b4f242521",
+      "status": "local receipt"
+    },
+    {
+      "anchor_txid": null,
+      "artifact": "docs/CANONICAL_SERIALIZATION.md",
+      "sha256": "017bdacb40fb6212e58a3547e99794db4b7267b0d61db637e3f39482d3f67001",
+      "status": "local receipt"
+    },
+    {
+      "anchor_txid": null,
+      "artifact": "training/dataset_manifest.json",
+      "sha256": "c6a247df02758c701f59c3bbbbcae06b6a23962c7b41c91659754b6fa3dd211b",
+      "status": "local receipt"
+    },
+    {
+      "anchor_txid": null,
+      "artifact": "PATENT_SUPPORT.md",
+      "sha256": "7e3bbb0385827a2120b856aa026bcebc318cfdcd43c8c215ab55dfb56fc5a5bf",
+      "status": "local receipt"
+    },
+    {
+      "anchor_txid": null,
+      "artifact": "COUNSEL_MEMO.md",
+      "sha256": "87b9b6a1b215e7ff842860511415036f31ad7fe202031f5d0c4a995e84705bcf",
+      "status": "local receipt"
+    }
+  ],
+  "trusted_timestamp_service": null
+}

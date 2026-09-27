@@ -1,0 +1,7 @@
+{
+  "iterations": 10000,
+  "elapsed_seconds": 0.249293699998816,
+  "decisions_per_second": 40113.32817494984,
+  "environment": "Windows Python 3.14.7",
+  "note": "Local deterministic baseline; not a production capacity guarantee."
+}

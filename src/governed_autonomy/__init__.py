@@ -46,7 +46,7 @@ from .identity import (
 from .issuer import AuthorizationIssuer, PolicyDeniedError
 from .claim51a import entropy_normalized_confidence
 from .governance_service import GovernanceAttestation, GovernanceReplayWriter, GovernanceService
-from .jobs import Job, SQLiteJobStore, run_once
+from .jobs import Job, run_once
 from .langchain_adapter import GASCallbackHandler, GASExecutionBarrierTool, GASToolOutput
 from .mcp_gateway import (
     GASMCPGateway,
@@ -88,7 +88,6 @@ from .storage import (
     POSTGRES_REPLAY_SCHEMA,
     NonceRepository,
     PostgresNonceRepository,
-    PostgresReplayLog,
     PostgresTrustStore,
     SQLiteNonceRepository,
 )
@@ -170,7 +169,6 @@ __all__ = [
     "SQLiteNonceRepository",
     "PostgresNonceRepository",
     "POSTGRES_NONCE_SCHEMA",
-    "PostgresReplayLog",
     "PostgresTrustStore",
     "POSTGRES_REPLAY_SCHEMA",
     "BoundedRateLimiter",
@@ -179,7 +177,6 @@ __all__ = [
     "security_headers",
     "validate_server_config",
     "Job",
-    "SQLiteJobStore",
     "run_once",
     "GASMCPGateway",
     "GASMCPServer",

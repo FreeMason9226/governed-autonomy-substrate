@@ -1,4 +1,4 @@
-from governed_autonomy import SQLiteJobStore, run_once
+from governed_autonomy.jobs import SQLiteJobStore, run_once
 
 
 def test_jobs_are_idempotent_and_dead_letter_after_bounded_retries():

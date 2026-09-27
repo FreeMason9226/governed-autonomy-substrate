@@ -1,0 +1,3 @@
+without GAA: denied (execution requires a Governance Authorization Artifact)
+with GAA: success
+replay chain valid: True

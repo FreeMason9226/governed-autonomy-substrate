@@ -5,8 +5,6 @@ image:
 replicaCount: 2
 runtimeMode: postgres
 bearerTokenSecret: governed-autonomy
-databaseUrlSecret: governed-autonomy-runtime
-runtimeSecret: governed-autonomy-runtime
 createBearerTokenSecret: false
 bearerToken: ""
 service:
@@ -36,11 +34,6 @@ externalSecrets:
   secretStoreKind: ClusterSecretStore
   remoteKey: governed-autonomy/bearer-token
   remoteProperty: value
-  databaseUrlRemoteKey: governed-autonomy/database-url
-  issuerKeyIdRemoteKey: governed-autonomy/issuer-key-id
-  issuerPublicKeyRemoteKey: governed-autonomy/issuer-public-key
-  kmsSignEndpointRemoteKey: governed-autonomy/kms-sign-endpoint
-  kmsSignTokenRemoteKey: governed-autonomy/kms-sign-token
 oidc:
   enabled: false
   issuer: ""

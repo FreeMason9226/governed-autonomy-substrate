@@ -1,0 +1,66 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 1314 >>
+stream
+BT
+/F1 10 Tf
+50 760 Td
+(GAS Reproducibility Report) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Generated: 2026-09-24T05:03:10.771806+00:00) Tj
+0 -14 Td
+(Python: 3.14.7) Tj
+0 -14 Td
+(Seeds: GIR=20260923; simulation=20260923) Tj
+0 -14 Td
+(Checks: full-tests=0, demo=0, anchor=0, verify-replay=0, gir-smoke=0) Tj
+0 -14 Td
+(Dependency lock SHA-256: 356524f58a79800b379574035132bb0094c29182f608882574d2b71c4b64053c) Tj
+0 -14 Td
+(Checkpoint and artifact hashes:) Tj
+0 -14 Td
+(gir/train/checkpoint_smoke.json: 5ddc5b955d27af16fd4098684b8d9200809452bf2498bfec269d26f9aeb4ef6e) Tj
+0 -14 Td
+(gir/train/checkpoint_manifest.json: 1a8eeb804cccf15682b53f4a17d8789dfb509570d6a9f1e7e3e1205fd5ec34b6) Tj
+0 -14 Td
+(replay/tests/anchoring_vectors.json: 63f7a52eb72eb895edc91d0f82f9a5ea60ed77c35f65e696d4f2373b4f242521) Tj
+0 -14 Td
+(docs/CANONICAL_SERIALIZATION.md: 017bdacb40fb6212e58a3547e99794db4b7267b0d61db637e3f39482d3f67001) Tj
+0 -14 Td
+(training/dataset_manifest.json: c6a247df02758c701f59c3bbbbcae06b6a23962c7b41c91659754b6fa3dd211b) Tj
+0 -14 Td
+(PATENT_SUPPORT.md: 7e3bbb0385827a2120b856aa026bcebc318cfdcd43c8c215ab55dfb56fc5a5bf) Tj
+0 -14 Td
+(COUNSEL_MEMO.md: 87b9b6a1b215e7ff842860511415036f31ad7fe202031f5d0c4a995e84705bcf) Tj
+0 -14 Td
+(Status: local reproducibility evidence; external KMS and trusted timestamp receipts pending.) Tj
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000001607 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+1677
+%%EOF

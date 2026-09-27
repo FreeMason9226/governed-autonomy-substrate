@@ -4,7 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from governed_autonomy import KeyPair, PostgresReplayLog, build_runtime_service
+from governed_autonomy import KeyPair, build_runtime_service
+from governed_autonomy.storage import PostgresReplayLog
 
 
 @pytest.fixture

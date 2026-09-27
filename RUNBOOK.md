@@ -17,3 +17,9 @@ incident evidence bundle.
 Restore only the last verified replay snapshot, run the full CI security gate, obtain
 two-person approval, and transition `SAFE -> RECOVERY -> NORMAL`. Use
 [docs/incident-runbook.md](docs/incident-runbook.md) for the detailed procedure.
+
+## Legal notification
+
+Preserve the evidence archive and timestamps, notify designated security and patent counsel,
+record the incident and disclosure decision, and obtain counsel direction before changing
+or deleting any artifact relevant to prosecution or regulatory reporting.
