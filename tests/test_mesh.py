@@ -1,0 +1,173 @@
+﻿import pytest
+
+from governed_autonomy import (
+    GovernanceInput,
+    GovernanceMesh,
+    GovernanceMeshError,
+    GovernanceSourceRegistry,
+    KeyPair,
+    ReplayLog,
+    TrustStore,
+)
+
+
+def decision(allow, reason=None):
+    value = {"allow": allow}
+    if reason:
+        value["reasons"] = [reason]
+    return value
+
+
+def test_mesh_preflight_is_deterministic_and_audited():
+    inputs = [
+        GovernanceInput("policy", decision(True), weight=3, priority=2),
+        GovernanceInput("risk", decision(True), weight=1, priority=1),
+    ]
+    replay = ReplayLog()
+    mesh = GovernanceMesh(replay_log=replay)
+    first = mesh.preflight(inputs, request_digest="req-digest")
+    second = GovernanceMesh().preflight(list(reversed(inputs)), request_digest="req-digest")
+    assert first.allow is True
+    assert first.status == "allow"
+    assert first.digest == second.digest
+    assert first.replay_frame_ref == f"mesh-{first.digest}"
+    assert replay.events("governance_preflight")[0]["decision_digest"] == first.digest
+
+
+def test_mesh_fails_closed_on_high_priority_conflict():
+    result = GovernanceMesh().preflight(
+        [
+            GovernanceInput("allow-source", decision(True), weight=5, priority=10),
+            GovernanceInput("deny-source", decision(False, "risk"), weight=1, priority=10),
+        ],
+        request_digest="req-digest",
+    )
+    assert result.status == "conflict"
+    assert result.allow is False
+    assert len(result.conflicts) == 1
+    assert result.selected_source_ids == ()
+
+
+def test_mesh_same_priority_divergence_fails_closed_even_when_allow_matches():
+    result = GovernanceMesh().preflight(
+        [
+            GovernanceInput("policy", decision(True, "policy-ok"), weight=5, priority=4),
+            GovernanceInput("risk", decision(True, "risk-ok"), weight=1, priority=4),
+        ],
+        request_digest="req-digest",
+    )
+    assert result.status == "conflict"
+    assert result.allow is False
+    assert result.selected_source_ids == ()
+
+
+def test_mesh_weighted_decision_is_stable_when_priorities_do_not_conflict():
+    result = GovernanceMesh().preflight(
+        [
+            GovernanceInput("allow-a", decision(True), weight=4, priority=2),
+            GovernanceInput("deny-b", decision(False), weight=1, priority=1),
+        ],
+        request_digest="req-digest",
+    )
+    assert result.status == "allow"
+    assert result.selected_source_ids == ("allow-a",)
+
+
+def test_mesh_rejects_invalid_or_duplicate_inputs():
+    with pytest.raises(GovernanceMeshError):
+        GovernanceInput("source", {"allow": "yes"})
+    with pytest.raises(GovernanceMeshError):
+        GovernanceInput("source", {"allow": True, "unsupported": {1, 2}})
+    with pytest.raises(GovernanceMeshError):
+        GovernanceMesh().preflight(
+            [GovernanceInput("same", decision(True)), GovernanceInput("same", decision(True))],
+            request_digest="req-digest",
+        )
+    with pytest.raises(GovernanceMeshError):
+        GovernanceMesh().preflight([], request_digest="req-digest")
+
+
+def test_mesh_replay_frame_reference_is_part_of_audited_result():
+    result = GovernanceMesh().preflight(
+        [GovernanceInput("policy", decision(False, "denied"))],
+        request_digest="req-digest",
+        replay_frame_ref="authorization-frame-1",
+    )
+    assert result.status == "deny"
+    assert result.allow is False
+    assert result.replay_frame_ref == "authorization-frame-1"
+    assert result.reasons == ("denied",)
+
+
+def test_mesh_can_require_authenticated_source_provenance():
+    source = KeyPair.generate("policy-source")
+    item = GovernanceInput("policy", decision(True)).attest(source)
+    result = GovernanceMesh(
+        trusted_sources={"policy": source.public_key},
+    ).preflight([item], request_digest="req-digest")
+    assert result.allow is True
+
+
+def test_mesh_rejects_missing_or_tampered_source_attestation():
+    source = KeyPair.generate("policy-source")
+    item = GovernanceInput("policy", decision(True))
+    with pytest.raises(GovernanceMeshError):
+        GovernanceMesh(trusted_sources={"policy": source.public_key}).preflight(
+            [item], request_digest="req-digest"
+        )
+    tampered = GovernanceInput("policy", decision(False)).attest(source)
+    with pytest.raises(GovernanceMeshError):
+        GovernanceMesh(trusted_sources={"policy": source.public_key}).preflight(
+            [GovernanceInput("policy", decision(True), source_signature=tampered.source_signature)],
+            request_digest="req-digest",
+        )
+
+
+def test_mesh_accepts_trust_store_key_registry_and_rejects_revoked_keys():
+    source = KeyPair.generate("stored-source")
+    store = TrustStore()
+    store.add(source.key_id, source.public_key)
+    attested = GovernanceInput("stored-source", decision(True)).attest(source)
+    result = GovernanceMesh(trust_store=store).preflight([attested], request_digest="req-digest")
+    assert result.allow is True
+
+    store.revoke(source.key_id)
+    with pytest.raises(GovernanceMeshError):
+        GovernanceMesh(trust_store=store).preflight([attested], request_digest="req-digest")
+
+
+def test_mesh_source_registry_supports_registration_and_rotation():
+    source = KeyPair.generate("registry-source")
+    registry = GovernanceSourceRegistry()
+    registry.register("registry-source", source.public_key, metadata={"tenant": "ops"})
+    result = GovernanceMesh(source_registry=registry).preflight(
+        [GovernanceInput("registry-source", decision(True)).attest(source)],
+        request_digest="req-digest",
+    )
+    assert result.allow is True
+
+    registry.revoke("registry-source")
+    with pytest.raises(GovernanceMeshError):
+        GovernanceMesh(source_registry=registry).preflight(
+            [GovernanceInput("registry-source", decision(True)).attest(source)],
+            request_digest="req-digest",
+        )
+
+
+def test_mesh_source_registry_round_trips_through_canonical_snapshot(tmp_path):
+    source = KeyPair.generate("registry-roundtrip")
+    registry = GovernanceSourceRegistry(path=tmp_path / "source-registry.json")
+    registry.register("registry-roundtrip", source.public_key, metadata={"tenant": "ops"})
+
+    payload = registry.to_dict()
+    assert isinstance(payload["sources"]["registry-roundtrip"]["public_key"], str)
+
+    reloaded = GovernanceSourceRegistry.from_dict(payload)
+    result = GovernanceMesh(source_registry=reloaded).preflight(
+        [GovernanceInput("registry-roundtrip", decision(True)).attest(source)],
+        request_digest="req-digest",
+    )
+    assert result.allow is True
+
+    reopened = GovernanceSourceRegistry(path=tmp_path / "source-registry.json")
+    assert reopened.resolve("registry-roundtrip") is not None

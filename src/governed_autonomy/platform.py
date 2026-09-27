@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from .mesh import GovernanceInput, GovernanceSourceRegistry
 from .observability import PlatformObservability
 from .service import GovernedService
 
@@ -38,25 +39,36 @@ class ServicePrincipalRegistry:
     def validate_runtime(
         self,
         *,
-        identity: "RuntimeIdentity",
+        identity: RuntimeIdentity,
         action: str | None,
         context: dict[str, Any],
     ) -> None:
         if identity.principal_id is None:
-            raise ValueError("principal_id is required when a service-principal registry is configured")
+            raise ValueError(
+                "principal_id is required when a service-principal registry is configured"
+            )
 
         principal = self.get(identity.principal_id)
-        if principal.tenant_id is not None and identity.tenant_id is not None:
-            if principal.tenant_id != identity.tenant_id:
-                raise ValueError(
-                    f"principal tenant mismatch for principal {identity.principal_id!r}: "
-                    f"{principal.tenant_id!r} != {identity.tenant_id!r}"
-                )
+        if (
+            principal.tenant_id is not None
+            and identity.tenant_id is not None
+            and principal.tenant_id != identity.tenant_id
+        ):
+            raise ValueError(
+                f"principal tenant mismatch for principal {identity.principal_id!r}: "
+                f"{principal.tenant_id!r} != {identity.tenant_id!r}"
+            )
         if principal.tenant_id is not None and identity.tenant_id is None:
             raise ValueError("runtime identity is missing tenant_id for this service principal")
 
-        if principal.allowed_actions and action is not None and action not in principal.allowed_actions:
-            raise ValueError(f"action {action!r} is not allowed for principal {identity.principal_id!r}")
+        if (
+            principal.allowed_actions
+            and action is not None
+            and action not in principal.allowed_actions
+        ):
+            raise ValueError(
+                f"action {action!r} is not allowed for principal {identity.principal_id!r}"
+            )
 
         environment = context.get("environment", identity.environment)
         if principal.allowed_environments and environment not in principal.allowed_environments:
@@ -65,8 +77,14 @@ class ServicePrincipalRegistry:
             )
 
         source = context.get("source", identity.source)
-        if principal.allowed_sources and source is not None and source not in principal.allowed_sources:
-            raise ValueError(f"source {source!r} is not permitted for principal {identity.principal_id!r}")
+        if (
+            principal.allowed_sources
+            and source is not None
+            and source not in principal.allowed_sources
+        ):
+            raise ValueError(
+                f"source {source!r} is not permitted for principal {identity.principal_id!r}"
+            )
 
         if principal.scope and any(key not in context for key in principal.scope):
             missing = [key for key in principal.scope if key not in context]
@@ -84,8 +102,19 @@ class PlatformDeploymentPolicy:
     require_tenant: bool = False
     required_roles: tuple[str, ...] = ()
     max_context_entries: int = 32
+    mesh_required_actions: tuple[str, ...] = ()
+    mesh_required_environments: tuple[str, ...] = ()
+    mesh_required_sources: tuple[str, ...] = ()
+    min_mesh_inputs: int = 0
 
-    def validate_runtime(self, *, identity: "RuntimeIdentity", context: dict[str, Any]) -> None:
+    def validate_runtime(
+        self,
+        *,
+        identity: RuntimeIdentity,
+        context: dict[str, Any],
+        action: str | None = None,
+        mesh_inputs: list[GovernanceInput] | None = None,
+    ) -> None:
         environment = context.get("environment", identity.environment)
         if environment not in self.allowed_environments:
             raise ValueError(f"environment is not allowed for this runtime: {environment!r}")
@@ -114,11 +143,25 @@ class PlatformDeploymentPolicy:
             if missing_roles:
                 raise ValueError(f"identity is missing required roles: {missing_roles}")
 
+        if self.mesh_required_actions and action in self.mesh_required_actions:
+            if not mesh_inputs or len(mesh_inputs) < max(1, self.min_mesh_inputs):
+                raise ValueError(f"mesh_inputs are required for action {action!r}")
+        if self.mesh_required_environments and environment in self.mesh_required_environments:
+            if not mesh_inputs or len(mesh_inputs) < max(1, self.min_mesh_inputs):
+                raise ValueError(f"mesh_inputs are required in environment {environment!r}")
+        if self.mesh_required_sources:
+            provided = {item.source_id for item in mesh_inputs or ()}
+            missing_sources = tuple(source_id for source_id in self.mesh_required_sources if source_id not in provided)
+            if missing_sources:
+                raise ValueError(
+                    f"mesh source requirements are not satisfied: {', '.join(missing_sources)}"
+                )
+
         if len(context) > self.max_context_entries:
             raise ValueError("runtime context exceeds the allowed size")
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "allowed_environments": list(self.allowed_environments),
             "allowed_sources": list(self.allowed_sources),
             "require_request_id": self.require_request_id,
@@ -127,6 +170,15 @@ class PlatformDeploymentPolicy:
             "required_roles": list(self.required_roles),
             "max_context_entries": self.max_context_entries,
         }
+        if self.mesh_required_actions:
+            result["mesh_required_actions"] = list(self.mesh_required_actions)
+        if self.mesh_required_environments:
+            result["mesh_required_environments"] = list(self.mesh_required_environments)
+        if self.mesh_required_sources:
+            result["mesh_required_sources"] = list(self.mesh_required_sources)
+        if self.min_mesh_inputs:
+            result["min_mesh_inputs"] = self.min_mesh_inputs
+        return result
 
 
 @dataclass(frozen=True)
@@ -173,11 +225,17 @@ class GovernancePlatform:
         observability: PlatformObservability | None = None,
         deployment_policy: PlatformDeploymentPolicy | None = None,
         principal_registry: ServicePrincipalRegistry | None = None,
+        mesh_source_registry: GovernanceSourceRegistry | None = None,
     ) -> None:
         self.service = service
         self.identity = identity
         self.deployment_policy = deployment_policy or PlatformDeploymentPolicy()
         self.principal_registry = principal_registry
+        self.mesh_source_registry = mesh_source_registry
+        if self.mesh_source_registry is not None:
+            self.service.mesh_source_registry = self.mesh_source_registry
+            if self.service.issuer.mesh_source_registry is None:
+                self.service.issuer.mesh_source_registry = self.mesh_source_registry
         self.observability = observability or PlatformObservability(
             service=service,
             service_name=identity.service,
@@ -192,6 +250,7 @@ class GovernancePlatform:
         ttl_seconds: int = 300,
         approvals: list[Any] | None = None,
         context: dict[str, Any] | None = None,
+        mesh_inputs: list[GovernanceInput] | None = None,
     ):
         effective_request = dict(request)
         effective_context = dict(self.identity.context())
@@ -205,13 +264,19 @@ class GovernancePlatform:
                 action=effective_request.get("action"),
                 context=effective_request["context"],
             )
-        self.deployment_policy.validate_runtime(identity=self.identity, context=effective_request["context"])
+        self.deployment_policy.validate_runtime(
+            identity=self.identity,
+            context=effective_request["context"],
+            action=effective_request.get("action"),
+            mesh_inputs=mesh_inputs,
+        )
         try:
             artifact = self.service.authorize(
                 effective_request,
                 policy_id,
                 ttl_seconds=ttl_seconds,
                 approvals=approvals,
+                mesh_inputs=mesh_inputs,
             )
             self.observability.record_authorized()
             return artifact
@@ -243,4 +308,9 @@ class GovernancePlatform:
             "metrics": self.observability.snapshot()["metrics"],
             "deployment": self.deployment_policy.to_dict(),
         }
+        if self.mesh_source_registry is not None:
+            report["mesh_source_registry"] = {
+                "sources": len(self.mesh_source_registry._keys),
+                "revoked": len(self.mesh_source_registry._revoked),
+            }
         return report

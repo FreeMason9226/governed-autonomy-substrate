@@ -1,0 +1,195 @@
+name: Staging Operations
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Image tag to deploy
+        required: true
+        type: string
+      run_restore:
+        description: Run the isolated PostgreSQL backup restore drill
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  RELEASE: governed-autonomy
+  NAMESPACE: governed-autonomy-staging
+
+jobs:
+  staging:
+    name: Install operators, deploy, verify, rollback
+    runs-on: ubuntu-latest
+    environment: staging
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - uses: azure/setup-kubectl@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Configure cluster credentials
+        env:
+          KUBECONFIG_B64: ${{ secrets.KUBECONFIG_B64 }}
+        run: |
+          test -n "$KUBECONFIG_B64"
+          echo "$KUBECONFIG_B64" | base64 --decode > "$RUNNER_TEMP/kubeconfig"
+          chmod 600 "$RUNNER_TEMP/kubeconfig"
+          echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
+          kubectl auth can-i create deployments --namespace "$NAMESPACE"
+      - name: Install cluster operators
+        env:
+          LOG_FORWARD_HOST: ${{ vars.LOG_FORWARD_HOST }}
+          LOG_FORWARD_PORT: ${{ vars.LOG_FORWARD_PORT }}
+        run: |
+          test -n "$LOG_FORWARD_HOST"
+          test -n "$LOG_FORWARD_PORT"
+          kubectl create namespace observability --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create secret generic centralized-logging \
+            --namespace observability \
+            --from-literal=host="$LOG_FORWARD_HOST" \
+            --from-literal=port="$LOG_FORWARD_PORT" \
+            --dry-run=client -o yaml | kubectl apply -f -
+          helm repo add jetstack https://charts.jetstack.io
+          helm repo add external-secrets https://charts.external-secrets.io
+          helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo add fluent https://fluent.github.io/helm-charts
+          helm repo update
+          helm upgrade --install cert-manager jetstack/cert-manager \
+            --namespace cert-manager --create-namespace \
+            --set crds.enabled=true --wait --timeout 10m
+          helm upgrade --install external-secrets external-secrets/external-secrets \
+            --namespace external-secrets --create-namespace \
+            --wait --timeout 10m
+          helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+            --namespace ingress-nginx --create-namespace \
+            --wait --timeout 10m
+          helm upgrade --install kube-prometheus prometheus-community/kube-prometheus-stack \
+            --namespace observability --create-namespace \
+            --set grafana.enabled=true --wait --timeout 10m
+          helm upgrade --install fluent-bit fluent/fluent-bit \
+            --namespace observability --create-namespace \
+            -f deploy/observability/fluent-bit-values.yaml \
+            --wait --timeout 10m
+      - name: Configure staging operator prerequisites
+        env:
+          CERT_EMAIL: ${{ vars.CERT_EMAIL }}
+        run: |
+          test -n "$CERT_EMAIL"
+          kubectl get clustersecretstore gas-secrets
+          cat <<EOF | kubectl apply -f -
+          apiVersion: cert-manager.io/v1
+          kind: ClusterIssuer
+          metadata:
+            name: letsencrypt-prod
+          spec:
+            acme:
+              email: $CERT_EMAIL
+              server: https://acme-v02.api.letsencrypt.org/directory
+              privateKeySecretRef:
+                name: letsencrypt-prod-account-key
+              solvers:
+                - http01:
+                    ingress:
+                      ingressClassName: nginx
+          EOF
+      - name: Deploy staging release
+        run: |
+          helm upgrade --install "$RELEASE" deploy/helm \
+            --namespace "$NAMESPACE" --create-namespace \
+            --set image.repository="$REGISTRY/$IMAGE_NAME" \
+            --set image.tag="${{ inputs.image_tag }}" \
+            --set externalSecrets.enabled=true \
+            --set ingress.enabled=true \
+            --set serviceMonitor.enabled=true \
+            --set prometheusRule.enabled=true \
+            --set postgres.enabled=true \
+            --set postgres.backup.enabled=true \
+            --wait --timeout 10m
+          kubectl rollout status deployment/"$RELEASE" --namespace "$NAMESPACE" --timeout=10m
+      - name: Run conformance and load checks
+        env:
+          GAS_URL: ${{ vars.GAS_URL }}
+          GAS_TOKEN: ${{ secrets.GAS_TOKEN }}
+          GAS_REQUESTS: '250'
+          GAS_WORKERS: '25'
+          GAS_P95_LIMIT: '1.0'
+        run: |
+          test -n "$GAS_URL"
+          test -n "$GAS_TOKEN"
+          python -m pip install -e '.[dev]'
+          python -m pytest tests/conformance -q
+          python tests/load_smoke.py
+          curl --fail --silent -H "Authorization: Bearer $GAS_TOKEN" "$GAS_URL/readyz"
+      - name: Rollback drill
+        id: previous
+        run: |
+          mapfile -t revisions < <(helm history "$RELEASE" --namespace "$NAMESPACE" -o json | jq -r '.[].revision')
+          test "${#revisions[@]}" -ge 2
+          previous="${revisions[${#revisions[@]}-2]}"
+          echo "revision=$previous" >> "$GITHUB_OUTPUT"
+      - name: Execute rollback
+        run: bash deploy/scripts/rollback-smoke.sh
+        env:
+          NAMESPACE: ${{ env.NAMESPACE }}
+          RELEASE: ${{ env.RELEASE }}
+          REVISION: ${{ steps.previous.outputs.revision }}
+      - name: Verify rollback readiness
+        env:
+          GAS_URL: ${{ vars.GAS_URL }}
+          GAS_TOKEN: ${{ secrets.GAS_TOKEN }}
+        run: curl --fail --silent -H "Authorization: Bearer $GAS_TOKEN" "$GAS_URL/readyz"
+
+  restore:
+    name: Isolated backup restore drill
+    needs: staging
+    if: inputs.run_restore
+    runs-on: ubuntu-latest
+    environment: staging
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-kubectl@v4
+      - name: Configure cluster credentials
+        env:
+          KUBECONFIG_B64: ${{ secrets.KUBECONFIG_B64 }}
+        run: |
+          test -n "$KUBECONFIG_B64"
+          echo "$KUBECONFIG_B64" | base64 --decode > "$RUNNER_TEMP/kubeconfig"
+          echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
+      - name: Download encrypted backup
+        env:
+          BACKUP_URL: ${{ vars.BACKUP_URL }}
+          BACKUP_BEARER_TOKEN: ${{ secrets.BACKUP_BEARER_TOKEN }}
+        run: |
+          test -n "$BACKUP_URL"
+          test -n "$BACKUP_BEARER_TOKEN"
+          curl --fail --location --retry 3 \
+            -H "Authorization: Bearer $BACKUP_BEARER_TOKEN" \
+            "$BACKUP_URL" --output "$RUNNER_TEMP/replay.sql.gz"
+      - name: Restore into isolated PostgreSQL pod
+        env:
+          BACKUP_FILE: ${{ runner.temp }}/replay.sql.gz
+        run: |
+          kubectl create namespace gas-restore --dry-run=client -o yaml | kubectl apply -f -
+          kubectl run gas-restore-postgres --namespace gas-restore \
+            --image=postgres:16 --restart=Never \
+            --env=POSTGRES_USER=restore --env=POSTGRES_PASSWORD=restore \
+            --env=POSTGRES_DB=restore
+          kubectl wait --for=condition=Ready pod/gas-restore-postgres \
+            --namespace gas-restore --timeout=5m
+          kubectl cp "$BACKUP_FILE" gas-restore/gas-restore-postgres:/tmp/replay.sql.gz
+          kubectl exec --namespace gas-restore gas-restore-postgres -- \
+            sh -c 'gunzip -c /tmp/replay.sql.gz | psql -U restore -d restore --set ON_ERROR_STOP=1'
+          kubectl delete namespace gas-restore --wait=true

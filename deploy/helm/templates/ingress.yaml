@@ -1,0 +1,39 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "governed-autonomy.fullname" . }}
+  labels:
+    {{- include "governed-autonomy.labels" . | nindent 4 }}
+  annotations:
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.clusterIssuer | quote }}
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  tls:
+    - hosts: [{{ .Values.ingress.host | quote }}]
+      secretName: {{ include "governed-autonomy.fullname" . }}-tls
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "governed-autonomy.fullname" . }}
+                port: {name: http}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "governed-autonomy.fullname" . }}
+  labels:
+    {{- include "governed-autonomy.labels" . | nindent 4 }}
+spec:
+  secretName: {{ include "governed-autonomy.fullname" . }}-tls
+  issuerRef:
+    name: {{ .Values.ingress.clusterIssuer }}
+    kind: ClusterIssuer
+  dnsNames: [{{ .Values.ingress.host | quote }}]
+{{- end }}

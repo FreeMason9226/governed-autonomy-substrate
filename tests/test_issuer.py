@@ -2,8 +2,13 @@ import pytest
 
 from governed_autonomy import (
     AuthorizationIssuer,
+    AuthorizationError,
     DeterministicArbiter,
     ExecutionBoundary,
+    GovernanceInput,
+    GovernanceMesh,
+    GovernanceSourceRegistry,
+    GovernedService,
     KeyPair,
     Policy,
     PolicyDeniedError,
@@ -116,3 +121,161 @@ def test_issuer_accepts_signed_approvals_for_quorum_and_rejects_tampered_evidenc
             quorum_policy,
             approvals=[approvals[0], {**approvals[1].to_dict(), "signature": "not-valid"}],
         )
+
+
+def test_issuer_binds_allow_mesh_preflight_into_signed_decision_and_replay():
+    from governed_autonomy import GovernanceInput, GovernanceMesh
+
+    issuer = KeyPair.generate("mesh-issuer")
+    log = ReplayLog()
+    artifact = AuthorizationIssuer(
+        issuer=issuer,
+        replay_log=log,
+        nonce_factory=lambda: "mesh-nonce",
+        mesh=GovernanceMesh(replay_log=log),
+    ).authorize(
+        {"action": "write_file", "path": "out.txt", "content": "ok"},
+        policy(),
+        mesh_inputs=[GovernanceInput("policy-source", {"allow": True}, priority=5)],
+    )
+
+    assert artifact.decision["mesh_preflight_digest"]
+    assert log.events("governance_preflight")[0]["decision_digest"] == artifact.decision["mesh_preflight_digest"]
+    assert log.get("authorization:mesh-nonce").event["artifact_payload"] == artifact.unsigned_payload().decode()
+
+
+def test_issuer_rejects_denied_mesh_preflight_before_issuing_gaa():
+    from governed_autonomy import GovernanceInput, GovernanceMesh
+
+    log = ReplayLog()
+    with pytest.raises(PolicyDeniedError) as raised:
+        AuthorizationIssuer(
+            issuer=KeyPair.generate("mesh-deny"),
+            replay_log=log,
+            nonce_factory=lambda: "mesh-denied-nonce",
+            mesh=GovernanceMesh(replay_log=log),
+        ).authorize(
+            {"action": "write_file", "path": "out.txt", "content": "ok"},
+            policy(),
+            mesh_inputs=[GovernanceInput("risk-source", {"allow": False, "reasons": ["risk"]})],
+        )
+
+    assert "governance_mesh_denied" in raised.value.decision["reason_codes"]
+    assert raised.value.decision["mesh_preflight_digest"]
+    assert log.get("authorization:mesh-denied-nonce").event["issued"] is False
+
+
+def test_execution_reconstructs_mesh_evidence_before_running_action():
+    issuer = KeyPair.generate("mesh-execution")
+    log = ReplayLog()
+    artifact = AuthorizationIssuer(
+        issuer=issuer,
+        replay_log=log,
+        nonce_factory=lambda: "mesh-execution-nonce",
+        mesh=GovernanceMesh(replay_log=log),
+    ).authorize(
+        {"action": "write_file", "path": "out.txt", "content": "ok"},
+        policy(),
+        mesh_inputs=[GovernanceInput("policy-source", {"allow": True}, priority=5)],
+    )
+
+    result = ExecutionBoundary(
+        replay_log=log,
+        issuer_keys={issuer.key_id: issuer.public_key},
+        clock=lambda: 100,
+    ).execute(artifact, lambda request: request["content"])
+    assert result == "ok"
+
+
+def test_issuer_accepts_mesh_source_registry_for_preflight_verified_authorization():
+    issuer = KeyPair.generate("mesh-registry-issuer")
+    source = KeyPair.generate("policy-source")
+    registry = GovernanceSourceRegistry()
+    registry.register("policy-source", source.public_key)
+
+    artifact = AuthorizationIssuer(
+        issuer=issuer,
+        replay_log=ReplayLog(),
+        nonce_factory=lambda: "mesh-registry-nonce",
+        mesh_source_registry=registry,
+    ).authorize(
+        {"action": "write_file", "path": "out.txt", "content": "ok"},
+        policy(),
+        mesh_inputs=[GovernanceInput("policy-source", {"allow": True}, priority=5).attest(source)],
+    )
+
+    assert artifact.decision["mesh_preflight_digest"]
+
+
+def test_governed_service_binds_mesh_source_registry_for_runtime_authorization():
+    issuer = KeyPair.generate("mesh-service-issuer")
+    source = KeyPair.generate("runtime-source")
+    registry = GovernanceSourceRegistry()
+    registry.register("runtime-source", source.public_key)
+    replay = ReplayLog()
+    service = GovernedService(
+        issuer=AuthorizationIssuer(issuer=issuer, replay_log=replay),
+        boundary=ExecutionBoundary(
+            replay_log=replay,
+            issuer_keys={issuer.key_id: issuer.public_key},
+            clock=lambda: 100,
+        ),
+        policies={"files-v1": policy()},
+        actions={"write_file": lambda request: request["content"]},
+        mesh_source_registry=registry,
+    )
+
+    artifact = service.authorize(
+        {"action": "write_file", "path": "out.txt", "content": "ok"},
+        "files-v1",
+        mesh_inputs=[GovernanceInput("runtime-source", {"allow": True}, priority=5).attest(source)],
+    )
+    assert artifact.decision["mesh_preflight_digest"]
+    assert service.issuer.mesh_source_registry is registry
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        lambda event: event["mesh_inputs"][0]["decision"].update({"allow": False}),
+        lambda event: event.update({"mesh_preflight_digest": "wrong"}),
+        lambda event: event.update({"mesh_inputs": [{"source_id": "bad"}]}),
+        lambda event: event["mesh_inputs"].append(event["mesh_inputs"][0].copy()),
+        lambda event: event.update({"mesh_request_digest": "wrong"}),
+    ],
+)
+def test_execution_rejects_tampered_or_invalid_mesh_evidence(tamper):
+    issuer = KeyPair.generate()
+    log = ReplayLog()
+    artifact = AuthorizationIssuer(
+        issuer=issuer,
+        replay_log=log,
+        nonce_factory=lambda: "tampered-mesh-nonce",
+    ).authorize(
+        {"action": "write_file", "path": "out.txt", "content": "ok"},
+        policy(),
+        mesh_inputs=[GovernanceInput("policy-source", {"allow": True})],
+    )
+    tamper(log.get("authorization:tampered-mesh-nonce").event)
+
+    with pytest.raises(AuthorizationError):
+        ExecutionBoundary(
+            replay_log=log,
+            issuer_keys={issuer.key_id: issuer.public_key},
+            clock=lambda: 100,
+        ).execute(artifact, lambda request: request["content"])
+
+
+def test_legacy_artifact_without_mesh_evidence_still_executes():
+    issuer = KeyPair.generate("legacy")
+    log = ReplayLog()
+    artifact = AuthorizationIssuer(
+        issuer=issuer,
+        replay_log=log,
+        nonce_factory=lambda: "legacy-nonce",
+    ).authorize({"action": "write_file", "path": "out.txt", "content": "ok"}, policy())
+    assert ExecutionBoundary(
+        replay_log=log,
+        issuer_keys={issuer.key_id: issuer.public_key},
+        clock=lambda: 100,
+    ).execute(artifact, lambda request: request["content"]) == "ok"

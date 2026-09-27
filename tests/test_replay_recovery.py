@@ -82,3 +82,16 @@ def test_replay_log_reconstructs_authorization_history():
     assert summary["success_count"] == 1
     assert reconstructed["n1"]["authorization"]["issued"] is True
     assert reconstructed["n1"]["execution"]["status"] == "completed"
+
+
+def test_replay_integrity_report_is_deterministic_and_events_are_detached():
+    log = ReplayLog()
+    log.append("frame-1", {"type": "authorization", "nonce": "n-1", "decision": {"allow": True}})
+    first = log.verify_integrity()
+    second = log.verify_integrity()
+    assert first == second
+    assert first["ok"] is True
+    assert first["frame_count"] == 1
+    events = log.events("authorization")
+    events[0]["decision"]["allow"] = False
+    assert log.events("authorization")[0]["decision"]["allow"] is True

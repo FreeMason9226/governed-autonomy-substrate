@@ -54,7 +54,9 @@ class RuntimeMetrics:
 class PlatformObservability:
     """Runtime monitoring for the governance barrier and platform shell."""
 
-    def __init__(self, *, service: GovernedService, service_name: str, environment: str = "dev") -> None:
+    def __init__(
+        self, *, service: GovernedService, service_name: str, environment: str = "dev"
+    ) -> None:
         self.service = service
         self.metrics = RuntimeMetrics(service=service_name, environment=environment)
 
@@ -88,9 +90,17 @@ class PlatformObservability:
     def prometheus(self) -> str:
         values = self.metrics.to_dict()
         lines = []
-        for key in ("total_authorizations", "successful_authorizations", "denied_authorizations",
-                    "total_executions", "successful_executions", "failed_executions"):
-            lines.append(f'governed_autonomy_{key}{{service="{self.metrics.service}",environment="{self.metrics.environment}"}} {values[key]}')
+        for key in (
+            "total_authorizations",
+            "successful_authorizations",
+            "denied_authorizations",
+            "total_executions",
+            "successful_executions",
+            "failed_executions",
+        ):
+            lines.append(
+                f'governed_autonomy_{key}{{service="{self.metrics.service}",environment="{self.metrics.environment}"}} {values[key]}'
+            )
         return "\n".join(lines) + "\n"
 
     def trace_hook(self, event: str, attributes: dict[str, Any]) -> None:

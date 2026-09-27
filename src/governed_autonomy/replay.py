@@ -1,3 +1,4 @@
+import copy
 import hashlib
 import json
 import sqlite3
@@ -60,14 +61,10 @@ class ReplayLog:
                 )
             except (KeyError, TypeError, json.JSONDecodeError) as exc:
                 raise ValueError(f"invalid replay frame at line {line_number}") from exc
-            expected = ReplayFrame.create(
-                frame.frame_id, frame.previous_hash, frame.event
-            )
+            expected = ReplayFrame.create(frame.frame_id, frame.previous_hash, frame.event)
             if frame.frame_hash != expected.frame_hash:
                 raise ValueError(f"invalid frame hash at line {line_number}")
-            if frame.previous_hash != (
-                log._frames[-1].frame_hash if log._frames else ""
-            ):
+            if frame.previous_hash != (log._frames[-1].frame_hash if log._frames else ""):
                 raise ValueError(f"broken replay chain at line {line_number}")
             log._frames.append(frame)
             if frame.event.get("type") == "execution":
@@ -109,7 +106,7 @@ class ReplayLog:
         if event_type is not None and not event_type:
             raise ValueError("event_type must not be empty")
         return tuple(
-            frame.event
+            copy.deepcopy(frame.event)
             for frame in self._frames
             if event_type is None or frame.event.get("type") == event_type
         )
@@ -118,7 +115,7 @@ class ReplayLog:
         if not nonce:
             raise ValueError("nonce must not be empty")
         return tuple(
-            frame.event
+            copy.deepcopy(frame.event)
             for frame in self._frames
             if frame.event.get("nonce") == nonce
         )
@@ -161,20 +158,14 @@ class ReplayLog:
     def audit_summary(self) -> dict[str, Any]:
         """Return an immutable, deterministic summary of authorization and execution history."""
         decisions = self.reconstruct_decisions()
-        authorizations = [
-            event for event in self.events("authorization") if event.get("nonce")
-        ]
+        authorizations = [event for event in self.events("authorization") if event.get("nonce")]
         executions = [event for event in self.events("execution") if event.get("nonce")]
         return {
             "frame_count": len(self._frames),
             "authorization_count": len(authorizations),
             "execution_count": len(executions),
-            "success_count": sum(
-                1 for event in executions if event.get("status") == "completed"
-            ),
-            "failure_count": sum(
-                1 for event in executions if event.get("status") == "failed"
-            ),
+            "success_count": sum(1 for event in executions if event.get("status") == "completed"),
+            "failure_count": sum(1 for event in executions if event.get("status") == "failed"),
             "nonces": sorted(str(event["nonce"]) for event in authorizations + executions),
             "decisions": decisions,
         }
@@ -187,6 +178,34 @@ class ReplayLog:
                 return False
             previous_hash = frame.frame_hash
         return True
+
+    def verify_integrity(self) -> dict[str, Any]:
+        """Return deterministic integrity evidence for replay/divergence audits."""
+        previous_hash = ""
+        seen_frame_ids: set[str] = set()
+        duplicate_frame_ids: list[str] = []
+        first_error: dict[str, Any] | None = None
+        for index, frame in enumerate(self._frames):
+            if frame.frame_id in seen_frame_ids:
+                duplicate_frame_ids.append(frame.frame_id)
+            seen_frame_ids.add(frame.frame_id)
+            expected = ReplayFrame.create(frame.frame_id, previous_hash, frame.event)
+            if first_error is None and frame.previous_hash != previous_hash:
+                first_error = {"index": index, "frame_id": frame.frame_id, "reason": "previous_hash_mismatch"}
+            if first_error is None and frame.frame_hash != expected.frame_hash:
+                first_error = {"index": index, "frame_id": frame.frame_id, "reason": "frame_hash_mismatch"}
+            previous_hash = frame.frame_hash
+        content = [frame.to_dict() for frame in self._frames]
+        replay_digest = hashlib.sha256(canonical_json(content)).hexdigest()
+        ok = first_error is None and not duplicate_frame_ids
+        return {
+            "ok": ok,
+            "frame_count": len(self._frames),
+            "head_hash": previous_hash,
+            "replay_digest": replay_digest,
+            "duplicate_frame_ids": sorted(duplicate_frame_ids),
+            "first_error": first_error,
+        }
 
 
 class SQLiteReplayLog(ReplayLog):
@@ -229,8 +248,7 @@ class SQLiteReplayLog(ReplayLog):
             )
         ]
         self._used_nonces = {
-            row[0]
-            for row in self._connection.execute("SELECT nonce FROM consumed_nonces")
+            row[0] for row in self._connection.execute("SELECT nonce FROM consumed_nonces")
         }
         if not self.verify_chain():
             self._connection.close()
@@ -267,9 +285,7 @@ class SQLiteReplayLog(ReplayLog):
     def claim_nonce(self, nonce: str) -> None:
         with self._lock:
             try:
-                self._connection.execute(
-                    "INSERT INTO consumed_nonces (nonce) VALUES (?)", (nonce,)
-                )
+                self._connection.execute("INSERT INTO consumed_nonces (nonce) VALUES (?)", (nonce,))
                 self._connection.commit()
             except sqlite3.IntegrityError as exc:
                 self._connection.rollback()

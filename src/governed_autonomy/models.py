@@ -4,7 +4,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .canonical import canonical_json
-from .crypto import KeyPair, verify_signature
+from .crypto import verify_signature
+from .signing import Signer
 
 
 @dataclass(frozen=True)
@@ -38,7 +39,7 @@ class SignedApproval:
         action: str,
         request_digest: str,
         decision_digest: str,
-        issuer: KeyPair,
+        issuer: Signer,
         actor_id: str | None = None,
         context: dict[str, Any] | None = None,
     ) -> "SignedApproval":
@@ -64,12 +65,16 @@ class SignedApproval:
     def verify(self, public_key: Any) -> bool:
         return verify_signature(public_key, self.unsigned_payload(), self.signature)
 
-    def matches_request(self, request: dict[str, Any], *, decision: dict[str, Any] | None = None) -> bool:
+    def matches_request(
+        self, request: dict[str, Any], *, decision: dict[str, Any] | None = None
+    ) -> bool:
         if not isinstance(request, dict):
             return False
         if self.action != str(request.get("action")):
             return False
-        request_without_approvals = {key: value for key, value in request.items() if key != "approvals"}
+        request_without_approvals = {
+            key: value for key, value in request.items() if key != "approvals"
+        }
         digest = hashlib.sha256(canonical_json(request_without_approvals)).hexdigest()
         if self.request_digest != digest:
             return False
@@ -83,11 +88,13 @@ class SignedApproval:
         *,
         request: dict[str, Any],
         decision: dict[str, Any],
-        issuer: KeyPair,
+        issuer: Signer,
         actor_id: str | None = None,
         context: dict[str, Any] | None = None,
     ) -> "SignedApproval":
-        request_without_approvals = {key: value for key, value in request.items() if key != "approvals"}
+        request_without_approvals = {
+            key: value for key, value in request.items() if key != "approvals"
+        }
         return cls.issue(
             action=str(request.get("action")),
             request_digest=hashlib.sha256(canonical_json(request_without_approvals)).hexdigest(),
@@ -174,7 +181,7 @@ class GovernanceAuthorizationArtifact:
         expires_at: int,
         nonce: str,
         replay_frame_ref: str,
-        issuer: KeyPair,
+        issuer: Signer,
     ) -> "GovernanceAuthorizationArtifact":
         unsigned = cls(
             action_request,
@@ -221,13 +228,11 @@ class GovernanceAuthorizationArtifact:
             raise ValueError("action_request must be an object")
         if not isinstance(value["decision"], dict):
             raise ValueError("decision must be an object")
-        if not isinstance(value["expires_at"], int) or isinstance(
-            value["expires_at"], bool
-        ):
+        if not isinstance(value["expires_at"], int) or isinstance(value["expires_at"], bool):
             raise ValueError("expires_at must be an integer")
-        for field in ("nonce", "replay_frame_ref", "issuer_key_id", "signature"):
-            if not isinstance(value[field], str) or not value[field]:
-                raise ValueError(f"{field} must be a non-empty string")
+        for field_name in ("nonce", "replay_frame_ref", "issuer_key_id", "signature"):
+            if not isinstance(value[field_name], str) or not value[field_name]:
+                raise ValueError(f"{field_name} must be a non-empty string")
         return cls(
             action_request=value["action_request"],
             decision=value["decision"],

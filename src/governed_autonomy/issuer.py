@@ -1,13 +1,16 @@
+﻿import hashlib
 import secrets
 import time
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from .crypto import KeyPair
+from .canonical import canonical_json
 from .errors import AuthorizationError
+from .mesh import GovernanceInput, GovernancePreflightDecision
 from .models import GovernanceAuthorizationArtifact, SignedApproval
 from .policy import DeterministicArbiter, Policy
 from .replay import ReplayLog
+from .signing import Signer
 
 
 class PolicyDeniedError(AuthorizationError):
@@ -30,17 +33,21 @@ class AuthorizationIssuer:
     def __init__(
         self,
         *,
-        issuer: KeyPair,
+        issuer: Signer,
         replay_log: ReplayLog,
         arbiter: DeterministicArbiter | None = None,
         clock: Callable[[], int] | None = None,
         nonce_factory: Callable[[], str] | None = None,
+        mesh: Any | None = None,
+        mesh_source_registry: Any | None = None,
     ) -> None:
         self.issuer = issuer
         self.replay_log = replay_log
         self.arbiter = arbiter or DeterministicArbiter()
         self.clock = clock or (lambda: int(time.time()))
         self.nonce_factory = nonce_factory or (lambda: secrets.token_urlsafe(24))
+        self.mesh = mesh
+        self.mesh_source_registry = mesh_source_registry
 
     def authorize(
         self,
@@ -49,6 +56,7 @@ class AuthorizationIssuer:
         *,
         ttl_seconds: int = 300,
         approvals: Sequence[SignedApproval | dict[str, Any]] | None = None,
+        mesh_inputs: Sequence[GovernanceInput] | None = None,
     ) -> GovernanceAuthorizationArtifact:
         if ttl_seconds <= 0:
             raise ValueError("ttl_seconds must be positive")
@@ -71,7 +79,81 @@ class AuthorizationIssuer:
                 effective_request["approvals"] = [*list(existing), *serialized]
             else:
                 raise ValueError("request approvals must be a list when present")
+
+        action = str(effective_request.get("action")) if effective_request.get("action") is not None else None
+        mesh_values = tuple(mesh_inputs or ())
+        required_mesh_count = getattr(policy, "required_mesh_inputs", {}).get(action, 0)
+        required_mesh_sources = getattr(policy, "required_mesh_sources", {}).get(action, ())
+        environment = (
+            effective_request.get("context", {}).get("environment")
+            if isinstance(effective_request.get("context"), dict)
+            else None
+        )
+        active_mesh_requirement = (
+            action in getattr(policy, "mesh_required_actions", ())
+            or environment in getattr(policy, "mesh_required_environments", ())
+        )
+        if active_mesh_requirement or required_mesh_count or required_mesh_sources:
+            provided = {item.source_id for item in mesh_values}
+            if active_mesh_requirement and not mesh_values:
+                denied = self.arbiter.decide(effective_request, policy)
+                denied["allow"] = False
+                denied["reason_codes"] = [
+                    *denied.get("reason_codes", []),
+                    "mesh_inputs_required",
+                ]
+                denied["reasons"] = [
+                    *denied.get("reasons", []),
+                    f"mesh inputs required for action {action!r}",
+                ]
+                raise PolicyDeniedError(denied)
+            if len(mesh_values) < required_mesh_count:
+                denied = self.arbiter.decide(effective_request, policy)
+                denied["allow"] = False
+                denied["reason_codes"] = [
+                    *denied.get("reason_codes", []),
+                    "mesh_inputs_required",
+                ]
+                denied["reasons"] = [
+                    *denied.get("reasons", []),
+                    f"mesh inputs required for action {action!r}",
+                ]
+                raise PolicyDeniedError(denied)
+            missing_sources = tuple(source for source in required_mesh_sources if source not in provided)
+            if missing_sources:
+                denied = self.arbiter.decide(effective_request, policy)
+                denied["allow"] = False
+                denied["reason_codes"] = [
+                    *denied.get("reason_codes", []),
+                    "mesh_sources_missing",
+                ]
+                denied["reasons"] = [
+                    *denied.get("reasons", []),
+                    f"mesh source requirements unmet: {', '.join(missing_sources)}",
+                ]
+                raise PolicyDeniedError(denied)
+
         decision = self.arbiter.decide(effective_request, policy)
+        mesh_decision: GovernancePreflightDecision | None = None
+        if mesh_values:
+            request_digest = hashlib.sha256(canonical_json(effective_request)).hexdigest()
+            mesh = self.mesh
+            if mesh is None:
+                from .mesh import GovernanceMesh
+                mesh = GovernanceMesh(
+                    replay_log=self.replay_log,
+                    source_registry=self.mesh_source_registry,
+                )
+            mesh_decision = mesh.preflight(mesh_values, request_digest=request_digest)
+            if not mesh_decision.allow:
+                denied = dict(decision)
+                denied["allow"] = False
+                denied["reason_codes"] = [*denied.get("reason_codes", []), "governance_mesh_denied"]
+                denied["reasons"] = [*denied.get("reasons", []), *mesh_decision.reasons]
+                denied["mesh_preflight_digest"] = mesh_decision.digest
+                decision = denied
+            else:
+                decision = {**decision, "mesh_preflight_digest": mesh_decision.digest}
         nonce = self.nonce_factory()
         frame_id = f"authorization:{nonce}"
         if not decision["allow"]:
@@ -105,6 +187,17 @@ class AuthorizationIssuer:
                 "artifact_payload": unsigned.unsigned_payload().decode("utf-8"),
                 "decision": decision,
                 "issued": True,
+                **(
+                    {
+                        "mesh_preflight_digest": mesh_decision.digest,
+                        "mesh_request_digest": hashlib.sha256(
+                            canonical_json(effective_request)
+                        ).hexdigest(),
+                        "mesh_inputs": [item.to_dict() for item in mesh_inputs or ()],
+                    }
+                    if mesh_decision is not None
+                    else {}
+                ),
             },
         )
         return GovernanceAuthorizationArtifact.issue(
@@ -128,8 +221,7 @@ class AuthorizationIssuer:
         if not failed_nonce:
             raise ValueError("failed_nonce must not be empty")
         failed = any(
-            event.get("type") == "execution"
-            and event.get("status") == "failed"
+            event.get("type") == "execution" and event.get("status") == "failed"
             for event in self.replay_log.events_for_nonce(failed_nonce)
         )
         if not failed:

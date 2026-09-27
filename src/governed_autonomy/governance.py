@@ -24,10 +24,7 @@ class GovernanceRule:
         if not action:
             raise ValueError("governance rule must include an action")
 
-        required_fields = tuple(
-            str(field)
-            for field in payload.get("required_fields", ())
-        )
+        required_fields = tuple(str(field) for field in payload.get("required_fields", ()))
         exact_fields_raw = payload.get("exact_fields", {})
         if not isinstance(exact_fields_raw, Mapping):
             raise ValueError("exact_fields must be a mapping of field->value")
@@ -85,10 +82,7 @@ class GovernanceRuleTranslator:
                 raise ValueError("source mapping must include a 'rules' collection")
             effective_policy_id = str(source.get("policy_id") or policy_id or self.policy_id)
             policy = self.translate(rules, policy_id=effective_policy_id)
-            required_context = tuple(
-                str(field)
-                for field in source.get("required_context", ())
-            )
+            required_context = tuple(str(field) for field in source.get("required_context", ()))
             exact_context_raw = source.get("exact_context", {})
             if exact_context_raw is None:
                 exact_context_raw = {}
@@ -98,11 +92,12 @@ class GovernanceRuleTranslator:
             required_approvals_raw = source.get("required_approvals", {})
             if isinstance(required_approvals_raw, Mapping):
                 required_approvals = {
-                    str(action): int(value)
-                    for action, value in required_approvals_raw.items()
+                    str(action): int(value) for action, value in required_approvals_raw.items()
                 }
-            elif isinstance(required_approvals_raw, int) and not isinstance(required_approvals_raw, bool):
-                required_approvals = {action: required_approvals_raw for action in policy.allowed_actions}
+            elif isinstance(required_approvals_raw, int) and not isinstance(
+                required_approvals_raw, bool
+            ):
+                required_approvals = dict.fromkeys(policy.allowed_actions, required_approvals_raw)
             else:
                 required_approvals = {}
             if not required_context and not exact_context and not required_approvals:
@@ -132,7 +127,9 @@ class GovernanceRuleTranslator:
             if current is None:
                 normalized[rule.action] = rule
                 continue
-            merged_required = tuple(dict.fromkeys((*current.required_fields, *rule.required_fields)))
+            merged_required = tuple(
+                dict.fromkeys((*current.required_fields, *rule.required_fields))
+            )
             merged_exact = {**current.exact_fields, **rule.exact_fields}
             merged_required_context = tuple(
                 sorted(dict.fromkeys((*current.required_context, *rule.required_context)))
@@ -185,7 +182,9 @@ class GovernanceRuleTranslator:
         if not text:
             raise ValueError("governance rule strings must not be empty")
 
-        match = re.match(r"^(?:allow|require)\s+([A-Za-z0-9_]+)\s+(?:when|if|for)\s+(.*)$", text, re.IGNORECASE)
+        match = re.match(
+            r"^(?:allow|require)\s+([A-Za-z0-9_]+)\s+(?:when|if|for)\s+(.*)$", text, re.IGNORECASE
+        )
         if match:
             action, remainder = match.groups()
             required_fields: list[str] = []
@@ -227,7 +226,11 @@ class GovernanceRuleTranslator:
                 required_approvals=required_approvals,
             )
 
-        match = re.match(r"^require\s+([A-Za-z0-9_]+)\s+([A-Za-z0-9_]+)\s*(?:==|=|is)\s*(.+)$", text, re.IGNORECASE)
+        match = re.match(
+            r"^require\s+([A-Za-z0-9_]+)\s+([A-Za-z0-9_]+)\s*(?:==|=|is)\s*(.+)$",
+            text,
+            re.IGNORECASE,
+        )
         if match:
             action, field, value = match.groups()
             value = self._normalize_literal(value)
