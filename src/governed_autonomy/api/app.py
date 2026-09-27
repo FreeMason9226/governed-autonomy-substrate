@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import hmac
 import os
+import time
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, replace
@@ -438,6 +439,7 @@ def create_app(
         policy = ctx.platform.service.policies.get(body.policy_id)
         if policy is None:
             raise KeyError(f"unknown policy: {body.policy_id}")
+        mesh_inputs = [GovernanceInput.from_dict(item) for item in body.mesh_inputs]
         required_approvals = policy.required_approvals.get(str(body.request.get("action")), 0)
         runtime_platform = _request_platform(ctx.platform, request, caller)
         record = ctx.control_plane.create_authorization(
@@ -465,7 +467,7 @@ def create_app(
                 ttl_seconds=body.ttl_seconds,
                 approvals=approvals or None,
                 context=dict(body.context),
-                mesh_inputs=[GovernanceInput.from_dict(item) for item in body.mesh_inputs],
+                mesh_inputs=mesh_inputs,
             )
         except PolicyDeniedError as exc:
             ctx.control_plane.update_authorization(
@@ -503,6 +505,17 @@ def create_app(
         ctx: AppContext = Depends(current_context),
         caller: AuthContext = Depends(auth),
     ):
+        record = ctx.control_plane.get_authorization(authorization_id)
+        now = int(time.time())
+        if record.expires_at is not None and record.expires_at <= now:
+            expired = ctx.control_plane.update_authorization(
+                authorization_id,
+                status="expired",
+                error_text="authorization expired before approval",
+            )
+            return _authorization_response(expired, ctx.control_plane)
+        if record.status == "cancelled" or record.status == "failed":
+            return _authorization_response(record, ctx.control_plane)
         ctx.control_plane.record_approval(
             authorization_id,
             decision="approve",
@@ -510,8 +523,6 @@ def create_app(
             rationale=body.rationale,
         )
         record = ctx.control_plane.get_authorization(authorization_id)
-        if record.status == "cancelled" or record.status == "failed":
-            return _authorization_response(record, ctx.control_plane)
         if record.status == "authorized" or record.approvals_count < record.required_approvals:
             return _authorization_response(record, ctx.control_plane)
         if record.status != "awaiting_approval":
@@ -519,10 +530,21 @@ def create_app(
         runtime_platform = _request_platform(ctx.platform, request, caller)
         context_payload = dict(record.context)
         context_payload["approval_count"] = record.approvals_count
+        approvals = [
+            {
+                "decision": item.decision,
+                "actor_id": item.actor_id,
+                "rationale": item.rationale,
+            }
+            for item in ctx.control_plane.list_approvals(authorization_id)
+            if item.decision == "approve"
+        ]
+        ttl_seconds = max(1, (record.expires_at or now) - now)
         artifact = runtime_platform.authorize(
             dict(record.request_payload),
             record.policy_id,
-            ttl_seconds=record.ttl_seconds,
+            ttl_seconds=ttl_seconds,
+            approvals=approvals,
             context=context_payload,
             mesh_inputs=[GovernanceInput.from_dict(item) for item in record.mesh_inputs],
         )

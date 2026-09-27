@@ -306,6 +306,7 @@ class InMemoryControlPlaneRepository:
     ) -> AuthorizationRecord:
         with self._lock:
             authorization_id = uuid.uuid4().hex
+            expires_at = int(time.time()) + ttl_seconds
             record = AuthorizationRecord(
                 authorization_id=authorization_id,
                 policy_id=policy_id,
@@ -316,6 +317,7 @@ class InMemoryControlPlaneRepository:
                 idempotency_key=idempotency_key,
                 request_digest=request_digest,
                 ttl_seconds=ttl_seconds,
+                expires_at=expires_at,
                 required_approvals=required_approvals,
                 max_attempts=max_attempts,
             )
@@ -350,6 +352,7 @@ class InMemoryControlPlaneRepository:
                 for record in self._authorizations.values()
                 if record.status == "authorized"
                 and (record.next_attempt_at is None or record.next_attempt_at <= effective_now)
+                and (record.expires_at is None or record.expires_at > effective_now)
             ]
             records.sort(key=lambda item: (item.next_attempt_at or 0.0, item.authorization_id))
             claimed: list[AuthorizationRecord] = []
@@ -668,14 +671,15 @@ class PostgresControlPlaneRepository:
     ) -> AuthorizationRecord:
         authorization_id = uuid.uuid4().hex
         status = "awaiting_approval" if required_approvals > 0 else "requested"
+        expires_at = int(time.time()) + ttl_seconds
         cursor = self.connection.cursor()
         try:
             cursor.execute(
                 """
                 INSERT INTO gas_authorizations(
                     authorization_id, policy_id, request_json, context_json, mesh_inputs_json,
-                    status, idempotency_key, request_digest, ttl_seconds, required_approvals, max_attempts
-                ) VALUES (%s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s, %s, %s, %s, %s, %s)
+                    status, idempotency_key, request_digest, ttl_seconds, required_approvals, max_attempts, expires_at
+                ) VALUES (%s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     authorization_id,
@@ -689,6 +693,7 @@ class PostgresControlPlaneRepository:
                     ttl_seconds,
                     required_approvals,
                     max_attempts,
+                    expires_at,
                 ),
             )
             self.connection.commit()
@@ -702,6 +707,7 @@ class PostgresControlPlaneRepository:
                 idempotency_key=idempotency_key,
                 request_digest=request_digest,
                 ttl_seconds=ttl_seconds,
+                expires_at=expires_at,
                 required_approvals=required_approvals,
                 max_attempts=max_attempts,
             )
@@ -809,7 +815,9 @@ class PostgresControlPlaneRepository:
                 WITH claimed AS (
                     SELECT authorization_id
                     FROM gas_authorizations
-                    WHERE status='authorized' AND (next_attempt_at IS NULL OR next_attempt_at <= %s)
+                    WHERE status='authorized'
+                      AND (next_attempt_at IS NULL OR next_attempt_at <= %s)
+                      AND (expires_at IS NULL OR expires_at > %s)
                     ORDER BY COALESCE(next_attempt_at, 0), authorization_id
                     LIMIT %s
                     FOR UPDATE SKIP LOCKED
@@ -825,7 +833,7 @@ class PostgresControlPlaneRepository:
                           auth.approvals_count, auth.required_approvals, auth.execution_attempts,
                           auth.max_attempts, auth.next_attempt_at, auth.expires_at
                 """,
-                (effective_now, limit),
+                (effective_now, effective_now, limit),
             )
             rows = [self._row_to_authorization(row) for row in cursor.fetchall()]
             self.connection.commit()

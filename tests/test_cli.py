@@ -1,5 +1,7 @@
 import importlib
 import json
+import sys
+import types
 
 from governed_autonomy.api.app import AppContext
 from governed_autonomy.bootstrap import build_platform_demo
@@ -57,3 +59,28 @@ def test_cli_parser_flows(tmp_path, monkeypatch, capsys):
     assert main(["policy", "publish", str(policy_file)]) == 0
     policy_out = json.loads(capsys.readouterr().out)
     assert policy_out["policy_id"] == "cli-policy"
+
+    authorization = control_plane.create_authorization(
+        policy_id="demo-files-v1",
+        request_payload={"action": "write_file", "path": "out.txt", "content": "cli"},
+        context={},
+        mesh_inputs=[],
+        request_digest="digest-cli",
+        idempotency_key=None,
+        ttl_seconds=300,
+        required_approvals=0,
+    )
+    assert main(["authorization", "inspect", authorization.authorization_id]) == 0
+    auth_out = json.loads(capsys.readouterr().out)
+    assert auth_out["authorization_id"] == authorization.authorization_id
+
+    class _FakeConnection:
+        def close(self) -> None:
+            return None
+
+    fake_psycopg = types.SimpleNamespace(connect=lambda _: _FakeConnection())
+    monkeypatch.setitem(sys.modules, "psycopg", fake_psycopg)
+    monkeypatch.setattr(cli_main, "run_postgres_migrations", lambda connection: ["002_control_plane.sql"])
+    assert main(["migrate", "--database-url", "******localhost:5432/gas"]) == 0
+    migrate_out = json.loads(capsys.readouterr().out)
+    assert migrate_out["applied"] == ["002_control_plane.sql"]
