@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS gas_authorizations (
     error_text TEXT,
     idempotency_key TEXT UNIQUE,
     request_digest TEXT NOT NULL,
+    ttl_seconds INTEGER NOT NULL DEFAULT 300,
     approvals_count INTEGER NOT NULL DEFAULT 0,
     required_approvals INTEGER NOT NULL DEFAULT 0,
     execution_attempts INTEGER NOT NULL DEFAULT 0,
@@ -148,6 +149,7 @@ class AuthorizationRecord:
     error_text: str | None = None
     idempotency_key: str | None = None
     request_digest: str = ""
+    ttl_seconds: int = 300
     approvals_count: int = 0
     required_approvals: int = 0
     execution_attempts: int = 0
@@ -181,6 +183,7 @@ class ControlPlaneRepository(Protocol):
         mesh_inputs: list[dict[str, Any]],
         request_digest: str,
         idempotency_key: str | None,
+        ttl_seconds: int,
         required_approvals: int,
         max_attempts: int = 3,
     ) -> AuthorizationRecord: ...
@@ -297,6 +300,7 @@ class InMemoryControlPlaneRepository:
         mesh_inputs: list[dict[str, Any]],
         request_digest: str,
         idempotency_key: str | None,
+        ttl_seconds: int,
         required_approvals: int,
         max_attempts: int = 3,
     ) -> AuthorizationRecord:
@@ -311,6 +315,7 @@ class InMemoryControlPlaneRepository:
                 status="awaiting_approval" if required_approvals > 0 else "requested",
                 idempotency_key=idempotency_key,
                 request_digest=request_digest,
+                ttl_seconds=ttl_seconds,
                 required_approvals=required_approvals,
                 max_attempts=max_attempts,
             )
@@ -339,14 +344,20 @@ class InMemoryControlPlaneRepository:
 
     def list_ready_authorizations(self, *, now: float | None = None, limit: int = 10) -> list[AuthorizationRecord]:
         effective_now = time.time() if now is None else now
-        records = [
-            record
-            for record in self._authorizations.values()
-            if record.status == "authorized"
-            and (record.next_attempt_at is None or record.next_attempt_at <= effective_now)
-        ]
-        records.sort(key=lambda item: (item.next_attempt_at or 0.0, item.authorization_id))
-        return records[:limit]
+        with self._lock:
+            records = [
+                record
+                for record in self._authorizations.values()
+                if record.status == "authorized"
+                and (record.next_attempt_at is None or record.next_attempt_at <= effective_now)
+            ]
+            records.sort(key=lambda item: (item.next_attempt_at or 0.0, item.authorization_id))
+            claimed: list[AuthorizationRecord] = []
+            for record in records[:limit]:
+                updated = replace(record, status="executing")
+                self._authorizations[record.authorization_id] = updated
+                claimed.append(updated)
+            return claimed
 
     def update_authorization(self, authorization_id: str, **changes: Any) -> AuthorizationRecord:
         with self._lock:
@@ -650,6 +661,7 @@ class PostgresControlPlaneRepository:
         mesh_inputs: list[dict[str, Any]],
         request_digest: str,
         idempotency_key: str | None,
+        ttl_seconds: int,
         required_approvals: int,
         max_attempts: int = 3,
     ) -> AuthorizationRecord:
@@ -661,8 +673,8 @@ class PostgresControlPlaneRepository:
                 """
                 INSERT INTO gas_authorizations(
                     authorization_id, policy_id, request_json, context_json, mesh_inputs_json,
-                    status, idempotency_key, request_digest, required_approvals, max_attempts
-                ) VALUES (%s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s, %s, %s, %s, %s)
+                    status, idempotency_key, request_digest, ttl_seconds, required_approvals, max_attempts
+                ) VALUES (%s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     authorization_id,
@@ -673,6 +685,7 @@ class PostgresControlPlaneRepository:
                     status,
                     idempotency_key,
                     request_digest,
+                    ttl_seconds,
                     required_approvals,
                     max_attempts,
                 ),
@@ -687,6 +700,7 @@ class PostgresControlPlaneRepository:
                 status=status,
                 idempotency_key=idempotency_key,
                 request_digest=request_digest,
+                ttl_seconds=ttl_seconds,
                 required_approvals=required_approvals,
                 max_attempts=max_attempts,
             )
@@ -709,12 +723,13 @@ class PostgresControlPlaneRepository:
             error_text=row[8],
             idempotency_key=row[9],
             request_digest=row[10],
-            approvals_count=row[11],
-            required_approvals=row[12],
-            execution_attempts=row[13],
-            max_attempts=row[14],
-            next_attempt_at=row[15],
-            expires_at=row[16],
+            ttl_seconds=row[11],
+            approvals_count=row[12],
+            required_approvals=row[13],
+            execution_attempts=row[14],
+            max_attempts=row[15],
+            next_attempt_at=row[16],
+            expires_at=row[17],
         )
 
     def get_authorization(self, authorization_id: str) -> AuthorizationRecord:
@@ -724,8 +739,8 @@ class PostgresControlPlaneRepository:
                 """
                 SELECT authorization_id, policy_id, request_json::text, context_json::text,
                        mesh_inputs_json::text, status, artifact_json::text, result_json::text,
-                       error_text, idempotency_key, request_digest, approvals_count,
-                       required_approvals, execution_attempts, max_attempts,
+                       error_text, idempotency_key, request_digest, ttl_seconds,
+                       approvals_count, required_approvals, execution_attempts, max_attempts,
                        next_attempt_at, expires_at
                 FROM gas_authorizations WHERE authorization_id=%s
                 """,
@@ -745,8 +760,8 @@ class PostgresControlPlaneRepository:
                 """
                 SELECT authorization_id, policy_id, request_json::text, context_json::text,
                        mesh_inputs_json::text, status, artifact_json::text, result_json::text,
-                       error_text, idempotency_key, request_digest, approvals_count,
-                       required_approvals, execution_attempts, max_attempts,
+                       error_text, idempotency_key, request_digest, ttl_seconds,
+                       approvals_count, required_approvals, execution_attempts, max_attempts,
                        next_attempt_at, expires_at
                 FROM gas_authorizations WHERE idempotency_key=%s
                 """,
@@ -764,8 +779,8 @@ class PostgresControlPlaneRepository:
                 """
                 SELECT authorization_id, policy_id, request_json::text, context_json::text,
                        mesh_inputs_json::text, status, artifact_json::text, result_json::text,
-                       error_text, idempotency_key, request_digest, approvals_count,
-                       required_approvals, execution_attempts, max_attempts,
+                       error_text, idempotency_key, request_digest, ttl_seconds,
+                       approvals_count, required_approvals, execution_attempts, max_attempts,
                        next_attempt_at, expires_at
                 FROM gas_authorizations ORDER BY created_at, authorization_id
                 """
@@ -773,8 +788,8 @@ class PostgresControlPlaneRepository:
                 else """
                 SELECT authorization_id, policy_id, request_json::text, context_json::text,
                        mesh_inputs_json::text, status, artifact_json::text, result_json::text,
-                       error_text, idempotency_key, request_digest, approvals_count,
-                       required_approvals, execution_attempts, max_attempts,
+                       error_text, idempotency_key, request_digest, ttl_seconds,
+                       approvals_count, required_approvals, execution_attempts, max_attempts,
                        next_attempt_at, expires_at
                 FROM gas_authorizations WHERE status=%s ORDER BY created_at, authorization_id
                 """
@@ -790,19 +805,33 @@ class PostgresControlPlaneRepository:
         try:
             cursor.execute(
                 """
-                SELECT authorization_id, policy_id, request_json::text, context_json::text,
-                       mesh_inputs_json::text, status, artifact_json::text, result_json::text,
-                       error_text, idempotency_key, request_digest, approvals_count,
-                       required_approvals, execution_attempts, max_attempts,
-                       next_attempt_at, expires_at
-                FROM gas_authorizations
-                WHERE status='authorized' AND (next_attempt_at IS NULL OR next_attempt_at <= %s)
-                ORDER BY COALESCE(next_attempt_at, 0), authorization_id
-                LIMIT %s
+                WITH claimed AS (
+                    SELECT authorization_id
+                    FROM gas_authorizations
+                    WHERE status='authorized' AND (next_attempt_at IS NULL OR next_attempt_at <= %s)
+                    ORDER BY COALESCE(next_attempt_at, 0), authorization_id
+                    LIMIT %s
+                    FOR UPDATE SKIP LOCKED
+                )
+                UPDATE gas_authorizations AS auth
+                SET status='executing', updated_at=CURRENT_TIMESTAMP
+                FROM claimed
+                WHERE auth.authorization_id = claimed.authorization_id
+                RETURNING auth.authorization_id, auth.policy_id, auth.request_json::text,
+                          auth.context_json::text, auth.mesh_inputs_json::text, auth.status,
+                          auth.artifact_json::text, auth.result_json::text, auth.error_text,
+                          auth.idempotency_key, auth.request_digest, auth.ttl_seconds,
+                          auth.approvals_count, auth.required_approvals, auth.execution_attempts,
+                          auth.max_attempts, auth.next_attempt_at, auth.expires_at
                 """,
                 (effective_now, limit),
             )
-            return [self._row_to_authorization(row) for row in cursor.fetchall()]
+            rows = [self._row_to_authorization(row) for row in cursor.fetchall()]
+            self.connection.commit()
+            return rows
+        except Exception:
+            self.connection.rollback()
+            raise
         finally:
             cursor.close()
 
@@ -818,6 +847,7 @@ class PostgresControlPlaneRepository:
                     artifact_json=%s::jsonb,
                     result_json=%s::jsonb,
                     error_text=%s,
+                    ttl_seconds=%s,
                     approvals_count=%s,
                     required_approvals=%s,
                     execution_attempts=%s,
@@ -832,6 +862,7 @@ class PostgresControlPlaneRepository:
                     self._dump(updated.artifact_payload) if updated.artifact_payload is not None else None,
                     self._dump(updated.result_payload) if updated.result_payload is not None else None,
                     updated.error_text,
+                    updated.ttl_seconds,
                     updated.approvals_count,
                     updated.required_approvals,
                     updated.execution_attempts,

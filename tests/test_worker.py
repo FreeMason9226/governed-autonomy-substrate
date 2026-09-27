@@ -18,6 +18,7 @@ def test_worker_executes_authorized_artifacts_and_marks_dead_letter_on_retries()
         mesh_inputs=[],
         request_digest="digest-1",
         idempotency_key=None,
+        ttl_seconds=300,
         required_approvals=0,
         max_attempts=2,
     )
@@ -48,6 +49,7 @@ def test_worker_executes_authorized_artifacts_and_marks_dead_letter_on_retries()
         mesh_inputs=[],
         request_digest="digest-2",
         idempotency_key=None,
+        ttl_seconds=300,
         required_approvals=0,
         max_attempts=1,
     )

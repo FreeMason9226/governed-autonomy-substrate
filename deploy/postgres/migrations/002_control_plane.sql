@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS gas_authorizations (
     error_text TEXT,
     idempotency_key TEXT UNIQUE,
     request_digest TEXT NOT NULL,
+    ttl_seconds INTEGER NOT NULL DEFAULT 300,
     approvals_count INTEGER NOT NULL DEFAULT 0,
     required_approvals INTEGER NOT NULL DEFAULT 0,
     execution_attempts INTEGER NOT NULL DEFAULT 0,

@@ -1,4 +1,6 @@
 
+import time
+
 from fastapi.testclient import TestClient
 
 from governed_autonomy import InMemoryControlPlaneRepository, create_app
@@ -119,6 +121,7 @@ def test_fastapi_policy_principal_and_approval_flows():
         json={
             "policy_id": "approval-policy",
             "request": {"action": "write_file", "path": "out.txt", "content": "pending"},
+            "ttl_seconds": 1,
         },
     )
     assert pending.status_code == 202
@@ -133,6 +136,7 @@ def test_fastapi_policy_principal_and_approval_flows():
     assert approved.status_code == 200
     assert approved.json()["status"] == "authorized"
     assert approved.json()["approvals_count"] == 1
+    assert approved.json()["artifact"]["expires_at"] <= int(time.time()) + 1
 
     revoked = harness.client.post(
         "/v1/principals/worker-a/revoke",
@@ -141,3 +145,47 @@ def test_fastapi_policy_principal_and_approval_flows():
     )
     assert revoked.status_code == 200
     assert revoked.json()["key_status"] == "revoked"
+
+
+def test_fastapi_problem_detail_errors_include_request_id():
+    harness = _AppHarness()
+
+    unauthorized = harness.client.get("/v1/health")
+    assert unauthorized.status_code == 401
+    assert unauthorized.json()["title"] == "request failed"
+
+    bad_request = harness.client.put(
+        "/v1/policies/demo-files-v1",
+        headers=harness.headers,
+        json={
+            "policy": {
+                "policy_id": "different-id",
+                "allowed_actions": ["write_file"],
+                "required_fields": {"write_file": ["content", "path"]},
+                "exact_fields": {},
+                "required_context": [],
+                "exact_context": {},
+                "max_request_bytes": 65536,
+                "max_ttl_seconds": 300,
+                "required_approvals": {},
+            }
+        },
+    )
+    assert bad_request.status_code == 400
+    assert bad_request.headers["X-Request-ID"] == "req-123"
+    assert bad_request.json()["request_id"] == "req-123"
+
+    forbidden = harness.client.post(
+        "/v1/authorize",
+        headers=harness.headers,
+        json={
+            "policy_id": "demo-files-v1",
+            "request": {"action": "delete_file", "path": "out.txt"},
+        },
+    )
+    assert forbidden.status_code == 403
+    assert forbidden.json()["status"] == 403
+
+    missing = harness.client.get("/v1/authorizations/does-not-exist", headers=harness.headers)
+    assert missing.status_code == 404
+    assert missing.json()["request_id"] == "req-123"

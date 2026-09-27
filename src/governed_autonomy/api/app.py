@@ -58,6 +58,10 @@ class AppContext:
     principal_registry: ServicePrincipalRegistry
 
 
+def _safe_detail(detail: str) -> str:
+    return detail.replace("\n", " ").replace("\r", " ").strip()[:256]
+
+
 def _problem(request: Request, status_code: int, title: str, detail: str) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
@@ -65,7 +69,7 @@ def _problem(request: Request, status_code: int, title: str, detail: str) -> JSO
             "type": "about:blank",
             "title": title,
             "status": status_code,
-            "detail": detail,
+            "detail": _safe_detail(detail),
             "request_id": request.state.request_id,
         },
         headers={"X-Request-ID": request.state.request_id},
@@ -271,11 +275,16 @@ def create_app(
 
     @app.exception_handler(KeyError)
     async def key_error_handler(request: Request, exc: KeyError):
-        return _problem(request, status.HTTP_404_NOT_FOUND, "not found", str(exc))
+        return _problem(request, status.HTTP_404_NOT_FOUND, "not found", _safe_detail(str(exc)))
 
     @app.exception_handler(ValueError)
     async def value_error_handler(request: Request, exc: ValueError):
-        return _problem(request, status.HTTP_400_BAD_REQUEST, "invalid request", str(exc))
+        return _problem(
+            request,
+            status.HTTP_400_BAD_REQUEST,
+            "invalid request",
+            _safe_detail(str(exc)),
+        )
 
     def current_context() -> AppContext:
         return app.state.context
@@ -430,6 +439,7 @@ def create_app(
             mesh_inputs=body.mesh_inputs,
             request_digest=request_digest,
             idempotency_key=idempotency_key,
+            ttl_seconds=body.ttl_seconds,
             required_approvals=required_approvals,
             max_attempts=body.max_attempts,
         )
@@ -495,6 +505,7 @@ def create_app(
         artifact = runtime_platform.authorize(
             dict(record.request_payload),
             record.policy_id,
+            ttl_seconds=record.ttl_seconds,
             context=context_payload,
             mesh_inputs=[GovernanceInput.from_dict(item) for item in record.mesh_inputs],
         )

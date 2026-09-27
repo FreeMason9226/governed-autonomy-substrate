@@ -4,6 +4,7 @@ import argparse
 import os
 import time
 from dataclasses import dataclass
+from typing import Any
 
 from .api.app import _build_default_context
 from .control_plane import ControlPlaneRepository
@@ -22,7 +23,7 @@ class WorkerService:
         self,
         *,
         control_plane: ControlPlaneRepository,
-        platform,
+        platform: Any,
         retry_delay_seconds: float = 1.0,
     ) -> None:
         self.control_plane = control_plane
@@ -84,9 +85,8 @@ class WorkerService:
 
     def serve(self, *, poll_interval: float = 1.0) -> None:
         while True:
-            result = self.run_once()
-            if result is None:
-                time.sleep(poll_interval)
+            self.run_once()
+            time.sleep(poll_interval)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
