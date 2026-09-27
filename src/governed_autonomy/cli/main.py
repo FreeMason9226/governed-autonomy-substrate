@@ -35,7 +35,7 @@ def build_parser() -> argparse.ArgumentParser:
     principal_register = principal_sub.add_parser("register")
     principal_register.add_argument("file")
     principal_revoke = principal_sub.add_parser("revoke")
-    principal_revoke.add_argument("file")
+    principal_revoke.add_argument("principal_id")
 
     policy = subparsers.add_parser("policy")
     policy_sub = policy.add_subparsers(dest="policy_command", required=True)
@@ -93,8 +93,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "principal" and args.principal_command == "revoke":
-        payload = _load_json(args.file)
-        record = context.control_plane.revoke_principal(payload["principal_id"])
+        record = context.control_plane.revoke_principal(args.principal_id)
         synchronize_principal_registry(context.principal_registry, context.control_plane)
         print(json.dumps({"principal_id": record.principal_id, "status": record.key_status}, sort_keys=True))
         return 0

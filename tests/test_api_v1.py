@@ -127,6 +127,13 @@ def test_fastapi_policy_principal_and_approval_flows():
     assert pending.status_code == 202
     pending_payload = pending.json()
     assert pending_payload["status"] == "awaiting_approval"
+    assert pending_payload["artifact"] is None
+    pending_fetch = harness.client.get(
+        f"/v1/authorizations/{pending_payload['authorization_id']}",
+        headers=harness.headers,
+    )
+    assert pending_fetch.status_code == 200
+    assert pending_fetch.json()["status"] == "awaiting_approval"
 
     approved = harness.client.post(
         f"/v1/authorizations/{pending_payload['authorization_id']}/approve",

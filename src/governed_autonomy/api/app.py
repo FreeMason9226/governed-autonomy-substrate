@@ -76,6 +76,12 @@ def _problem(request: Request, status_code: int, title: str, detail: str) -> JSO
     )
 
 
+def _public_error_detail(value: object, fallback: str) -> str:
+    if isinstance(value, str) and value and "\n" not in value and "\r" not in value:
+        return value[:256]
+    return fallback
+
+
 def _authorization_response(record, repository: ControlPlaneRepository) -> dict[str, Any]:
     return {
         "authorization_id": record.authorization_id,
@@ -153,7 +159,7 @@ def _build_default_context() -> AppContext:
     mode = os.environ.get("GAS_RUNTIME_MODE", "postgres").lower()
     database_url = os.environ.get("DATABASE_URL") if mode == "postgres" else None
     control_plane_database_url = os.environ.get("GAS_CONTROL_PLANE_DATABASE_URL") or database_url
-    if mode == "memory" or database_url is None:
+    if mode == "memory":
         platform, _, _, _ = build_platform_demo(
             service_name=os.environ.get("GAS_SERVICE_NAME", "governed-autonomy-api"),
             environment=os.environ.get("GAS_ENVIRONMENT", "dev"),
@@ -174,6 +180,8 @@ def _build_default_context() -> AppContext:
             ),
             principal_registry=principal_registry,
         )
+        if database_url is None:
+            raise RuntimeError("DATABASE_URL is required for postgres runtime mode")
         if control_plane_database_url is None:
             raise RuntimeError("DATABASE_URL is required for postgres runtime mode")
         control_plane = build_control_plane_repository(database_url=control_plane_database_url)
@@ -270,20 +278,20 @@ def create_app(
 
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException):
-        detail = exc.detail if isinstance(exc.detail, str) else "request failed"
+        detail = _public_error_detail(exc.detail, "request failed")
         return _problem(request, exc.status_code, "request failed", detail)
 
     @app.exception_handler(KeyError)
-    async def key_error_handler(request: Request, exc: KeyError):
-        return _problem(request, status.HTTP_404_NOT_FOUND, "not found", _safe_detail(str(exc)))
+    async def key_error_handler(request: Request, _exc: KeyError):
+        return _problem(request, status.HTTP_404_NOT_FOUND, "not found", "resource not found")
 
     @app.exception_handler(ValueError)
-    async def value_error_handler(request: Request, exc: ValueError):
+    async def value_error_handler(request: Request, _exc: ValueError):
         return _problem(
             request,
             status.HTTP_400_BAD_REQUEST,
             "invalid request",
-            _safe_detail(str(exc)),
+            "request payload is invalid",
         )
 
     def current_context() -> AppContext:
@@ -465,7 +473,12 @@ def create_app(
                 status="failed",
                 error_text=str(exc),
             )
-            return _problem(request, status.HTTP_403_FORBIDDEN, "policy denied", str(exc))
+            return _problem(
+                request,
+                status.HTTP_403_FORBIDDEN,
+                "policy denied",
+                "request violates policy",
+            )
         updated = ctx.control_plane.update_authorization(
             record.authorization_id,
             status="authorized",
@@ -497,7 +510,11 @@ def create_app(
             rationale=body.rationale,
         )
         record = ctx.control_plane.get_authorization(authorization_id)
+        if record.status == "cancelled" or record.status == "failed":
+            return _authorization_response(record, ctx.control_plane)
         if record.status == "authorized" or record.approvals_count < record.required_approvals:
+            return _authorization_response(record, ctx.control_plane)
+        if record.status != "awaiting_approval":
             return _authorization_response(record, ctx.control_plane)
         runtime_platform = _request_platform(ctx.platform, request, caller)
         context_payload = dict(record.context)
@@ -591,28 +608,14 @@ def create_app(
     return app
 
 
-app = create_app(
-    bearer_token=os.environ.get("GOVERNED_AUTONOMY_BEARER_TOKEN"),
-    oidc_validator=(
-        OIDCValidator(
-            issuer=os.environ["OIDC_ISSUER"],
-            audience=os.environ["OIDC_AUDIENCE"],
-            jwks_provider=UrlJWKSProvider(os.environ["OIDC_JWKS_URL"]),
-        )
-        if all(
-            os.environ.get(key)
-            for key in ("OIDC_ISSUER", "OIDC_AUDIENCE", "OIDC_JWKS_URL")
-        )
-        else None
-    ),
-)
-
-
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the Governed Autonomy Platform API.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--bearer-token", default=os.environ.get("GOVERNED_AUTONOMY_BEARER_TOKEN"))
+    parser.add_argument("--oidc-issuer", default=os.environ.get("OIDC_ISSUER"))
+    parser.add_argument("--oidc-audience", default=os.environ.get("OIDC_AUDIENCE"))
+    parser.add_argument("--oidc-jwks-url", default=os.environ.get("OIDC_JWKS_URL"))
     return parser.parse_args(argv)
 
 
@@ -622,8 +625,20 @@ def main(argv: list[str] | None = None) -> int:
         import uvicorn
     except ImportError as exc:  # pragma: no cover - runtime dependency
         raise SystemExit("install uvicorn to run the FastAPI service") from exc
+    oidc_validator = None
+    oidc_args = (args.oidc_issuer, args.oidc_audience, args.oidc_jwks_url)
+    if any(oidc_args) and not all(oidc_args):
+        raise SystemExit(
+            "OIDC_ISSUER, OIDC_AUDIENCE, and OIDC_JWKS_URL must be configured together"
+        )
+    if all(oidc_args):
+        oidc_validator = OIDCValidator(
+            issuer=args.oidc_issuer,
+            audience=args.oidc_audience,
+            jwks_provider=UrlJWKSProvider(args.oidc_jwks_url),
+        )
     uvicorn.run(
-        create_app(bearer_token=args.bearer_token),
+        create_app(bearer_token=args.bearer_token, oidc_validator=oidc_validator),
         host=args.host,
         port=args.port,
     )

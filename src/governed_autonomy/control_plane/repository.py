@@ -563,6 +563,7 @@ class PostgresControlPlaneRepository:
     ) -> PolicyVersionRecord:
         cursor = self.connection.cursor()
         try:
+            cursor.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (policy.policy_id,))
             if version is None:
                 cursor.execute(
                     "SELECT COALESCE(MAX(version), 0) + 1 FROM gas_policies WHERE policy_id=%s",
@@ -836,10 +837,24 @@ class PostgresControlPlaneRepository:
             cursor.close()
 
     def update_authorization(self, authorization_id: str, **changes: Any) -> AuthorizationRecord:
-        current = self.get_authorization(authorization_id)
-        updated = replace(current, **changes)
         cursor = self.connection.cursor()
         try:
+            cursor.execute(
+                """
+                SELECT authorization_id, policy_id, request_json::text, context_json::text,
+                       mesh_inputs_json::text, status, artifact_json::text, result_json::text,
+                       error_text, idempotency_key, request_digest, ttl_seconds,
+                       approvals_count, required_approvals, execution_attempts, max_attempts,
+                       next_attempt_at, expires_at
+                FROM gas_authorizations WHERE authorization_id=%s
+                FOR UPDATE
+                """,
+                (authorization_id,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                raise KeyError(f"unknown authorization: {authorization_id}")
+            updated = replace(self._row_to_authorization(row), **changes)
             cursor.execute(
                 """
                 UPDATE gas_authorizations SET
