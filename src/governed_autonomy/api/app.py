@@ -259,6 +259,7 @@ def create_app(
     )
     synchronize_policy_registry(context.platform.service.policies, context.control_plane)
     synchronize_principal_registry(context.principal_registry, context.control_plane)
+    context.platform.principal_registry = context.principal_registry
     app.state.context = context
     auth = _auth_dependency(
         bearer_token=bearer_token,
@@ -536,14 +537,27 @@ def create_app(
             if item.decision == "approve"
         ]
         ttl_seconds = max(1, (record.expires_at or now) - now)
-        artifact = runtime_platform.authorize(
-            dict(record.request_payload),
-            record.policy_id,
-            ttl_seconds=ttl_seconds,
-            approvals=approvals,
-            context=context_payload,
-            mesh_inputs=[GovernanceInput.from_dict(item) for item in record.mesh_inputs],
-        )
+        try:
+            artifact = runtime_platform.authorize(
+                dict(record.request_payload),
+                record.policy_id,
+                ttl_seconds=ttl_seconds,
+                approvals=approvals,
+                context=context_payload,
+                mesh_inputs=[GovernanceInput.from_dict(item) for item in record.mesh_inputs],
+            )
+        except PolicyDeniedError as exc:
+            failed = ctx.control_plane.update_authorization(
+                authorization_id,
+                status="failed",
+                error_text=str(exc),
+            )
+            return _problem(
+                request,
+                status.HTTP_403_FORBIDDEN,
+                "policy denied",
+                failed.error_text or "request violates policy",
+            )
         updated = ctx.control_plane.update_authorization(
             authorization_id,
             status="authorized",

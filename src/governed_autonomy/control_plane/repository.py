@@ -728,6 +728,10 @@ class PostgresControlPlaneRepository:
             )
         except Exception:
             self.connection.rollback()
+            if idempotency_key is not None:
+                existing = self.get_authorization_by_idempotency_key(idempotency_key)
+                if existing is not None and existing.request_digest == request_digest:
+                    return existing
             raise
         finally:
             cursor.close()

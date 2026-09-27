@@ -117,7 +117,7 @@ def test_fastapi_policy_principal_and_approval_flows():
 
     pending = harness.client.post(
         "/v1/authorize",
-        headers=harness.headers,
+        headers={**harness.headers, "X-Principal-ID": "worker-a"},
         json={
             "policy_id": "approval-policy",
             "request": {"action": "write_file", "path": "out.txt", "content": "pending"},
@@ -137,7 +137,7 @@ def test_fastapi_policy_principal_and_approval_flows():
 
     approved = harness.client.post(
         f"/v1/authorizations/{pending_payload['authorization_id']}/approve",
-        headers=harness.headers,
+        headers={**harness.headers, "X-Principal-ID": "worker-a"},
         json={"actor_id": "approver-1"},
     )
     assert approved.status_code == 200

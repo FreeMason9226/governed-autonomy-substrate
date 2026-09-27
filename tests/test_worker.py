@@ -1,4 +1,4 @@
-from governed_autonomy import InMemoryControlPlaneRepository, create_app
+from governed_autonomy import InMemoryControlPlaneRepository
 from governed_autonomy.bootstrap import build_platform_demo
 from governed_autonomy.worker import WorkerService
 
@@ -8,8 +8,6 @@ def test_worker_executes_authorized_artifacts_and_marks_dead_letter_on_retries()
     control_plane = InMemoryControlPlaneRepository()
     for policy in service.policies.policies():
         control_plane.save_policy(policy, published=True)
-    app = create_app(platform=platform, control_plane=control_plane, bearer_token="test-token")
-    _ = app
 
     authorized = control_plane.create_authorization(
         policy_id="demo-files-v1",

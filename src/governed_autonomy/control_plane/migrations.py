@@ -24,7 +24,11 @@ def run_postgres_migrations(connection: Any, migrations_dir: Path | None = None)
         for path in sorted(directory.glob("*.sql")):
             if path.name in applied:
                 continue
-            cursor.execute(path.read_text(encoding="utf-8"))
+            runner = getattr(connection, "execute", None)
+            if callable(runner):
+                runner(path.read_text(encoding="utf-8"))
+            else:
+                cursor.execute(path.read_text(encoding="utf-8"))
             cursor.execute(
                 "INSERT INTO gas_schema_migrations(version) VALUES (%s)",
                 (path.name,),

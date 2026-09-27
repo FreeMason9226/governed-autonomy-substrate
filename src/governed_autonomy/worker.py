@@ -85,7 +85,8 @@ class WorkerService:
 
     def serve(self, *, poll_interval: float = 1.0) -> None:
         while True:
-            self.run_once()
+            while self.run_once() is not None:
+                continue
             time.sleep(poll_interval)
 
 
