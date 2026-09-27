@@ -1,0 +1,1988 @@
+=== START CI REPRO: Tue Sep 22 05:58:23 UTC 2026 ===
+=== SYSTEM INFO ===
+Linux codespaces-126726 6.8.0-1064-azure #72~22.04.1-Ubuntu SMP Wed Jul 22 23:39:45 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+Distributor ID:	Ubuntu
+Description:	Ubuntu 24.04.5 LTS
+Release:	24.04
+Codename:	noble
+Python 3.14.2
+v24.21.0
+11.19.0
+=== APT INSTALL (system deps) ===
+Hit:1 https://packages.microsoft.com/repos/microsoft-ubuntu-noble-prod noble InRelease
+Hit:2 http://security.ubuntu.com/ubuntu noble-security InRelease
+Hit:3 http://archive.ubuntu.com/ubuntu noble InRelease
+Hit:4 http://archive.ubuntu.com/ubuntu noble-updates InRelease
+Hit:5 http://archive.ubuntu.com/ubuntu noble-backports InRelease
+Reading package lists...
+Reading package lists...
+Building dependency tree...
+Reading state information...
+build-essential is already the newest version (12.10ubuntu1).
+python3-dev is already the newest version (3.12.3-0ubuntu2.1).
+libssl-dev is already the newest version (3.0.13-0ubuntu3.15).
+libffi-dev is already the newest version (3.4.6-1build1).
+pkg-config is already the newest version (1.8.1-2build1).
+curl is already the newest version (8.5.0-2ubuntu10.13).
+0 upgraded, 0 newly installed, 0 to remove and 39 not upgraded.
+=== RUST TOOLCHAIN ===
+info: downloading installer
+warn: it looks like you have an existing rustup settings file at:
+warn: /home/codespace/.rustup/settings.toml
+info: profile set to default
+info: default host tuple is x86_64-unknown-linux-gnu
+warn: Updating existing toolchain, profile choice will be ignored
+info: syncing channel updates for stable-x86_64-unknown-linux-gnu
+info: default toolchain set to stable-x86_64-unknown-linux-gnu
+
+  stable-x86_64-unknown-linux-gnu unchanged - rustc 1.98.1 (48a229cea 2026-09-01)
+
+
+Rust is installed now. Great!
+
+To get started you may need to restart your current shell.
+This would reload your PATH environment variable to include
+Cargo's bin directory ($HOME/.cargo/bin).
+
+To configure your current shell, you need to source the
+corresponding env file under $HOME/.cargo.
+
+Consider running the right command for your shell (note the leading DOT):
+. "$HOME/.cargo/env"           # For sh/ash/dash/pdksh/bash/zsh
+source "$HOME/.cargo/env.fish" # For fish
+cargo:rerun-if-env-changed=CC_x86_64-unknown-linux-gnu
+CC_x86_64-unknown-linux-gnu = None
+cargo:rerun-if-env-changed=CC_x86_64_unknown_linux_gnu
+CC_x86_64_unknown_linux_gnu = None
+cargo:rerun-if-env-changed=HOST_CC
+HOST_CC = None
+cargo:rerun-if-env-changed=CC
+CC = None
+cargo:rerun-if-env-changed=CC_ENABLE_DEBUG_OUTPUT
+cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+CRATE_CC_NO_DEFAULTS = None
+cargo:rerun-if-env-changed=CFLAGS
+CFLAGS = None
+cargo:rerun-if-env-changed=HOST_CFLAGS
+HOST_CFLAGS = None
+cargo:rerun-if-env-changed=CFLAGS_x86_64_unknown_linux_gnu
+CFLAGS_x86_64_unknown_linux_gnu = None
+cargo:rerun-if-env-changed=CFLAGS_x86_64-unknown-linux-gnu
+CFLAGS_x86_64-unknown-linux-gnu = None
+rustc 1.98.1 (48a229cea 2026-09-01)
+cargo 1.98.1 (797e8a9bc 2026-08-05)
+=== PIP UPGRADE ===
+Requirement already satisfied: pip in /usr/local/python/3.14.2/lib/python3.14/site-packages (26.2.1)
+Requirement already satisfied: setuptools in /usr/local/python/3.14.2/lib/python3.14/site-packages (84.0.0)
+Requirement already satisfied: wheel in /usr/local/python/3.14.2/lib/python3.14/site-packages (0.48.0)
+Requirement already satisfied: packaging>=24.0 in /home/codespace/.local/lib/python3.14/site-packages (from wheel) (26.3)
+=== INSTALL PROJECT + DEV EXTRAS ===
+Obtaining file:///workspaces/governed-autonomy-substrate
+  Installing build dependencies: started
+  Installing build dependencies: finished with status 'done'
+  Checking if build backend supports build_editable: started
+  Checking if build backend supports build_editable: finished with status 'done'
+  Getting requirements to build editable: started
+  Getting requirements to build editable: finished with status 'done'
+  Preparing editable metadata (pyproject.toml): started
+  Preparing editable metadata (pyproject.toml): finished with status 'done'
+Requirement already satisfied: cryptography>=42.0 in /usr/local/python/3.14.2/lib/python3.14/site-packages (from governed-autonomy-substrate==0.1.0) (50.0.1)
+Requirement already satisfied: pytest>=8.0 in /usr/local/python/3.14.2/lib/python3.14/site-packages (from governed-autonomy-substrate==0.1.0) (9.1.1)
+Requirement already satisfied: pytest-cov>=5.0 in /usr/local/python/3.14.2/lib/python3.14/site-packages (from governed-autonomy-substrate==0.1.0) (7.1.0)
+Requirement already satisfied: mypy>=1.10 in /usr/local/python/3.14.2/lib/python3.14/site-packages (from governed-autonomy-substrate==0.1.0) (2.3.1)
+Requirement already satisfied: ruff>=0.4 in /usr/local/python/3.14.2/lib/python3.14/site-packages (from governed-autonomy-substrate==0.1.0) (0.16.8)
+Requirement already satisfied: cffi>=2.0.0 in /home/codespace/.local/lib/python3.14/site-packages (from cryptography>=42.0->governed-autonomy-substrate==0.1.0) (2.1.1)
+Requirement already satisfied: pycparser in /home/codespace/.local/lib/python3.14/site-packages (from cffi>=2.0.0->cryptography>=42.0->governed-autonomy-substrate==0.1.0) (3.0)
+Requirement already satisfied: typing_extensions>=4.6.0 in /home/codespace/.local/lib/python3.14/site-packages (from mypy>=1.10->governed-autonomy-substrate==0.1.0) (4.16.0)
+Requirement already satisfied: mypy_extensions>=1.0.0 in /usr/local/python/3.14.2/lib/python3.14/site-packages (from mypy>=1.10->governed-autonomy-substrate==0.1.0) (1.1.0)
+Requirement already satisfied: pathspec>=1.0.0 in /usr/local/python/3.14.2/lib/python3.14/site-packages (from mypy>=1.10->governed-autonomy-substrate==0.1.0) (1.1.1)
+Requirement already satisfied: librt>=0.13.0 in /usr/local/python/3.14.2/lib/python3.14/site-packages (from mypy>=1.10->governed-autonomy-substrate==0.1.0) (0.15.0)
+Requirement already satisfied: ast-serialize<1.0.0,>=0.6.0 in /usr/local/python/3.14.2/lib/python3.14/site-packages (from mypy>=1.10->governed-autonomy-substrate==0.1.0) (0.11.2)
+Requirement already satisfied: iniconfig>=1.0.1 in /usr/local/python/3.14.2/lib/python3.14/site-packages (from pytest>=8.0->governed-autonomy-substrate==0.1.0) (2.3.0)
+Requirement already satisfied: packaging>=22 in /home/codespace/.local/lib/python3.14/site-packages (from pytest>=8.0->governed-autonomy-substrate==0.1.0) (26.3)
+Requirement already satisfied: pluggy<2,>=1.5 in /usr/local/python/3.14.2/lib/python3.14/site-packages (from pytest>=8.0->governed-autonomy-substrate==0.1.0) (1.6.0)
+Requirement already satisfied: pygments>=2.7.2 in /home/codespace/.local/lib/python3.14/site-packages (from pytest>=8.0->governed-autonomy-substrate==0.1.0) (2.21.0)
+Requirement already satisfied: coverage>=7.10.6 in /usr/local/python/3.14.2/lib/python3.14/site-packages (from coverage[toml]>=7.10.6->pytest-cov>=5.0->governed-autonomy-substrate==0.1.0) (7.16.1)
+Building wheels for collected packages: governed-autonomy-substrate
+  Building editable for governed-autonomy-substrate (pyproject.toml): started
+  Building editable for governed-autonomy-substrate (pyproject.toml): finished with status 'done'
+  Created wheel for governed-autonomy-substrate: filename=governed_autonomy_substrate-0.1.0-0.editable-py3-none-any.whl size=7127 sha256=a290c7b8104ed9639324e03a1c2b2663ad1099c08843b23efbfa5c8c8f67922a
+  Stored in directory: /tmp/pip-ephem-wheel-cache-iq2ie7af/wheels/17/cb/6e/879f42595292b1ac9c85616d8a8852a5811120b20c6b13bdb4
+Successfully built governed-autonomy-substrate
+Installing collected packages: governed-autonomy-substrate
+  Attempting uninstall: governed-autonomy-substrate
+    Found existing installation: governed-autonomy-substrate 0.1.0
+    Uninstalling governed-autonomy-substrate-0.1.0:
+      Successfully uninstalled governed-autonomy-substrate-0.1.0
+Successfully installed governed-autonomy-substrate-0.1.0
+=== PIP LIST (top) ===
+Package                     Version      Editable project location
+--------------------------- ------------ ---------------------------------------
+anyio                       4.15.1
+argon2-cffi                 25.1.0
+argon2-cffi-bindings        26.1.0
+arrow                       1.4.0
+ast_serialize               0.11.2
+asttokens                   3.0.2
+async-lru                   2.3.0
+attrs                       26.1.0
+babel                       2.18.0
+beautifulsoup4              4.15.0
+bleach                      6.4.0
+build                       1.6.1
+CacheControl                0.14.4
+certifi                     2026.7.22
+cffi                        2.1.1
+charset-normalizer          3.5.1
+cleo                        2.1.0
+colorama                    0.4.6
+comm                        0.2.3
+coverage                    7.16.1
+crashtest                   0.4.1
+cryptography                50.0.1
+debugpy                     1.8.21
+defusedxml                  0.7.1
+distlib                     0.4.3
+dulwich                     0.21.7
+executing                   2.2.1
+fastjsonschema              2.22.2
+filelock                    3.32.7
+findpython                  0.8.0
+flake8                      7.3.0
+fqdn                        1.5.1
+gitdb                       4.0.12
+GitPython                   3.1.62
+governed-autonomy-substrate 0.1.0        /workspaces/governed-autonomy-substrate
+h11                         0.16.0
+httpcore                    1.0.9
+httpx                       0.28.1
+idna                        3.19
+iniconfig                   2.3.0
+installer                   0.7.0
+ipykernel                   7.3.0
+ipython                     9.17.1
+ipython_pygments_lexers     1.1.1
+isoduration                 20.11.0
+jaraco.classes              3.4.0
+jaraco.context              6.1.2
+jaraco.functools            4.6.0
+jedi                        0.20.0
+jeepney                     0.9.0
+Jinja2                      3.1.6
+json5                       0.15.0
+jsonpointer                 3.1.1
+jsonschema                  4.26.0
+jsonschema-specifications   2025.9.1
+jupyter_builder             1.2.3
+jupyter_client              8.10.0
+jupyter_core                5.9.1
+jupyter-events              0.12.1
+jupyter-lsp                 2.3.1
+jupyter_server              2.21.0
+jupyter_server_terminals    0.5.4
+jupyterlab                  4.6.3
+jupyterlab_git              0.54.1
+jupyterlab-git-core         0.54.1
+jupyterlab_pygments         0.3.0
+jupyterlab_server           2.28.0
+keyring                     24.3.1
+lark                        1.3.1
+librt                       0.15.0
+MarkupSafe                  3.0.3
+matplotlib-inline           0.2.2
+mccabe                      0.7.0
+mistune                     3.3.4
+more-itertools              11.1.0
+msgpack                     1.2.2
+mypy                        2.3.1
+mypy_extensions             1.1.0
+nbclient                    0.11.0
+nbconvert                   7.17.1
+nbdime                      4.0.4
+nbformat                    5.11.1
+nest-asyncio2               1.7.2
+notebook_shim               0.2.4
+packaging                   26.3
+pandocfilters               1.5.1
+parso                       0.8.7
+pathspec                    1.1.1
+pbs-installer               2026.9.1
+pexpect                     4.9.0
+pip                         26.2.1
+pkginfo                     1.13
+platformdirs                4.11.8
+pluggy                      1.6.0
+poetry                      1.8.5
+poetry-core                 1.9.1
+poetry-plugin-export        1.8.0
+prometheus_client           0.26.0
+prompt_toolkit              3.0.53
+psutil                      7.2.2
+ptyprocess                  0.7.0
+pure_eval                   0.2.3
+pycodestyle                 2.14.0
+pycparser                   3.0
+pyflakes                    3.4.0
+Pygments                    2.21.0
+pyproject_hooks             1.3.3
+pytest                      9.1.1
+pytest-cov                  7.1.0
+python-dateutil             2.9.0.post0
+python-discovery            1.6.1
+python-json-logger          4.2.0
+PyYAML                      6.0.3
+pyzmq                       27.2.0
+RapidFuzz                   3.14.6
+referencing                 0.37.0
+requests                    2.34.2
+requests-toolbelt           1.0.0
+rfc3339-validator           0.1.4
+rfc3986-validator           0.1.1
+rfc3987-syntax              1.1.0
+rpds-py                     2026.6.3
+ruff                        0.16.8
+SecretStorage               3.5.0
+Send2Trash                  2.1.0
+setuptools                  84.0.0
+shellingham                 1.5.4
+six                         1.17.0
+smmap                       5.0.3
+soupsieve                   2.9.2
+stack-data                  0.6.3
+terminado                   0.18.1
+tinycss2                    1.5.1
+tomlkit                     0.15.1
+tornado                     6.5.8
+traitlets                   5.16.1
+trove-classifiers           2026.9.21.13
+typing_extensions           4.16.0
+tzdata                      2026.3
+uri-template                1.3.0
+urllib3                     2.7.0
+virtualenv                  20.39.1
+wcwidth                     0.8.3
+webcolors                   25.10.0
+webencodings                0.6.1
+websocket-client            1.9.2
+wheel                       0.48.0
+=== LINTS & TYPECHECK ===
+Requirement already satisfied: ruff in /usr/local/python/3.14.2/lib/python3.14/site-packages (0.16.8)
+Requirement already satisfied: flake8 in /usr/local/python/3.14.2/lib/python3.14/site-packages (7.3.0)
+Requirement already satisfied: mypy in /usr/local/python/3.14.2/lib/python3.14/site-packages (2.3.1)
+Requirement already satisfied: mccabe<0.8.0,>=0.7.0 in /usr/local/python/3.14.2/lib/python3.14/site-packages (from flake8) (0.7.0)
+Requirement already satisfied: pycodestyle<2.15.0,>=2.14.0 in /usr/local/python/3.14.2/lib/python3.14/site-packages (from flake8) (2.14.0)
+Requirement already satisfied: pyflakes<3.5.0,>=3.4.0 in /usr/local/python/3.14.2/lib/python3.14/site-packages (from flake8) (3.4.0)
+Requirement already satisfied: typing_extensions>=4.6.0 in /home/codespace/.local/lib/python3.14/site-packages (from mypy) (4.16.0)
+Requirement already satisfied: mypy_extensions>=1.0.0 in /usr/local/python/3.14.2/lib/python3.14/site-packages (from mypy) (1.1.0)
+Requirement already satisfied: pathspec>=1.0.0 in /usr/local/python/3.14.2/lib/python3.14/site-packages (from mypy) (1.1.1)
+Requirement already satisfied: librt>=0.13.0 in /usr/local/python/3.14.2/lib/python3.14/site-packages (from mypy) (0.15.0)
+Requirement already satisfied: ast-serialize<1.0.0,>=0.6.0 in /usr/local/python/3.14.2/lib/python3.14/site-packages (from mypy) (0.11.2)
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/governed_autonomy/__init__.py:3:1
+   |
+ 1 |   """Governed Autonomy Substrate MVP."""
+ 2 |
+ 3 | / from .crypto import KeyPair
+ 4 | | from .engine import ExecutionBoundary
+ 5 | | from .errors import AuthorizationError
+ 6 | | from .governance import GovernanceRule, GovernanceRuleTranslator
+ 7 | | from .models import GovernanceAuthorizationArtifact, SignedApproval
+ 8 | | from .policy import (
+ 9 | |     DeterministicArbiter,
+10 | |     Policy,
+11 | |     PolicyRegistry,
+12 | |     SignedPolicyManifest,
+13 | |     signed_policy_manifest_from_dict,
+14 | | )
+15 | | from .replay import ReplayLog, SQLiteReplayLog
+16 | | from .issuer import AuthorizationIssuer, PolicyDeniedError
+17 | | from .trust import TrustStore
+18 | | from .service import GovernedService
+19 | | from .health import health_report
+20 | | from .bootstrap import build_demo_service, build_platform_demo
+21 | | from .http_api import AuthenticatedAPI, create_server, parse_server_args
+22 | | from .platform import (
+23 | |     GovernancePlatform,
+24 | |     PlatformDeploymentPolicy,
+25 | |     RuntimeIdentity,
+26 | |     ServicePrincipal,
+27 | |     ServicePrincipalRegistry,
+28 | | )
+29 | | from .platform_admin import PolicyApproval, PolicyChangeManager, PolicyChangeProposal
+30 | | from .identity import ExternalIdentity, IdentityValidationError, JWKSProvider, OIDCValidator, JWTValidator, StaticJWKSProvider
+31 | | from .signing import LocalEd25519Signer, RemoteSigner, Signer
+32 | | from .storage import NonceRepository, SQLiteNonceRepository, PostgresNonceRepository, POSTGRES_NONCE_SCHEMA, PostgresReplayLog, POST…
+33 | | from .deployment import BoundedRateLimiter, TLSConfig, correlation_id, security_headers, validate_server_config
+34 | | from .jobs import Job, SQLiteJobStore, run_once
+35 | | from .mcp_gateway import GASMCPGateway, GASMCPServer, MCPGatewayContext, MCPToolDefinition, MCPToolResult
+36 | | from .langchain_adapter import GASCallbackHandler, GASExecutionBarrierTool, GASToolOutput
+37 | | from .a2a import A2AGuard, A2ATaskDelegation
+38 | | from .compliance import ComplianceAuditor, ComplianceEvaluation
+   | |_______________________________________________________________^
+39 |
+40 |   __all__ = [
+   |
+help: Organize imports
+   |
+2  |
+3  + from .a2a import A2AGuard, A2ATaskDelegation
+4  + from .bootstrap import build_demo_service, build_platform_demo
+5  + from .compliance import ComplianceAuditor, ComplianceEvaluation
+6  | from .crypto import KeyPair
+7  + from .deployment import (
+8  +     BoundedRateLimiter,
+9  +     TLSConfig,
+10 +     correlation_id,
+11 +     security_headers,
+12 +     validate_server_config,
+13 + )
+14 | from .engine import ExecutionBoundary
+15 | from .errors import AuthorizationError
+16 | from .governance import GovernanceRule, GovernanceRuleTranslator
+17 + from .health import health_report
+18 + from .http_api import AuthenticatedAPI, create_server, parse_server_args
+19 + from .identity import (
+20 +     ExternalIdentity,
+21 +     IdentityValidationError,
+22 +     JWKSProvider,
+23 +     JWTValidator,
+24 +     OIDCValidator,
+25 +     StaticJWKSProvider,
+26 + )
+27 + from .issuer import AuthorizationIssuer, PolicyDeniedError
+28 + from .jobs import Job, SQLiteJobStore, run_once
+29 + from .langchain_adapter import GASCallbackHandler, GASExecutionBarrierTool, GASToolOutput
+30 + from .mcp_gateway import (
+31 +     GASMCPGateway,
+32 +     GASMCPServer,
+33 +     MCPGatewayContext,
+34 +     MCPToolDefinition,
+35 +     MCPToolResult,
+36 + )
+37 | from .models import GovernanceAuthorizationArtifact, SignedApproval
+38 + from .platform import (
+39 +     GovernancePlatform,
+40 +     PlatformDeploymentPolicy,
+41 +     RuntimeIdentity,
+42 +     ServicePrincipal,
+43 +     ServicePrincipalRegistry,
+44 + )
+45 + from .platform_admin import PolicyApproval, PolicyChangeManager, PolicyChangeProposal
+46 | from .policy import (
+--------------------------------------------------------------------------------
+53 | from .replay import ReplayLog, SQLiteReplayLog
+   - from .issuer import AuthorizationIssuer, PolicyDeniedError
+   - from .trust import TrustStore
+54 | from .service import GovernedService
+   - from .health import health_report
+   - from .bootstrap import build_demo_service, build_platform_demo
+   - from .http_api import AuthenticatedAPI, create_server, parse_server_args
+   - from .platform import (
+   -     GovernancePlatform,
+   -     PlatformDeploymentPolicy,
+   -     RuntimeIdentity,
+   -     ServicePrincipal,
+   -     ServicePrincipalRegistry,
+55 + from .signing import LocalEd25519Signer, RemoteSigner, Signer
+56 + from .storage import (
+57 +     POSTGRES_NONCE_SCHEMA,
+58 +     POSTGRES_REPLAY_SCHEMA,
+59 +     NonceRepository,
+60 +     PostgresNonceRepository,
+61 +     PostgresReplayLog,
+62 +     SQLiteNonceRepository,
+63 | )
+   - from .platform_admin import PolicyApproval, PolicyChangeManager, PolicyChangeProposal
+   - from .identity import ExternalIdentity, IdentityValidationError, JWKSProvider, OIDCValidator, JWTValidator, StaticJWKSProvider
+   - from .signing import LocalEd25519Signer, RemoteSigner, Signer
+   - from .storage import NonceRepository, SQLiteNonceRepository, PostgresNonceRepository, POSTGRES_NONCE_SCHEMA, PostgresReplayLog, POSTGRES_REPLAY_SCHEMA
+   - from .deployment import BoundedRateLimiter, TLSConfig, correlation_id, security_headers, validate_server_config
+   - from .jobs import Job, SQLiteJobStore, run_once
+   - from .mcp_gateway import GASMCPGateway, GASMCPServer, MCPGatewayContext, MCPToolDefinition, MCPToolResult
+   - from .langchain_adapter import GASCallbackHandler, GASExecutionBarrierTool, GASToolOutput
+   - from .a2a import A2AGuard, A2ATaskDelegation
+   - from .compliance import ComplianceAuditor, ComplianceEvaluation
+64 + from .trust import TrustStore
+65 |
+   |
+
+F401 [*] `hashlib` imported but unused
+  --> src/governed_autonomy/a2a.py:15:8
+   |
+13 | from __future__ import annotations
+14 |
+15 | import hashlib
+   |        ^^^^^^^
+16 | from collections.abc import Callable
+17 | from dataclasses import dataclass
+   |
+help: Remove unused import: `hashlib`
+   |
+14 |
+   - import hashlib
+15 | from collections.abc import Callable
+   |
+
+I001 [*] Import block is un-sorted or un-formatted
+ --> src/governed_autonomy/admin_ui.py:7:1
+  |
+5 | and leaves session/SSO concerns to the deployment edge.
+6 | """
+7 | from __future__ import annotations
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+8 |
+9 | def render_admin_ui() -> bytes:
+  |
+help: Organize imports
+   |
+8  |
+9  +
+10 | def render_admin_ui() -> bytes:
+   |
+
+F401 [*] `typing.Any` imported but unused
+ --> src/governed_autonomy/bootstrap.py:1:20
+  |
+1 | from typing import Any
+  |                    ^^^
+2 |
+3 | from .crypto import KeyPair
+  |
+help: Remove unused import: `typing.Any`
+  |
+  - from typing import Any
+1 |
+  |
+
+UP017 [*] Use `datetime.UTC` alias
+   --> src/governed_autonomy/compliance.py:236:48
+    |
+235 |         return {
+236 |             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    |                                                ^^^^^^^^^^^^^^^^^^^^^
+237 |             "compliance_status": "COMPLIANT" if fails == 0 else "NON_COMPLIANT",
+238 |             "score": {
+    |
+help: Convert to `datetime.UTC` alias
+    |
+235 |         return {
+    -             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+236 +             "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+237 |             "compliance_status": "COMPLIANT" if fails == 0 else "NON_COMPLIANT",
+    |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/governed_autonomy/engine.py:1:1
+   |
+ 1 | / import time
+ 2 | | import hashlib
+ 3 | | from collections.abc import Callable
+ 4 | | from typing import Any
+ 5 | |
+ 6 | | from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+ 7 | |
+ 8 | | from .crypto import verify_signature
+ 9 | | from .canonical import canonical_json
+10 | | from .errors import AuthorizationError
+11 | | from .models import GovernanceAuthorizationArtifact
+12 | | from .replay import ReplayLog
+13 | | from .trust import TrustStore
+14 | | from .policy import DeterministicArbiter, PolicyRegistry
+   | |________________________________________________________^
+help: Organize imports
+   |
+1  + import hashlib
+2  | import time
+   - import hashlib
+3  | from collections.abc import Callable
+--------------------------------------------------------------------------------
+7  |
+8  + from .canonical import canonical_json
+9  | from .crypto import verify_signature
+   - from .canonical import canonical_json
+10 | from .errors import AuthorizationError
+11 | from .models import GovernanceAuthorizationArtifact
+12 + from .policy import DeterministicArbiter, PolicyRegistry
+13 | from .replay import ReplayLog
+14 | from .trust import TrustStore
+   - from .policy import DeterministicArbiter, PolicyRegistry
+15 |
+   |
+
+C420 [*] Unnecessary dict comprehension for iterable; use `dict.fromkeys` instead
+   --> src/governed_autonomy/governance.py:105:38
+    |
+103 |                 }
+104 |             elif isinstance(required_approvals_raw, int) and not isinstance(required_approvals_raw, bool):
+105 |                 required_approvals = {action: required_approvals_raw for action in policy.allowed_actions}
+    |                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+106 |             else:
+107 |                 required_approvals = {}
+    |
+help: Replace with `dict.fromkeys(iterable)`)
+    |
+104 |             elif isinstance(required_approvals_raw, int) and not isinstance(required_approvals_raw, bool):
+    -                 required_approvals = {action: required_approvals_raw for action in policy.allowed_actions}
+105 +                 required_approvals = dict.fromkeys(policy.allowed_actions, required_approvals_raw)
+106 |             else:
+    |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/governed_autonomy/http_api.py:1:1
+   |
+ 1 | / import argparse
+ 2 | | import hmac
+ 3 | | import json
+ 4 | | import os
+ 5 | | import ssl
+ 6 | | from http import HTTPStatus
+ 7 | | from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+ 8 | | from typing import Any, Sequence
+ 9 | |
+10 | | from .admin_ui import render_admin_ui
+11 | | from .bootstrap import build_demo_service
+12 | | from .deployment import BoundedRateLimiter, TLSConfig, correlation_id, security_headers
+13 | | from .errors import AuthorizationError
+14 | | from .health import health_report
+15 | | from .issuer import PolicyDeniedError
+16 | | from .service import GovernedService
+17 | | from .identity import OIDCValidator, IdentityValidationError
+   | |____________________________________________________________^
+help: Organize imports
+   |
+14 | from .health import health_report
+15 + from .identity import IdentityValidationError, OIDCValidator
+16 | from .issuer import PolicyDeniedError
+17 | from .service import GovernedService
+   - from .identity import OIDCValidator, IdentityValidationError
+18 |
+   |
+
+UP035 [*] Import from `collections.abc` instead: `Sequence`
+  --> src/governed_autonomy/http_api.py:8:1
+   |
+ 6 | from http import HTTPStatus
+ 7 | from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+ 8 | from typing import Any, Sequence
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ 9 |
+10 | from .admin_ui import render_admin_ui
+   |
+help: Import from `collections.abc`
+   |
+7  | from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+   - from typing import Any, Sequence
+8  + from typing import Any
+9  + from collections.abc import Sequence
+10 |
+   |
+
+E702 Multiple statements on one line (semicolon)
+  --> src/governed_autonomy/http_api.py:39:95
+   |
+37 |             def do_GET(self) -> None:
+38 |                 if not api._allowed(self):
+39 |                     self._send(HTTPStatus.TOO_MANY_REQUESTS, {"error": "rate limit exceeded"}); return
+   |                                                                                               ^
+40 |                 if not api._authenticated(self):
+41 |                     self._send(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"}); return
+   |
+
+E702 Multiple statements on one line (semicolon)
+  --> src/governed_autonomy/http_api.py:41:83
+   |
+39 |                     self._send(HTTPStatus.TOO_MANY_REQUESTS, {"error": "rate limit exceeded"}); return
+40 |                 if not api._authenticated(self):
+41 |                     self._send(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"}); return
+   |                                                                                   ^
+42 |                 if self.path == "/admin":
+43 |                     body = render_admin_ui()
+   |
+
+E701 Multiple statements on one line (colon)
+  --> src/governed_autonomy/http_api.py:47:59
+   |
+45 |                     self.send_header("Content-Type", "text/html; charset=utf-8")
+46 |                     self.send_header("Content-Length", str(len(body)))
+47 |                     for k, v in security_headers().items(): self.send_header(k, v)
+   |                                                           ^
+48 |                     self.end_headers(); self.wfile.write(body); return
+49 |                 if self.path in {"/health", "/livez", "/readyz", "/startupz"}:
+   |
+
+E702 Multiple statements on one line (semicolon)
+  --> src/governed_autonomy/http_api.py:48:39
+   |
+46 | …         self.send_header("Content-Length", str(len(body)))
+47 | …         for k, v in security_headers().items(): self.send_header(k, v)
+48 | …         self.end_headers(); self.wfile.write(body); return
+   |                             ^
+49 | …     if self.path in {"/health", "/livez", "/readyz", "/startupz"}:
+50 | …         report = health_report(replay_log=api.service.boundary.replay_log, trust_store=api.service.boundary.trust_store, policy_regi…
+   |
+
+E702 Multiple statements on one line (semicolon)
+  --> src/governed_autonomy/http_api.py:48:63
+   |
+46 | …         self.send_header("Content-Length", str(len(body)))
+47 | …         for k, v in security_headers().items(): self.send_header(k, v)
+48 | …         self.end_headers(); self.wfile.write(body); return
+   |                                                     ^
+49 | …     if self.path in {"/health", "/livez", "/readyz", "/startupz"}:
+50 | …         report = health_report(replay_log=api.service.boundary.replay_log, trust_store=api.service.boundary.trust_store, policy_regi…
+   |
+
+E702 Multiple statements on one line (semicolon)
+  --> src/governed_autonomy/http_api.py:56:75
+   |
+54 |                         report = {"ok": True, "status": "started"}
+55 |                     elif self.path == "/readyz" and not report["ok"]:
+56 |                         self._send(HTTPStatus.SERVICE_UNAVAILABLE, report); return
+   |                                                                           ^
+57 |                     self._send(HTTPStatus.OK, report); return
+58 |                 if self.path == "/audit":
+   |
+
+E702 Multiple statements on one line (semicolon)
+  --> src/governed_autonomy/http_api.py:57:54
+   |
+55 |                     elif self.path == "/readyz" and not report["ok"]:
+56 |                         self._send(HTTPStatus.SERVICE_UNAVAILABLE, report); return
+57 |                     self._send(HTTPStatus.OK, report); return
+   |                                                      ^
+58 |                 if self.path == "/audit":
+59 |                     self._send(HTTPStatus.OK, api.service.audit_report()); return
+   |
+
+E702 Multiple statements on one line (semicolon)
+  --> src/governed_autonomy/http_api.py:59:74
+   |
+57 |                     self._send(HTTPStatus.OK, report); return
+58 |                 if self.path == "/audit":
+59 |                     self._send(HTTPStatus.OK, api.service.audit_report()); return
+   |                                                                          ^
+60 |                 if self.path == "/admin/policies":
+61 |                     self._send(HTTPStatus.OK, {"policies": api.service.policies.to_dict()}); return
+   |
+
+E702 Multiple statements on one line (semicolon)
+  --> src/governed_autonomy/http_api.py:61:92
+   |
+59 |                     self._send(HTTPStatus.OK, api.service.audit_report()); return
+60 |                 if self.path == "/admin/policies":
+61 |                     self._send(HTTPStatus.OK, {"policies": api.service.policies.to_dict()}); return
+   |                                                                                            ^
+62 |                 if self.path == "/admin/proposals":
+63 |                     self._send(HTTPStatus.OK, {"proposals": []}); return
+   |
+
+E702 Multiple statements on one line (semicolon)
+  --> src/governed_autonomy/http_api.py:63:65
+   |
+61 |                     self._send(HTTPStatus.OK, {"policies": api.service.policies.to_dict()}); return
+62 |                 if self.path == "/admin/proposals":
+63 |                     self._send(HTTPStatus.OK, {"proposals": []}); return
+   |                                                                 ^
+64 |                 if self.path == "/admin/metrics":
+65 |                     self._send(HTTPStatus.OK, api.service.audit_report()["audit_summary"]); return
+   |
+
+E702 Multiple statements on one line (semicolon)
+  --> src/governed_autonomy/http_api.py:65:91
+   |
+63 |                     self._send(HTTPStatus.OK, {"proposals": []}); return
+64 |                 if self.path == "/admin/metrics":
+65 |                     self._send(HTTPStatus.OK, api.service.audit_report()["audit_summary"]); return
+   |                                                                                           ^
+66 |                 if self.path == "/openapi.json":
+67 |                     self._send(HTTPStatus.OK, API_SCHEMA); return
+   |
+
+E702 Multiple statements on one line (semicolon)
+  --> src/governed_autonomy/http_api.py:67:58
+   |
+65 |                     self._send(HTTPStatus.OK, api.service.audit_report()["audit_summary"]); return
+66 |                 if self.path == "/openapi.json":
+67 |                     self._send(HTTPStatus.OK, API_SCHEMA); return
+   |                                                          ^
+68 |                 self._send(HTTPStatus.NOT_FOUND, {"error": "not found"})
+   |
+
+E702 Multiple statements on one line (semicolon)
+  --> src/governed_autonomy/http_api.py:72:95
+   |
+70 |             def do_POST(self) -> None:
+71 |                 if not api._allowed(self):
+72 |                     self._send(HTTPStatus.TOO_MANY_REQUESTS, {"error": "rate limit exceeded"}); return
+   |                                                                                               ^
+73 |                 if not api._authenticated(self):
+74 |                     self._send(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"}); return
+   |
+
+E702 Multiple statements on one line (semicolon)
+  --> src/governed_autonomy/http_api.py:74:83
+   |
+72 |                     self._send(HTTPStatus.TOO_MANY_REQUESTS, {"error": "rate limit exceeded"}); return
+73 |                 if not api._authenticated(self):
+74 |                     self._send(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"}); return
+   |                                                                                   ^
+75 |                 try:
+76 |                     payload = api._read_json(self)
+   |
+
+E701 Multiple statements on one line (colon)
+   --> src/governed_autonomy/http_api.py:98:55
+    |
+ 96 |                 self.send_header("Content-Length", str(len(encoded)))
+ 97 |                 self.send_header("X-Request-ID", api._request_id(self))
+ 98 |                 for k, v in security_headers().items(): self.send_header(k, v)
+    |                                                       ^
+ 99 |                 self.end_headers(); self.wfile.write(encoded)
+100 |         return Handler
+    |
+
+E702 Multiple statements on one line (semicolon)
+   --> src/governed_autonomy/http_api.py:99:35
+    |
+ 97 |                 self.send_header("X-Request-ID", api._request_id(self))
+ 98 |                 for k, v in security_headers().items(): self.send_header(k, v)
+ 99 |                 self.end_headers(); self.wfile.write(encoded)
+    |                                   ^
+100 |         return Handler
+    |
+
+E701 Multiple statements on one line (colon)
+   --> src/governed_autonomy/http_api.py:123:26
+    |
+121 |     def _read_json(self, request: BaseHTTPRequestHandler) -> dict[str, Any]:
+122 |         header = request.headers.get("Content-Length")
+123 |         if header is None: raise ValueError("Content-Length is required")
+    |                          ^
+124 |         try: length = int(header)
+125 |         except ValueError as exc: raise ValueError("Content-Length is invalid") from exc
+    |
+
+E701 Multiple statements on one line (colon)
+   --> src/governed_autonomy/http_api.py:124:12
+    |
+122 |         header = request.headers.get("Content-Length")
+123 |         if header is None: raise ValueError("Content-Length is required")
+124 |         try: length = int(header)
+    |            ^
+125 |         except ValueError as exc: raise ValueError("Content-Length is invalid") from exc
+126 |         if length < 0 or length > self.max_body_bytes: raise ValueError("request body exceeds size limit")
+    |
+
+E701 Multiple statements on one line (colon)
+   --> src/governed_autonomy/http_api.py:125:33
+    |
+123 |         if header is None: raise ValueError("Content-Length is required")
+124 |         try: length = int(header)
+125 |         except ValueError as exc: raise ValueError("Content-Length is invalid") from exc
+    |                                 ^
+126 |         if length < 0 or length > self.max_body_bytes: raise ValueError("request body exceeds size limit")
+127 |         try: payload = json.loads(request.rfile.read(length))
+    |
+
+E701 Multiple statements on one line (colon)
+   --> src/governed_autonomy/http_api.py:126:54
+    |
+124 |         try: length = int(header)
+125 |         except ValueError as exc: raise ValueError("Content-Length is invalid") from exc
+126 |         if length < 0 or length > self.max_body_bytes: raise ValueError("request body exceeds size limit")
+    |                                                      ^
+127 |         try: payload = json.loads(request.rfile.read(length))
+128 |         except json.JSONDecodeError as exc: raise ValueError("request JSON is invalid") from exc
+    |
+
+E701 Multiple statements on one line (colon)
+   --> src/governed_autonomy/http_api.py:127:12
+    |
+125 |         except ValueError as exc: raise ValueError("Content-Length is invalid") from exc
+126 |         if length < 0 or length > self.max_body_bytes: raise ValueError("request body exceeds size limit")
+127 |         try: payload = json.loads(request.rfile.read(length))
+    |            ^
+128 |         except json.JSONDecodeError as exc: raise ValueError("request JSON is invalid") from exc
+129 |         if not isinstance(payload, dict): raise ValueError("request JSON must be an object")
+    |
+
+E701 Multiple statements on one line (colon)
+   --> src/governed_autonomy/http_api.py:128:43
+    |
+126 |         if length < 0 or length > self.max_body_bytes: raise ValueError("request body exceeds size limit")
+127 |         try: payload = json.loads(request.rfile.read(length))
+128 |         except json.JSONDecodeError as exc: raise ValueError("request JSON is invalid") from exc
+    |                                           ^
+129 |         if not isinstance(payload, dict): raise ValueError("request JSON must be an object")
+130 |         return payload
+    |
+
+E701 Multiple statements on one line (colon)
+   --> src/governed_autonomy/http_api.py:129:41
+    |
+127 |         try: payload = json.loads(request.rfile.read(length))
+128 |         except json.JSONDecodeError as exc: raise ValueError("request JSON is invalid") from exc
+129 |         if not isinstance(payload, dict): raise ValueError("request JSON must be an object")
+    |                                         ^
+130 |         return payload
+    |
+
+E702 Multiple statements on one line (semicolon)
+   --> src/governed_autonomy/http_api.py:135:55
+    |
+133 | def parse_server_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+134 |     parser = argparse.ArgumentParser(description="Run the Governed Autonomy HTTP API server.")
+135 |     parser.add_argument("--host", default="127.0.0.1"); parser.add_argument("--port", type=int, default=8000)
+    |                                                       ^
+136 |     parser.add_argument("--bearer-token", default=os.environ.get("GOVERNED_AUTONOMY_BEARER_TOKEN"))
+137 |     parser.add_argument("--max-body-bytes", type=int, default=64 * 1024)
+    |
+
+E701 Multiple statements on one line (colon)
+   --> src/governed_autonomy/http_api.py:185:8
+    |
+183 |     server = create_server(service, bearer_token=args.bearer_token, host=args.host, port=args.port, max_body_bytes=args.max_body_byte…
+184 |     print(f"Serving Governed Autonomy HTTP API on http://{args.host}:{server.server_address[1]}")
+185 |     try: server.serve_forever()
+    |        ^
+186 |     except KeyboardInterrupt: pass
+187 |     finally: server.server_close()
+    |
+
+E701 Multiple statements on one line (colon)
+   --> src/governed_autonomy/http_api.py:186:29
+    |
+184 |     print(f"Serving Governed Autonomy HTTP API on http://{args.host}:{server.server_address[1]}")
+185 |     try: server.serve_forever()
+186 |     except KeyboardInterrupt: pass
+    |                             ^
+187 |     finally: server.server_close()
+188 |     return 0
+    |
+
+E701 Multiple statements on one line (colon)
+   --> src/governed_autonomy/http_api.py:187:12
+    |
+185 |     try: server.serve_forever()
+186 |     except KeyboardInterrupt: pass
+187 |     finally: server.server_close()
+    |            ^
+188 |     return 0
+    |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/governed_autonomy/identity.py:2:1
+   |
+ 1 |   """Fail-closed OIDC/JWT validation with an injectable, rotatable JWKS source."""
+ 2 | / from __future__ import annotations
+ 3 | |
+ 4 | | import base64
+ 5 | | import json
+ 6 | | import time
+ 7 | | from dataclasses import dataclass
+ 8 | | from typing import Any, Protocol
+ 9 | |
+10 | | from cryptography.exceptions import InvalidSignature
+11 | | from cryptography.hazmat.primitives.asymmetric import ec, ed25519, rsa, padding
+12 | | from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
+13 | | from cryptography.hazmat.primitives.hashes import SHA256, SHA384, SHA512
+   | |________________________________________________________________________^
+help: Organize imports
+   |
+10 | from cryptography.exceptions import InvalidSignature
+   - from cryptography.hazmat.primitives.asymmetric import ec, ed25519, rsa, padding
+11 + from cryptography.hazmat.primitives.asymmetric import ec, ed25519, padding, rsa
+12 | from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
+   |
+
+UP035 [*] Import from `collections.abc` instead: `Callable`
+  --> src/governed_autonomy/jobs.py:12:1
+   |
+10 | import uuid
+11 | from dataclasses import dataclass
+12 | from typing import Any, Callable
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: Import from `collections.abc`
+   |
+11 | from dataclasses import dataclass
+   - from typing import Any, Callable
+12 + from typing import Any
+13 + from collections.abc import Callable
+14 |
+   |
+
+F401 [*] `dataclasses.field` imported but unused
+  --> src/governed_autonomy/langchain_adapter.py:20:36
+   |
+18 | import json
+19 | from collections.abc import Callable, Sequence
+20 | from dataclasses import dataclass, field
+   |                                    ^^^^^
+21 | from typing import Any
+   |
+help: Remove unused import: `dataclasses.field`
+   |
+19 | from collections.abc import Callable, Sequence
+   - from dataclasses import dataclass, field
+20 + from dataclasses import dataclass
+21 | from typing import Any
+   |
+
+F401 [*] `.errors.AuthorizationError` imported but unused
+  --> src/governed_autonomy/langchain_adapter.py:24:21
+   |
+23 | from .engine import ExecutionBoundary
+24 | from .errors import AuthorizationError
+   |                     ^^^^^^^^^^^^^^^^^^
+25 | from .issuer import AuthorizationIssuer, PolicyDeniedError
+26 | from .models import GovernanceAuthorizationArtifact, SignedApproval
+   |
+help: Remove unused import: `.errors.AuthorizationError`
+   |
+23 | from .engine import ExecutionBoundary
+   - from .errors import AuthorizationError
+24 | from .issuer import AuthorizationIssuer, PolicyDeniedError
+   |
+
+F401 [*] `.issuer.PolicyDeniedError` imported but unused
+  --> src/governed_autonomy/langchain_adapter.py:25:42
+   |
+23 | from .engine import ExecutionBoundary
+24 | from .errors import AuthorizationError
+25 | from .issuer import AuthorizationIssuer, PolicyDeniedError
+   |                                          ^^^^^^^^^^^^^^^^^
+26 | from .models import GovernanceAuthorizationArtifact, SignedApproval
+27 | from .policy import Policy, PolicyRegistry
+   |
+help: Remove unused import: `.issuer.PolicyDeniedError`
+   |
+24 | from .errors import AuthorizationError
+   - from .issuer import AuthorizationIssuer, PolicyDeniedError
+25 + from .issuer import AuthorizationIssuer
+26 | from .models import GovernanceAuthorizationArtifact, SignedApproval
+   |
+
+F401 [*] `.policy.PolicyRegistry` imported but unused
+  --> src/governed_autonomy/langchain_adapter.py:27:29
+   |
+25 | from .issuer import AuthorizationIssuer, PolicyDeniedError
+26 | from .models import GovernanceAuthorizationArtifact, SignedApproval
+27 | from .policy import Policy, PolicyRegistry
+   |                             ^^^^^^^^^^^^^^
+28 | from .replay import ReplayLog
+29 | from .trust import TrustStore
+   |
+help: Remove unused import: `.policy.PolicyRegistry`
+   |
+26 | from .models import GovernanceAuthorizationArtifact, SignedApproval
+   - from .policy import Policy, PolicyRegistry
+27 + from .policy import Policy
+28 | from .replay import ReplayLog
+   |
+
+F401 [*] `.trust.TrustStore` imported but unused
+  --> src/governed_autonomy/langchain_adapter.py:29:20
+   |
+27 | from .policy import Policy, PolicyRegistry
+28 | from .replay import ReplayLog
+29 | from .trust import TrustStore
+   |                    ^^^^^^^^^^
+30 |
+31 | try:
+   |
+help: Remove unused import: `.trust.TrustStore`
+   |
+28 | from .replay import ReplayLog
+   - from .trust import TrustStore
+29 |
+   |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/governed_autonomy/mcp_gateway.py:46:1
+   |
+44 |   """
+45 |
+46 | / from __future__ import annotations
+47 | |
+48 | | import functools
+49 | | from collections.abc import Callable, Sequence
+50 | | from dataclasses import dataclass, field
+51 | | from typing import Any
+52 | |
+53 | | from .crypto import KeyPair
+54 | | from .engine import ExecutionBoundary
+55 | | from .errors import AuthorizationError
+56 | | from .issuer import AuthorizationIssuer, PolicyDeniedError
+57 | | from .models import GovernanceAuthorizationArtifact, SignedApproval
+58 | | from .policy import DeterministicArbiter, Policy, PolicyRegistry
+59 | | from .replay import ReplayLog
+60 | | from .trust import TrustStore
+   | |_____________________________^
+help: Organize imports
+   |
+61 |
+   -
+62 | # ---------------------------------------------------------------------------
+   |
+
+I001 [*] Import block is un-sorted or un-formatted
+   --> src/governed_autonomy/mcp_gateway.py:447:13
+    |
+445 |           try:
+446 |               # pyrefly: ignore [missing-import]
+447 | /             import mcp.server as _mcp_server
+448 | |             # pyrefly: ignore [missing-import]
+449 | |             import mcp.server.stdio as _mcp_stdio
+450 | |             # pyrefly: ignore [missing-import]
+451 | |             import mcp.types as _mcp_types
+    | |__________________________________________^
+452 |           except ImportError as exc:
+453 |               raise ImportError(
+    |
+help: Organize imports
+    |
+447 |             import mcp.server as _mcp_server
+448 +
+449 |             # pyrefly: ignore [missing-import]
+450 |             import mcp.server.stdio as _mcp_stdio
+451 +
+452 |             # pyrefly: ignore [missing-import]
+    |
+
+F402 Import `field` from line 3 shadowed by loop variable
+   --> src/governed_autonomy/models.py:228:13
+    |
+226 |         ):
+227 |             raise ValueError("expires_at must be an integer")
+228 |         for field in ("nonce", "replay_frame_ref", "issuer_key_id", "signature"):
+    |             ^^^^^
+229 |             if not isinstance(value[field], str) or not value[field]:
+230 |                 raise ValueError(f"{field} must be a non-empty string")
+    |
+
+UP037 [*] Remove quotes from type annotation
+  --> src/governed_autonomy/platform.py:41:19
+   |
+39 |         self,
+40 |         *,
+41 |         identity: "RuntimeIdentity",
+   |                   ^^^^^^^^^^^^^^^^^
+42 |         action: str | None,
+43 |         context: dict[str, Any],
+   |
+help: Remove quotes
+   |
+40 |         *,
+   -         identity: "RuntimeIdentity",
+41 +         identity: RuntimeIdentity,
+42 |         action: str | None,
+   |
+
+SIM102 Use a single `if` statement instead of nested `if` statements
+  --> src/governed_autonomy/platform.py:49:9
+   |
+48 |           principal = self.get(identity.principal_id)
+49 | /         if principal.tenant_id is not None and identity.tenant_id is not None:
+50 | |             if principal.tenant_id != identity.tenant_id:
+   | |_________________________________________________________^
+51 |                   raise ValueError(
+52 |                       f"principal tenant mismatch for principal {identity.principal_id!r}: "
+   |
+help: Combine `if` statements using `and`
+
+UP037 [*] Remove quotes from type annotation
+  --> src/governed_autonomy/platform.py:88:45
+   |
+86 |     max_context_entries: int = 32
+87 |
+88 |     def validate_runtime(self, *, identity: "RuntimeIdentity", context: dict[str, Any]) -> None:
+   |                                             ^^^^^^^^^^^^^^^^^
+89 |         environment = context.get("environment", identity.environment)
+90 |         if environment not in self.allowed_environments:
+   |
+help: Remove quotes
+   |
+87 |
+   -     def validate_runtime(self, *, identity: "RuntimeIdentity", context: dict[str, Any]) -> None:
+88 +     def validate_runtime(self, *, identity: RuntimeIdentity, context: dict[str, Any]) -> None:
+89 |         environment = context.get("environment", identity.environment)
+   |
+
+F401 [*] `dataclasses.field` imported but unused
+ --> src/governed_autonomy/platform_admin.py:3:36
+  |
+1 | from __future__ import annotations
+2 |
+3 | from dataclasses import dataclass, field, replace
+  |                                    ^^^^^
+4 | from typing import Any
+  |
+help: Remove unused import: `dataclasses.field`
+  |
+2 |
+  - from dataclasses import dataclass, field, replace
+3 + from dataclasses import dataclass, replace
+4 | from typing import Any
+  |
+
+F401 [*] `typing.Any` imported but unused
+ --> src/governed_autonomy/platform_admin.py:4:20
+  |
+3 | from dataclasses import dataclass, field, replace
+4 | from typing import Any
+  |                    ^^^
+5 |
+6 | from .canonical import canonical_json
+  |
+help: Remove unused import: `typing.Any`
+  |
+3 | from dataclasses import dataclass, field, replace
+  - from typing import Any
+4 |
+  |
+
+UP037 [*] Remove quotes from type annotation
+  --> src/governed_autonomy/platform_admin.py:38:10
+   |
+36 |         policy_digest: str,
+37 |         approver: KeyPair,
+38 |     ) -> "PolicyApproval":
+   |          ^^^^^^^^^^^^^^^^
+39 |         return cls(
+40 |             proposal_id=proposal_id,
+   |
+help: Remove quotes
+   |
+37 |         approver: KeyPair,
+   -     ) -> "PolicyApproval":
+38 +     ) -> PolicyApproval:
+39 |         return cls(
+   |
+
+UP037 [*] Remove quotes from type annotation
+   --> src/governed_autonomy/platform_admin.py:99:10
+    |
+ 97 |         rationale: str,
+ 98 |         current_policy_digest: str,
+ 99 |     ) -> "PolicyChangeProposal":
+    |          ^^^^^^^^^^^^^^^^^^^^^^
+100 |         payload = cls(
+101 |             proposal_id=proposal_id,
+    |
+help: Remove quotes
+    |
+98  |         current_policy_digest: str,
+    -     ) -> "PolicyChangeProposal":
+99  +     ) -> PolicyChangeProposal:
+100 |         payload = cls(
+    |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/governed_autonomy/policy.py:1:1
+   |
+ 1 | / import hashlib
+ 2 | | import json
+ 3 | | from collections.abc import Mapping
+ 4 | | from pathlib import Path
+ 5 | | from dataclasses import dataclass, field
+ 6 | | from typing import Any
+ 7 | |
+ 8 | | from .canonical import canonical_json
+ 9 | | from .crypto import KeyPair, verify_signature
+10 | | from .models import SignedApproval
+11 | | from .trust import TrustStore
+   | |_____________________________^
+help: Organize imports
+  |
+3 | from collections.abc import Mapping
+4 + from dataclasses import dataclass, field
+5 | from pathlib import Path
+  - from dataclasses import dataclass, field
+6 | from typing import Any
+  |
+
+C416 Unnecessary dict comprehension (rewrite using `dict()`)
+  --> src/governed_autonomy/policy.py:71:29
+   |
+69 |                   for action, fields in sorted(self.required_fields.items())
+70 |               },
+71 |               "exact_fields": {
+   |  _____________________________^
+72 | |                 action: values
+73 | |                 for action, values in sorted(self.exact_fields.items())
+74 | |             },
+   | |_____________^
+75 |               "required_context": list(self.required_context),
+76 |               "exact_context": self.exact_context,
+   |
+help: Rewrite using `dict()`
+
+C416 Unnecessary dict comprehension (rewrite using `dict()`)
+  --> src/governed_autonomy/policy.py:79:35
+   |
+77 |               "max_request_bytes": self.max_request_bytes,
+78 |               "max_ttl_seconds": self.max_ttl_seconds,
+79 |               "required_approvals": {
+   |  ___________________________________^
+80 | |                 action: count
+81 | |                 for action, count in sorted(self.required_approvals.items())
+82 | |             },
+   | |_____________^
+83 |           }
+   |
+help: Rewrite using `dict()`
+
+SIM102 Use a single `if` statement instead of nested `if` statements
+   --> src/governed_autonomy/policy.py:126:17
+    |
+124 |                   if isinstance(approval, SignedApproval):
+125 |                       candidate = approval
+126 | /                 elif isinstance(approval, Mapping):
+127 | |                     if "issuer_key_id" in approval and "signature" in approval:
+    | |_______________________________________________________________________________^
+128 |                           try:
+129 |                               candidate = SignedApproval.from_dict(dict(approval))
+    |
+help: Combine `if` statements using `and`
+
+F402 Import `field` from line 5 shadowed by loop variable
+   --> src/governed_autonomy/policy.py:160:13
+    |
+158 |             reason_codes.append("action_not_allowed")
+159 |
+160 |         for field in policy.required_fields.get(action, ()):
+    |             ^^^^^
+161 |             if field not in request:
+162 |                 reasons.append(f"required field is missing: {field}")
+    |
+
+SIM102 Use a single `if` statement instead of nested `if` statements
+   --> src/governed_autonomy/policy.py:235:9
+    |
+233 |           current = self._policies.get(manifest.policy.policy_id)
+234 |           current_version = self._versions.get(manifest.policy.policy_id)
+235 | /         if current is not None:
+236 | |             if manifest.version <= current_version:
+    | |___________________________________________________^
+237 |                   if (
+238 |                       manifest.version == current_version
+    |
+help: Combine `if` statements using `and`
+
+F401 [*] `cryptography.hazmat.primitives.asymmetric.ed25519.Ed25519PublicKey` imported but unused
+ --> src/governed_autonomy/signing.py:6:82
+  |
+4 | from typing import Protocol
+5 |
+6 | from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+  |                                                                                  ^^^^^^^^^^^^^^^^
+7 |
+8 | from .canonical import b64encode
+  |
+help: Remove unused import: `cryptography.hazmat.primitives.asymmetric.ed25519.Ed25519PublicKey`
+  |
+5 |
+  - from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+6 + from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+7 |
+  |
+
+F401 [*] `governed_autonomy.policy.Policy` imported but unused
+  --> tests/conformance/test_conformance.py:25:38
+   |
+23 | from governed_autonomy.crypto import verify_signature
+24 | from governed_autonomy.models import GovernanceAuthorizationArtifact, SignedApproval
+25 | from governed_autonomy.policy import Policy, policy_from_dict
+   |                                      ^^^^^^
+26 | from governed_autonomy.replay import ReplayFrame, ReplayLog
+   |
+help: Remove unused import: `governed_autonomy.policy.Policy`
+   |
+24 | from governed_autonomy.models import GovernanceAuthorizationArtifact, SignedApproval
+   - from governed_autonomy.policy import Policy, policy_from_dict
+25 + from governed_autonomy.policy import policy_from_dict
+26 | from governed_autonomy.replay import ReplayFrame, ReplayLog
+   |
+
+F401 [*] `pytest` imported but unused
+ --> tests/test_compliance.py:3:8
+  |
+1 | from __future__ import annotations
+2 |
+3 | import pytest
+  |        ^^^^^^
+4 |
+5 | from governed_autonomy import (
+  |
+help: Remove unused import: `pytest`
+  |
+2 |
+  - import pytest
+3 |
+  |
+
+I001 [*] Import block is un-sorted or un-formatted
+ --> tests/test_governance_rules.py:1:1
+  |
+1 | / from governed_autonomy import DeterministicArbiter, GovernanceRuleTranslator, KeyPair, Policy, SignedApproval
+2 | | from governed_autonomy.policy import policy_from_dict
+  | |_____________________________________________________^
+help: Organize imports
+  |
+  - from governed_autonomy import DeterministicArbiter, GovernanceRuleTranslator, KeyPair, Policy, SignedApproval
+1 + from governed_autonomy import (
+2 +     DeterministicArbiter,
+3 +     GovernanceRuleTranslator,
+4 +     KeyPair,
+5 +     Policy,
+6 +     SignedApproval,
+7 + )
+8 | from governed_autonomy.policy import policy_from_dict
+  |
+
+I001 [*] Import block is un-sorted or un-formatted
+   --> tests/test_langchain_adapter.py:162:5
+    |
+161 |       # Prepare signed approval
+162 | /     from governed_autonomy.canonical import canonical_json
+163 | |     import hashlib
+    | |__________________^
+164 |
+165 |       raw_req = {"action": "calc_tax", "amount": 1000.0, "context": {}}
+    |
+help: Organize imports
+    |
+161 |     # Prepare signed approval
+    -     from governed_autonomy.canonical import canonical_json
+162 |     import hashlib
+163 |
+164 +     from governed_autonomy.canonical import canonical_json
+165 +
+166 |     raw_req = {"action": "calc_tax", "amount": 1000.0, "context": {}}
+    |
+
+I001 [*] Import block is un-sorted or un-formatted
+   --> tests/test_mcp_gateway.py:137:5
+    |
+136 |       # Issue approval
+137 | /     from governed_autonomy.canonical import canonical_json
+138 | |     import hashlib
+    | |__________________^
+139 |
+140 |       raw_req = {"action": "deploy", **args, "context": {}}
+    |
+help: Organize imports
+    |
+136 |     # Issue approval
+    -     from governed_autonomy.canonical import canonical_json
+137 |     import hashlib
+138 |
+139 +     from governed_autonomy.canonical import canonical_json
+140 +
+141 |     raw_req = {"action": "deploy", **args, "context": {}}
+    |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> tests/test_platform.py:1:1
+   |
+ 1 | / import pytest
+ 2 | |
+ 3 | | from governed_autonomy import (
+ 4 | |     GovernancePlatform,
+ 5 | |     KeyPair,
+ 6 | |     PlatformDeploymentPolicy,
+ 7 | |     Policy,
+ 8 | |     PolicyRegistry,
+ 9 | |     ReplayLog,
+10 | |     RuntimeIdentity,
+11 | |     ServicePrincipal,
+12 | |     ServicePrincipalRegistry,
+13 | |     TrustStore,
+14 | |     AuthorizationIssuer,
+15 | |     ExecutionBoundary,
+16 | |     GovernedService,
+17 | | )
+   | |_^
+help: Organize imports
+   |
+3  | from governed_autonomy import (
+4  +     AuthorizationIssuer,
+5  +     ExecutionBoundary,
+6  |     GovernancePlatform,
+7  +     GovernedService,
+8  |     KeyPair,
+--------------------------------------------------------------------------------
+16 |     TrustStore,
+   -     AuthorizationIssuer,
+   -     ExecutionBoundary,
+   -     GovernedService,
+17 | )
+   |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> tests/test_trust.py:1:1
+   |
+ 1 | / from pathlib import Path
+ 2 | |
+ 3 | | import pytest
+ 4 | |
+ 5 | | from governed_autonomy import (
+ 6 | |     AuthorizationIssuer,
+ 7 | |     AuthorizationError,
+ 8 | |     ExecutionBoundary,
+ 9 | |     KeyPair,
+10 | |     Policy,
+11 | |     ReplayLog,
+12 | |     TrustStore,
+13 | | )
+   | |_^
+help: Organize imports
+  |
+5 | from governed_autonomy import (
+6 +     AuthorizationError,
+7 |     AuthorizationIssuer,
+  -     AuthorizationError,
+8 |     ExecutionBoundary,
+  |
+
+Found 67 errors.
+[*] 33 fixable with the `--fix` option (3 hidden fixes can be enabled with the `--unsafe-fixes` option).
+./examples/a2a_demo.py:7:80: E501 line too long (86 > 79 characters)
+./examples/a2a_demo.py:62:80: E501 line too long (103 > 79 characters)
+./examples/a2a_demo.py:89:80: E501 line too long (89 > 79 characters)
+./examples/a2a_demo.py:99:80: E501 line too long (111 > 79 characters)
+./examples/langchain_demo.py:44:80: E501 line too long (96 > 79 characters)
+./examples/langchain_demo.py:61:80: E501 line too long (82 > 79 characters)
+./examples/langchain_demo.py:65:80: E501 line too long (83 > 79 characters)
+./examples/langchain_demo.py:91:80: E501 line too long (106 > 79 characters)
+./examples/mcp_demo.py:50:80: E501 line too long (83 > 79 characters)
+./examples/mcp_demo.py:71:80: E501 line too long (100 > 79 characters)
+./src/governed_autonomy/__init__.py:29:80: E501 line too long (85 > 79 characters)
+./src/governed_autonomy/__init__.py:30:80: E501 line too long (126 > 79 characters)
+./src/governed_autonomy/__init__.py:32:80: E501 line too long (150 > 79 characters)
+./src/governed_autonomy/__init__.py:33:80: E501 line too long (111 > 79 characters)
+./src/governed_autonomy/__init__.py:35:80: E501 line too long (105 > 79 characters)
+./src/governed_autonomy/__init__.py:36:80: E501 line too long (89 > 79 characters)
+./src/governed_autonomy/a2a.py:4:80: E501 line too long (81 > 79 characters)
+./src/governed_autonomy/a2a.py:15:1: F401 'hashlib' imported but unused
+./src/governed_autonomy/a2a.py:93:80: E501 line too long (94 > 79 characters)
+./src/governed_autonomy/a2a.py:118:80: E501 line too long (94 > 79 characters)
+./src/governed_autonomy/a2a.py:155:80: E501 line too long (88 > 79 characters)
+./src/governed_autonomy/a2a.py:157:80: E501 line too long (92 > 79 characters)
+./src/governed_autonomy/a2a.py:162:80: E501 line too long (92 > 79 characters)
+./src/governed_autonomy/a2a.py:169:80: E501 line too long (102 > 79 characters)
+./src/governed_autonomy/a2a.py:173:80: E501 line too long (94 > 79 characters)
+./src/governed_autonomy/a2a.py:179:80: E501 line too long (82 > 79 characters)
+./src/governed_autonomy/a2a.py:183:80: E501 line too long (107 > 79 characters)
+./src/governed_autonomy/admin_ui.py:9:1: E302 expected 2 blank lines, found 1
+./src/governed_autonomy/admin_ui.py:10:80: E501 line too long (94 > 79 characters)
+./src/governed_autonomy/admin_ui.py:11:80: E501 line too long (80 > 79 characters)
+./src/governed_autonomy/admin_ui.py:13:80: E501 line too long (90 > 79 characters)
+./src/governed_autonomy/admin_ui.py:15:80: E501 line too long (96 > 79 characters)
+./src/governed_autonomy/bootstrap.py:1:1: F401 'typing.Any' imported but unused
+./src/governed_autonomy/bootstrap.py:14:80: E501 line too long (82 > 79 characters)
+./src/governed_autonomy/bootstrap.py:49:80: E501 line too long (88 > 79 characters)
+./src/governed_autonomy/compliance.py:24:80: E501 line too long (83 > 79 characters)
+./src/governed_autonomy/compliance.py:35:80: E501 line too long (89 > 79 characters)
+./src/governed_autonomy/compliance.py:66:80: E501 line too long (101 > 79 characters)
+./src/governed_autonomy/compliance.py:92:80: E501 line too long (98 > 79 characters)
+./src/governed_autonomy/compliance.py:102:80: E501 line too long (89 > 79 characters)
+./src/governed_autonomy/compliance.py:116:80: E501 line too long (102 > 79 characters)
+./src/governed_autonomy/compliance.py:138:80: E501 line too long (93 > 79 characters)
+./src/governed_autonomy/compliance.py:145:80: E501 line too long (88 > 79 characters)
+./src/governed_autonomy/compliance.py:156:80: E501 line too long (94 > 79 characters)
+./src/governed_autonomy/compliance.py:180:80: E501 line too long (106 > 79 characters)
+./src/governed_autonomy/compliance.py:201:80: E501 line too long (100 > 79 characters)
+./src/governed_autonomy/compliance.py:219:80: E501 line too long (143 > 79 characters)
+./src/governed_autonomy/compliance.py:236:80: E501 line too long (82 > 79 characters)
+./src/governed_autonomy/compliance.py:237:80: E501 line too long (80 > 79 characters)
+./src/governed_autonomy/crypto.py:14:80: E501 line too long (83 > 79 characters)
+./src/governed_autonomy/crypto.py:34:80: E501 line too long (91 > 79 characters)
+./src/governed_autonomy/demo.py:13:80: E501 line too long (88 > 79 characters)
+./src/governed_autonomy/demo.py:14:80: E501 line too long (86 > 79 characters)
+./src/governed_autonomy/demo.py:44:80: E501 line too long (84 > 79 characters)
+./src/governed_autonomy/deployment.py:18:80: E501 line too long (104 > 79 characters)
+./src/governed_autonomy/deployment.py:21:80: E501 line too long (94 > 79 characters)
+./src/governed_autonomy/deployment.py:28:80: E501 line too long (80 > 79 characters)
+./src/governed_autonomy/deployment.py:30:80: E501 line too long (103 > 79 characters)
+./src/governed_autonomy/deployment.py:40:80: E501 line too long (122 > 79 characters)
+./src/governed_autonomy/deployment.py:48:80: E501 line too long (80 > 79 characters)
+./src/governed_autonomy/deployment.py:58:80: E501 line too long (84 > 79 characters)
+./src/governed_autonomy/engine.py:29:80: E501 line too long (81 > 79 characters)
+./src/governed_autonomy/engine.py:42:80: E501 line too long (81 > 79 characters)
+./src/governed_autonomy/engine.py:63:80: E501 line too long (80 > 79 characters)
+./src/governed_autonomy/engine.py:102:80: E501 line too long (85 > 79 characters)
+./src/governed_autonomy/engine.py:111:80: E501 line too long (80 > 79 characters)
+./src/governed_autonomy/engine.py:112:80: E501 line too long (94 > 79 characters)
+./src/governed_autonomy/engine.py:115:80: E501 line too long (80 > 79 characters)
+./src/governed_autonomy/engine.py:122:80: E501 line too long (82 > 79 characters)
+./src/governed_autonomy/engine.py:123:80: E501 line too long (85 > 79 characters)
+./src/governed_autonomy/engine.py:135:80: E501 line too long (92 > 79 characters)
+./src/governed_autonomy/engine.py:136:80: E501 line too long (86 > 79 characters)
+./src/governed_autonomy/governance.py:23:80: E501 line too long (89 > 79 characters)
+./src/governed_autonomy/governance.py:34:80: E501 line too long (87 > 79 characters)
+./src/governed_autonomy/governance.py:39:80: E501 line too long (88 > 79 characters)
+./src/governed_autonomy/governance.py:46:80: E501 line too long (89 > 79 characters)
+./src/governed_autonomy/governance.py:50:80: E501 line too long (84 > 79 characters)
+./src/governed_autonomy/governance.py:54:80: E501 line too long (81 > 79 characters)
+./src/governed_autonomy/governance.py:55:80: E501 line too long (81 > 79 characters)
+./src/governed_autonomy/governance.py:71:80: E501 line too long (82 > 79 characters)
+./src/governed_autonomy/governance.py:78:80: E501 line too long (80 > 79 characters)
+./src/governed_autonomy/governance.py:85:80: E501 line too long (84 > 79 characters)
+./src/governed_autonomy/governance.py:86:80: E501 line too long (93 > 79 characters)
+./src/governed_autonomy/governance.py:96:80: E501 line too long (83 > 79 characters)
+./src/governed_autonomy/governance.py:97:80: E501 line too long (93 > 79 characters)
+./src/governed_autonomy/governance.py:104:80: E501 line too long (106 > 79 characters)
+./src/governed_autonomy/governance.py:105:80: E501 line too long (106 > 79 characters)
+./src/governed_autonomy/governance.py:108:80: E501 line too long (85 > 79 characters)
+./src/governed_autonomy/governance.py:111:80: E501 line too long (84 > 79 characters)
+./src/governed_autonomy/governance.py:114:80: E501 line too long (91 > 79 characters)
+./src/governed_autonomy/governance.py:135:80: E501 line too long (101 > 79 characters)
+./src/governed_autonomy/governance.py:138:80: E501 line too long (90 > 79 characters)
+./src/governed_autonomy/governance.py:140:80: E501 line too long (82 > 79 characters)
+./src/governed_autonomy/governance.py:141:80: E501 line too long (96 > 79 characters)
+./src/governed_autonomy/governance.py:183:80: E501 line too long (81 > 79 characters)
+./src/governed_autonomy/governance.py:188:80: E501 line too long (112 > 79 characters)
+./src/governed_autonomy/governance.py:201:80: E501 line too long (85 > 79 characters)
+./src/governed_autonomy/governance.py:212:80: E501 line too long (94 > 79 characters)
+./src/governed_autonomy/governance.py:216:80: E501 line too long (85 > 79 characters)
+./src/governed_autonomy/governance.py:217:80: E501 line too long (94 > 79 characters)
+./src/governed_autonomy/governance.py:220:80: E501 line too long (84 > 79 characters)
+./src/governed_autonomy/governance.py:230:80: E501 line too long (116 > 79 characters)
+./src/governed_autonomy/http_api.py:12:80: E501 line too long (87 > 79 characters)
+./src/governed_autonomy/http_api.py:21:80: E501 line too long (84 > 79 characters)
+./src/governed_autonomy/http_api.py:23:80: E501 line too long (81 > 79 characters)
+./src/governed_autonomy/http_api.py:28:80: E501 line too long (100 > 79 characters)
+./src/governed_autonomy/http_api.py:34:9: E306 expected 1 blank line before a nested definition, found 0
+./src/governed_autonomy/http_api.py:39:80: E501 line too long (102 > 79 characters)
+./src/governed_autonomy/http_api.py:39:95: E702 multiple statements on one line (semicolon)
+./src/governed_autonomy/http_api.py:41:80: E501 line too long (90 > 79 characters)
+./src/governed_autonomy/http_api.py:41:83: E702 multiple statements on one line (semicolon)
+./src/governed_autonomy/http_api.py:45:80: E501 line too long (80 > 79 characters)
+./src/governed_autonomy/http_api.py:47:59: E701 multiple statements on one line (colon)
+./src/governed_autonomy/http_api.py:47:80: E501 line too long (82 > 79 characters)
+./src/governed_autonomy/http_api.py:48:39: E702 multiple statements on one line (semicolon)
+./src/governed_autonomy/http_api.py:48:63: E702 multiple statements on one line (semicolon)
+./src/governed_autonomy/http_api.py:50:80: E501 line too long (170 > 79 characters)
+./src/governed_autonomy/http_api.py:56:75: E702 multiple statements on one line (semicolon)
+./src/governed_autonomy/http_api.py:56:80: E501 line too long (82 > 79 characters)
+./src/governed_autonomy/http_api.py:57:54: E702 multiple statements on one line (semicolon)
+./src/governed_autonomy/http_api.py:59:74: E702 multiple statements on one line (semicolon)
+./src/governed_autonomy/http_api.py:59:80: E501 line too long (81 > 79 characters)
+./src/governed_autonomy/http_api.py:61:80: E501 line too long (99 > 79 characters)
+./src/governed_autonomy/http_api.py:61:92: E702 multiple statements on one line (semicolon)
+./src/governed_autonomy/http_api.py:63:65: E702 multiple statements on one line (semicolon)
+./src/governed_autonomy/http_api.py:65:80: E501 line too long (98 > 79 characters)
+./src/governed_autonomy/http_api.py:65:91: E702 multiple statements on one line (semicolon)
+./src/governed_autonomy/http_api.py:67:58: E702 multiple statements on one line (semicolon)
+./src/governed_autonomy/http_api.py:72:80: E501 line too long (102 > 79 characters)
+./src/governed_autonomy/http_api.py:72:95: E702 multiple statements on one line (semicolon)
+./src/governed_autonomy/http_api.py:74:80: E501 line too long (90 > 79 characters)
+./src/governed_autonomy/http_api.py:74:83: E702 multiple statements on one line (semicolon)
+./src/governed_autonomy/http_api.py:78:80: E501 line too long (187 > 79 characters)
+./src/governed_autonomy/http_api.py:81:80: E501 line too long (108 > 79 characters)
+./src/governed_autonomy/http_api.py:83:80: E501 line too long (80 > 79 characters)
+./src/governed_autonomy/http_api.py:85:80: E501 line too long (106 > 79 characters)
+./src/governed_autonomy/http_api.py:87:80: E501 line too long (84 > 79 characters)
+./src/governed_autonomy/http_api.py:92:80: E501 line too long (81 > 79 characters)
+./src/governed_autonomy/http_api.py:98:55: E701 multiple statements on one line (colon)
+./src/governed_autonomy/http_api.py:99:35: E702 multiple statements on one line (semicolon)
+./src/governed_autonomy/http_api.py:106:80: E501 line too long (119 > 79 characters)
+./src/governed_autonomy/http_api.py:112:80: E501 line too long (127 > 79 characters)
+./src/governed_autonomy/http_api.py:123:26: E701 multiple statements on one line (colon)
+./src/governed_autonomy/http_api.py:124:12: E701 multiple statements on one line (colon)
+./src/governed_autonomy/http_api.py:125:33: E701 multiple statements on one line (colon)
+./src/governed_autonomy/http_api.py:125:80: E501 line too long (88 > 79 characters)
+./src/governed_autonomy/http_api.py:126:54: E701 multiple statements on one line (colon)
+./src/governed_autonomy/http_api.py:126:80: E501 line too long (106 > 79 characters)
+./src/governed_autonomy/http_api.py:127:12: E701 multiple statements on one line (colon)
+./src/governed_autonomy/http_api.py:128:43: E701 multiple statements on one line (colon)
+./src/governed_autonomy/http_api.py:128:80: E501 line too long (96 > 79 characters)
+./src/governed_autonomy/http_api.py:129:41: E701 multiple statements on one line (colon)
+./src/governed_autonomy/http_api.py:129:80: E501 line too long (92 > 79 characters)
+./src/governed_autonomy/http_api.py:134:80: E501 line too long (94 > 79 characters)
+./src/governed_autonomy/http_api.py:135:55: E702 multiple statements on one line (semicolon)
+./src/governed_autonomy/http_api.py:135:80: E501 line too long (109 > 79 characters)
+./src/governed_autonomy/http_api.py:136:80: E501 line too long (99 > 79 characters)
+./src/governed_autonomy/http_api.py:181:80: E501 line too long (88 > 79 characters)
+./src/governed_autonomy/http_api.py:183:80: E501 line too long (163 > 79 characters)
+./src/governed_autonomy/http_api.py:184:80: E501 line too long (97 > 79 characters)
+./src/governed_autonomy/http_api.py:185:8: E701 multiple statements on one line (colon)
+./src/governed_autonomy/http_api.py:186:29: E701 multiple statements on one line (colon)
+./src/governed_autonomy/http_api.py:187:12: E701 multiple statements on one line (colon)
+./src/governed_autonomy/http_api.py:198:80: E501 line too long (81 > 79 characters)
+./src/governed_autonomy/identity.py:1:80: E501 line too long (80 > 79 characters)
+./src/governed_autonomy/identity.py:12:80: E501 line too long (80 > 79 characters)
+./src/governed_autonomy/identity.py:46:80: E501 line too long (130 > 79 characters)
+./src/governed_autonomy/identity.py:48:80: E501 line too long (107 > 79 characters)
+./src/governed_autonomy/identity.py:49:80: E501 line too long (113 > 79 characters)
+./src/governed_autonomy/identity.py:66:80: E501 line too long (91 > 79 characters)
+./src/governed_autonomy/identity.py:67:80: E501 line too long (90 > 79 characters)
+./src/governed_autonomy/identity.py:72:80: E501 line too long (85 > 79 characters)
+./src/governed_autonomy/identity.py:75:80: E501 line too long (96 > 79 characters)
+./src/governed_autonomy/identity.py:84:80: E501 line too long (88 > 79 characters)
+./src/governed_autonomy/identity.py:90:80: E501 line too long (83 > 79 characters)
+./src/governed_autonomy/identity.py:91:80: E501 line too long (107 > 79 characters)
+./src/governed_autonomy/identity.py:94:80: E501 line too long (130 > 79 characters)
+./src/governed_autonomy/identity.py:100:80: E501 line too long (100 > 79 characters)
+./src/governed_autonomy/identity.py:102:80: E501 line too long (105 > 79 characters)
+./src/governed_autonomy/identity.py:105:80: E501 line too long (97 > 79 characters)
+./src/governed_autonomy/identity.py:112:80: E501 line too long (101 > 79 characters)
+./src/governed_autonomy/identity.py:119:80: E501 line too long (136 > 79 characters)
+./src/governed_autonomy/identity.py:124:80: E501 line too long (130 > 79 characters)
+./src/governed_autonomy/identity.py:125:80: E501 line too long (146 > 79 characters)
+./src/governed_autonomy/issuer.py:43:80: E501 line too long (81 > 79 characters)
+./src/governed_autonomy/issuer.py:66:80: E501 line too long (93 > 79 characters)
+./src/governed_autonomy/issuer.py:73:80: E501 line too long (81 > 79 characters)
+./src/governed_autonomy/issuer.py:105:80: E501 line too long (80 > 79 characters)
+./src/governed_autonomy/issuer.py:127:80: E501 line too long (80 > 79 characters)
+./src/governed_autonomy/issuer.py:136:80: E501 line too long (89 > 79 characters)
+./src/governed_autonomy/issuer.py:138:80: E501 line too long (83 > 79 characters)
+./src/governed_autonomy/jobs.py:31:80: E501 line too long (88 > 79 characters)
+./src/governed_autonomy/jobs.py:32:80: E501 line too long (91 > 79 characters)
+./src/governed_autonomy/jobs.py:39:80: E501 line too long (86 > 79 characters)
+./src/governed_autonomy/jobs.py:41:80: E501 line too long (111 > 79 characters)
+./src/governed_autonomy/jobs.py:46:80: E501 line too long (86 > 79 characters)
+./src/governed_autonomy/jobs.py:47:80: E501 line too long (87 > 79 characters)
+./src/governed_autonomy/jobs.py:52:80: E501 line too long (88 > 79 characters)
+./src/governed_autonomy/jobs.py:58:80: E501 line too long (93 > 79 characters)
+./src/governed_autonomy/jobs.py:59:80: E501 line too long (101 > 79 characters)
+./src/governed_autonomy/jobs.py:62:80: E501 line too long (126 > 79 characters)
+./src/governed_autonomy/jobs.py:67:80: E501 line too long (108 > 79 characters)
+./src/governed_autonomy/jobs.py:70:80: E501 line too long (81 > 79 characters)
+./src/governed_autonomy/jobs.py:73:80: E501 line too long (96 > 79 characters)
+./src/governed_autonomy/jobs.py:74:80: E501 line too long (81 > 79 characters)
+./src/governed_autonomy/jobs.py:79:80: E501 line too long (94 > 79 characters)
+./src/governed_autonomy/jobs.py:92:80: E501 line too long (86 > 79 characters)
+./src/governed_autonomy/langchain_adapter.py:2:80: E501 line too long (84 > 79 characters)
+./src/governed_autonomy/langchain_adapter.py:20:1: F401 'dataclasses.field' imported but unused
+./src/governed_autonomy/langchain_adapter.py:24:1: F401 '.errors.AuthorizationError' imported but unused
+./src/governed_autonomy/langchain_adapter.py:25:1: F401 '.issuer.PolicyDeniedError' imported but unused
+./src/governed_autonomy/langchain_adapter.py:27:1: F401 '.policy.PolicyRegistry' imported but unused
+./src/governed_autonomy/langchain_adapter.py:29:1: F401 '.trust.TrustStore' imported but unused
+./src/governed_autonomy/langchain_adapter.py:33:80: E501 line too long (84 > 79 characters)
+./src/governed_autonomy/langchain_adapter.py:42:80: E501 line too long (80 > 79 characters)
+./src/governed_autonomy/langchain_adapter.py:139:80: E501 line too long (93 > 79 characters)
+./src/governed_autonomy/langchain_adapter.py:152:80: E501 line too long (80 > 79 characters)
+./src/governed_autonomy/mcp_gateway.py:2:80: E501 line too long (83 > 79 characters)
+./src/governed_autonomy/mcp_gateway.py:5:80: E501 line too long (80 > 79 characters)
+./src/governed_autonomy/mcp_gateway.py:41:80: E501 line too long (86 > 79 characters)
+./src/governed_autonomy/mcp_gateway.py:220:80: E501 line too long (89 > 79 characters)
+./src/governed_autonomy/mcp_gateway.py:272:80: E501 line too long (86 > 79 characters)
+./src/governed_autonomy/mcp_gateway.py:303:80: E501 line too long (87 > 79 characters)
+./src/governed_autonomy/mcp_gateway.py:318:80: E501 line too long (85 > 79 characters)
+./src/governed_autonomy/mcp_gateway.py:420:80: E501 line too long (85 > 79 characters)
+./src/governed_autonomy/mcp_gateway.py:444:80: E501 line too long (85 > 79 characters)
+./src/governed_autonomy/mcp_gateway.py:505:80: E501 line too long (85 > 79 characters)
+./src/governed_autonomy/models.py:65:80: E501 line too long (84 > 79 characters)
+./src/governed_autonomy/models.py:67:80: E501 line too long (106 > 79 characters)
+./src/governed_autonomy/models.py:72:80: E501 line too long (104 > 79 characters)
+./src/governed_autonomy/models.py:73:80: E501 line too long (86 > 79 characters)
+./src/governed_autonomy/models.py:78:80: E501 line too long (91 > 79 characters)
+./src/governed_autonomy/models.py:90:80: E501 line too long (104 > 79 characters)
+./src/governed_autonomy/models.py:93:80: E501 line too long (97 > 79 characters)
+./src/governed_autonomy/models.py:94:80: E501 line too long (81 > 79 characters)
+./src/governed_autonomy/models.py:116:80: E501 line too long (96 > 79 characters)
+./src/governed_autonomy/models.py:125:80: E501 line too long (81 > 79 characters)
+./src/governed_autonomy/models.py:126:80: E501 line too long (87 > 79 characters)
+./src/governed_autonomy/models.py:128:80: E501 line too long (85 > 79 characters)
+./src/governed_autonomy/models.py:130:80: E501 line too long (84 > 79 characters)
+./src/governed_autonomy/models.py:131:80: E501 line too long (96 > 79 characters)
+./src/governed_autonomy/models.py:134:80: E501 line too long (86 > 79 characters)
+./src/governed_autonomy/models.py:207:80: E501 line too long (83 > 79 characters)
+./src/governed_autonomy/models.py:208:80: E501 line too long (86 > 79 characters)
+./src/governed_autonomy/models.py:228:13: F402 import 'field' from line 3 shadowed by loop variable
+./src/governed_autonomy/models.py:228:80: E501 line too long (81 > 79 characters)
+./src/governed_autonomy/models.py:242:80: E501 line too long (80 > 79 characters)
+./src/governed_autonomy/observability.py:57:80: E501 line too long (105 > 79 characters)
+./src/governed_autonomy/observability.py:59:80: E501 line too long (84 > 79 characters)
+./src/governed_autonomy/observability.py:91:80: E501 line too long (97 > 79 characters)
+./src/governed_autonomy/observability.py:92:80: E501 line too long (86 > 79 characters)
+./src/governed_autonomy/observability.py:93:80: E501 line too long (143 > 79 characters)
+./src/governed_autonomy/observability.py:97:80: E501 line too long (81 > 79 characters)
+./src/governed_autonomy/platform.py:12:80: E501 line too long (96 > 79 characters)
+./src/governed_autonomy/platform.py:24:80: E501 line too long (90 > 79 characters)
+./src/governed_autonomy/platform.py:26:80: E501 line too long (86 > 79 characters)
+./src/governed_autonomy/platform.py:36:80: E501 line too long (85 > 79 characters)
+./src/governed_autonomy/platform.py:46:80: E501 line too long (104 > 79 characters)
+./src/governed_autonomy/platform.py:52:80: E501 line too long (90 > 79 characters)
+./src/governed_autonomy/platform.py:56:80: E501 line too long (96 > 79 characters)
+./src/governed_autonomy/platform.py:58:80: E501 line too long (104 > 79 characters)
+./src/governed_autonomy/platform.py:59:80: E501 line too long (105 > 79 characters)
+./src/governed_autonomy/platform.py:62:80: E501 line too long (96 > 79 characters)
+./src/governed_autonomy/platform.py:64:80: E501 line too long (103 > 79 characters)
+./src/governed_autonomy/platform.py:68:80: E501 line too long (104 > 79 characters)
+./src/governed_autonomy/platform.py:69:80: E501 line too long (107 > 79 characters)
+./src/governed_autonomy/platform.py:71:80: E501 line too long (82 > 79 characters)
+./src/governed_autonomy/platform.py:73:80: E501 line too long (81 > 79 characters)
+./src/governed_autonomy/platform.py:81:80: E501 line too long (91 > 79 characters)
+./src/governed_autonomy/platform.py:88:80: E501 line too long (96 > 79 characters)
+./src/governed_autonomy/platform.py:91:80: E501 line too long (93 > 79 characters)
+./src/governed_autonomy/platform.py:95:80: E501 line too long (84 > 79 characters)
+./src/governed_autonomy/platform.py:99:80: E501 line too long (83 > 79 characters)
+./src/governed_autonomy/platform.py:103:80: E501 line too long (85 > 79 characters)
+./src/governed_autonomy/platform.py:110:80: E501 line too long (83 > 79 characters)
+./src/governed_autonomy/platform.py:113:80: E501 line too long (96 > 79 characters)
+./src/governed_autonomy/platform.py:115:80: E501 line too long (88 > 79 characters)
+./src/governed_autonomy/platform.py:166:80: E501 line too long (88 > 79 characters)
+./src/governed_autonomy/platform.py:179:80: E501 line too long (80 > 79 characters)
+./src/governed_autonomy/platform.py:201:80: E501 line too long (92 > 79 characters)
+./src/governed_autonomy/platform.py:208:80: E501 line too long (109 > 79 characters)
+./src/governed_autonomy/platform_admin.py:3:1: F401 'dataclasses.field' imported but unused
+./src/governed_autonomy/platform_admin.py:4:1: F401 'typing.Any' imported but unused
+./src/governed_autonomy/platform_admin.py:168:80: E501 line too long (104 > 79 characters)
+./src/governed_autonomy/platform_admin.py:194:80: E501 line too long (96 > 79 characters)
+./src/governed_autonomy/policy.py:35:80: E501 line too long (93 > 79 characters)
+./src/governed_autonomy/policy.py:38:80: E501 line too long (87 > 79 characters)
+./src/governed_autonomy/policy.py:42:80: E501 line too long (88 > 79 characters)
+./src/governed_autonomy/policy.py:43:80: E501 line too long (91 > 79 characters)
+./src/governed_autonomy/policy.py:47:80: E501 line too long (90 > 79 characters)
+./src/governed_autonomy/policy.py:48:80: E501 line too long (80 > 79 characters)
+./src/governed_autonomy/policy.py:49:80: E501 line too long (82 > 79 characters)
+./src/governed_autonomy/policy.py:52:80: E501 line too long (87 > 79 characters)
+./src/governed_autonomy/policy.py:59:80: E501 line too long (93 > 79 characters)
+./src/governed_autonomy/policy.py:60:80: E501 line too long (82 > 79 characters)
+./src/governed_autonomy/policy.py:61:80: E501 line too long (85 > 79 characters)
+./src/governed_autonomy/policy.py:99:80: E501 line too long (83 > 79 characters)
+./src/governed_autonomy/policy.py:108:80: E501 line too long (87 > 79 characters)
+./src/governed_autonomy/policy.py:129:80: E501 line too long (80 > 79 characters)
+./src/governed_autonomy/policy.py:142:80: E501 line too long (80 > 79 characters)
+./src/governed_autonomy/policy.py:160:13: F402 import 'field' from line 5 shadowed by loop variable
+./src/governed_autonomy/policy.py:184:80: E501 line too long (107 > 79 characters)
+./src/governed_autonomy/policy.py:200:80: E501 line too long (88 > 79 characters)
+./src/governed_autonomy/policy.py:221:80: E501 line too long (84 > 79 characters)
+./src/governed_autonomy/policy.py:226:80: E501 line too long (85 > 79 characters)
+./src/governed_autonomy/policy.py:230:80: E501 line too long (94 > 79 characters)
+./src/governed_autonomy/policy.py:232:80: E501 line too long (81 > 79 characters)
+./src/governed_autonomy/policy.py:242:80: E501 line too long (83 > 79 characters)
+./src/governed_autonomy/policy.py:281:80: E501 line too long (80 > 79 characters)
+./src/governed_autonomy/policy.py:282:80: E501 line too long (99 > 79 characters)
+./src/governed_autonomy/policy.py:289:80: E501 line too long (89 > 79 characters)
+./src/governed_autonomy/policy.py:290:80: E501 line too long (86 > 79 characters)
+./src/governed_autonomy/policy.py:318:80: E501 line too long (83 > 79 characters)
+./src/governed_autonomy/policy.py:332:80: E501 line too long (90 > 79 characters)
+./src/governed_autonomy/policy.py:333:80: E501 line too long (99 > 79 characters)
+./src/governed_autonomy/policy.py:342:80: E501 line too long (89 > 79 characters)
+./src/governed_autonomy/policy.py:343:80: E501 line too long (86 > 79 characters)
+./src/governed_autonomy/policy.py:360:80: E501 line too long (87 > 79 characters)
+./src/governed_autonomy/policy.py:380:80: E501 line too long (92 > 79 characters)
+./src/governed_autonomy/policy.py:384:80: E501 line too long (92 > 79 characters)
+./src/governed_autonomy/policy.py:437:80: E501 line too long (84 > 79 characters)
+./src/governed_autonomy/policy.py:445:80: E501 line too long (83 > 79 characters)
+./src/governed_autonomy/policy.py:447:80: E501 line too long (81 > 79 characters)
+./src/governed_autonomy/replay.py:20:80: E501 line too long (95 > 79 characters)
+./src/governed_autonomy/replay.py:21:80: E501 line too long (85 > 79 characters)
+./src/governed_autonomy/replay.py:45:80: E501 line too long (80 > 79 characters)
+./src/governed_autonomy/replay.py:62:80: E501 line too long (88 > 79 characters)
+./src/governed_autonomy/replay.py:85:80: E501 line too long (84 > 79 characters)
+./src/governed_autonomy/replay.py:89:80: E501 line too long (90 > 79 characters)
+./src/governed_autonomy/replay.py:107:80: E501 line too long (82 > 79 characters)
+./src/governed_autonomy/replay.py:108:80: E501 line too long (82 > 79 characters)
+./src/governed_autonomy/replay.py:127:80: E501 line too long (83 > 79 characters)
+./src/governed_autonomy/replay.py:162:80: E501 line too long (96 > 79 characters)
+./src/governed_autonomy/replay.py:165:80: E501 line too long (81 > 79 characters)
+./src/governed_autonomy/replay.py:167:80: E501 line too long (88 > 79 characters)
+./src/governed_autonomy/replay.py:178:80: E501 line too long (91 > 79 characters)
+./src/governed_autonomy/replay.py:185:80: E501 line too long (85 > 79 characters)
+./src/governed_autonomy/replay.py:186:80: E501 line too long (95 > 79 characters)
+./src/governed_autonomy/replay.py:233:80: E501 line too long (84 > 79 characters)
+./src/governed_autonomy/replay.py:237:80: E501 line too long (80 > 79 characters)
+./src/governed_autonomy/replay.py:249:80: E501 line too long (92 > 79 characters)
+./src/governed_autonomy/replay.py:253:80: E501 line too long (81 > 79 characters)
+./src/governed_autonomy/replay.py:260:80: E501 line too long (85 > 79 characters)
+./src/governed_autonomy/service.py:13:80: E501 line too long (81 > 79 characters)
+./src/governed_autonomy/service.py:25:80: E501 line too long (93 > 79 characters)
+./src/governed_autonomy/service.py:52:80: E501 line too long (81 > 79 characters)
+./src/governed_autonomy/service.py:64:80: E501 line too long (98 > 79 characters)
+./src/governed_autonomy/signing.py:1:80: E501 line too long (80 > 79 characters)
+./src/governed_autonomy/signing.py:6:1: F401 'cryptography.hazmat.primitives.asymmetric.ed25519.Ed25519PublicKey' imported but unused
+./src/governed_autonomy/signing.py:6:80: E501 line too long (97 > 79 characters)
+./src/governed_autonomy/signing.py:18:80: E501 line too long (107 > 79 characters)
+./src/governed_autonomy/signing.py:30:80: E501 line too long (90 > 79 characters)
+./src/governed_autonomy/signing.py:34:80: E501 line too long (96 > 79 characters)
+./src/governed_autonomy/storage.py:16:80: E501 line too long (94 > 79 characters)
+./src/governed_autonomy/storage.py:18:80: E501 line too long (102 > 79 characters)
+./src/governed_autonomy/storage.py:27:80: E501 line too long (98 > 79 characters)
+./src/governed_autonomy/storage.py:34:80: E501 line too long (118 > 79 characters)
+./src/governed_autonomy/storage.py:61:80: E501 line too long (103 > 79 characters)
+./src/governed_autonomy/storage.py:66:80: E501 line too long (127 > 79 characters)
+./src/governed_autonomy/storage.py:75:80: E501 line too long (91 > 79 characters)
+./src/governed_autonomy/storage.py:84:80: E501 line too long (87 > 79 characters)
+./src/governed_autonomy/storage.py:88:80: E501 line too long (87 > 79 characters)
+./src/governed_autonomy/storage.py:95:80: E501 line too long (84 > 79 characters)
+./src/governed_autonomy/trust.py:68:80: E501 line too long (80 > 79 characters)
+./src/governed_autonomy/trust.py:76:80: E501 line too long (82 > 79 characters)
+./src/governed_autonomy/trust.py:77:80: E501 line too long (85 > 79 characters)
+./src/governed_autonomy/trust.py:81:80: E501 line too long (87 > 79 characters)
+./tests/conformance/test_conformance.py:24:80: E501 line too long (84 > 79 characters)
+./tests/conformance/test_conformance.py:25:1: F401 'governed_autonomy.policy.Policy' imported but unused
+./tests/conformance/test_conformance.py:84:80: E501 line too long (90 > 79 characters)
+./tests/conformance/test_conformance.py:95:80: E501 line too long (92 > 79 characters)
+./tests/conformance/test_conformance.py:102:80: E501 line too long (90 > 79 characters)
+./tests/conformance/test_conformance.py:117:80: E501 line too long (91 > 79 characters)
+./tests/conformance/test_conformance.py:145:80: E501 line too long (83 > 79 characters)
+./tests/conformance/test_conformance.py:153:80: E501 line too long (92 > 79 characters)
+./tests/conformance/test_conformance.py:161:80: E501 line too long (82 > 79 characters)
+./tests/conformance/test_conformance.py:179:80: E501 line too long (95 > 79 characters)
+./tests/conformance/test_conformance.py:192:80: E501 line too long (80 > 79 characters)
+./tests/conformance/test_conformance.py:215:80: E501 line too long (91 > 79 characters)
+./tests/conformance/test_conformance.py:226:80: E501 line too long (94 > 79 characters)
+./tests/conformance/test_conformance.py:231:80: E501 line too long (84 > 79 characters)
+./tests/conformance/test_conformance.py:234:80: E501 line too long (93 > 79 characters)
+./tests/test_a2a.py:20:80: E501 line too long (123 > 79 characters)
+./tests/test_a2a.py:45:80: E501 line too long (91 > 79 characters)
+./tests/test_a2a.py:66:80: E501 line too long (119 > 79 characters)
+./tests/test_a2a.py:68:80: E501 line too long (85 > 79 characters)
+./tests/test_a2a.py:106:80: E501 line too long (119 > 79 characters)
+./tests/test_a2a.py:117:80: E501 line too long (94 > 79 characters)
+./tests/test_a2a.py:129:80: E501 line too long (82 > 79 characters)
+./tests/test_a2a.py:134:80: E501 line too long (119 > 79 characters)
+./tests/test_a2a.py:147:80: E501 line too long (94 > 79 characters)
+./tests/test_a2a.py:158:80: E501 line too long (85 > 79 characters)
+./tests/test_a2a.py:163:80: E501 line too long (119 > 79 characters)
+./tests/test_a2a.py:165:80: E501 line too long (80 > 79 characters)
+./tests/test_a2a.py:174:80: E501 line too long (94 > 79 characters)
+./tests/test_a2a.py:196:80: E501 line too long (80 > 79 characters)
+./tests/test_a2a.py:201:80: E501 line too long (119 > 79 characters)
+./tests/test_a2a.py:203:80: E501 line too long (80 > 79 characters)
+./tests/test_a2a.py:212:80: E501 line too long (94 > 79 characters)
+./tests/test_a2a.py:229:80: E501 line too long (119 > 79 characters)
+./tests/test_a2a.py:231:80: E501 line too long (80 > 79 characters)
+./tests/test_a2a.py:240:80: E501 line too long (94 > 79 characters)
+./tests/test_a2a.py:260:80: E501 line too long (119 > 79 characters)
+./tests/test_a2a.py:265:80: E501 line too long (94 > 79 characters)
+./tests/test_authorization.py:61:80: E501 line too long (81 > 79 characters)
+./tests/test_authorization.py:93:80: E501 line too long (94 > 79 characters)
+./tests/test_authorization.py:95:80: E501 line too long (80 > 79 characters)
+./tests/test_authorization.py:99:80: E501 line too long (86 > 79 characters)
+./tests/test_authorization.py:116:1: E302 expected 2 blank lines, found 1
+./tests/test_authorization.py:142:80: E501 line too long (80 > 79 characters)
+./tests/test_authorization.py:166:80: E501 line too long (91 > 79 characters)
+./tests/test_compensation.py:29:80: E501 line too long (84 > 79 characters)
+./tests/test_compliance.py:3:1: F401 'pytest' imported but unused
+./tests/test_concurrency.py:15:80: E501 line too long (90 > 79 characters)
+./tests/test_governance_rules.py:1:80: E501 line too long (109 > 79 characters)
+./tests/test_governance_rules.py:47:80: E501 line too long (99 > 79 characters)
+./tests/test_governance_rules.py:61:80: E501 line too long (85 > 79 characters)
+./tests/test_governance_rules.py:77:80: E501 line too long (80 > 79 characters)
+./tests/test_governance_rules.py:88:80: E501 line too long (80 > 79 characters)
+./tests/test_http_api.py:7:80: E501 line too long (82 > 79 characters)
+./tests/test_http_api.py:52:80: E501 line too long (80 > 79 characters)
+./tests/test_http_api.py:87:80: E501 line too long (103 > 79 characters)
+./tests/test_issuer.py:31:80: E501 line too long (87 > 79 characters)
+./tests/test_issuer.py:58:80: E501 line too long (84 > 79 characters)
+./tests/test_issuer.py:70:80: E501 line too long (88 > 79 characters)
+./tests/test_issuer.py:102:80: E501 line too long (88 > 79 characters)
+./tests/test_issuer.py:117:80: E501 line too long (91 > 79 characters)
+./tests/test_jobs.py:6:80: E501 line too long (82 > 79 characters)
+./tests/test_jobs.py:7:80: E501 line too long (96 > 79 characters)
+./tests/test_jobs.py:8:80: E501 line too long (87 > 79 characters)
+./tests/test_jobs.py:10:80: E501 line too long (87 > 79 characters)
+./tests/test_langchain_adapter.py:25:80: E501 line too long (111 > 79 characters)
+./tests/test_langchain_adapter.py:58:80: E501 line too long (107 > 79 characters)
+./tests/test_langchain_adapter.py:96:80: E501 line too long (107 > 79 characters)
+./tests/test_langchain_adapter.py:117:80: E501 line too long (107 > 79 characters)
+./tests/test_langchain_adapter.py:133:80: E501 line too long (84 > 79 characters)
+./tests/test_langchain_adapter.py:138:80: E501 line too long (107 > 79 characters)
+./tests/test_mcp_gateway.py:71:80: E501 line too long (83 > 79 characters)
+./tests/test_mcp_gateway.py:105:80: E501 line too long (80 > 79 characters)
+./tests/test_mcp_gateway.py:142:80: E501 line too long (94 > 79 characters)
+./tests/test_mcp_gateway.py:168:80: E501 line too long (94 > 79 characters)
+./tests/test_models.py:3:80: E501 line too long (86 > 79 characters)
+./tests/test_models.py:17:80: E501 line too long (84 > 79 characters)
+./tests/test_models.py:18:80: E501 line too long (84 > 79 characters)
+./tests/test_models.py:28:80: E501 line too long (83 > 79 characters)
+./tests/test_models.py:70:80: E501 line too long (84 > 79 characters)
+./tests/test_models.py:83:80: E501 line too long (84 > 79 characters)
+./tests/test_models.py:105:80: E501 line too long (151 > 79 characters)
+./tests/test_models.py:106:80: E501 line too long (139 > 79 characters)
+./tests/test_models.py:116:80: E501 line too long (100 > 79 characters)
+./tests/test_models.py:119:80: E501 line too long (87 > 79 characters)
+./tests/test_models.py:120:80: E501 line too long (85 > 79 characters)
+./tests/test_platform.py:94:80: E501 line too long (99 > 79 characters)
+./tests/test_platform.py:105:80: E501 line too long (93 > 79 characters)
+./tests/test_platform.py:106:80: E501 line too long (107 > 79 characters)
+./tests/test_platform.py:113:80: E501 line too long (86 > 79 characters)
+./tests/test_platform.py:179:80: E501 line too long (100 > 79 characters)
+./tests/test_platform.py:198:80: E501 line too long (104 > 79 characters)
+./tests/test_platform.py:199:80: E501 line too long (99 > 79 characters)
+./tests/test_platform.py:202:80: E501 line too long (141 > 79 characters)
+./tests/test_platform.py:219:80: E501 line too long (100 > 79 characters)
+./tests/test_platform_admin.py:1:80: E501 line too long (94 > 79 characters)
+./tests/test_platform_admin.py:14:80: E501 line too long (95 > 79 characters)
+./tests/test_platform_admin.py:22:80: E501 line too long (110 > 79 characters)
+./tests/test_platform_admin.py:44:80: E501 line too long (95 > 79 characters)
+./tests/test_policy_boundary.py:17:80: E501 line too long (81 > 79 characters)
+./tests/test_policy_boundary_enforcement.py:70:80: E501 line too long (84 > 79 characters)
+./tests/test_policy_boundary_enforcement.py:96:80: E501 line too long (80 > 79 characters)
+./tests/test_policy_rollout.py:3:80: E501 line too long (95 > 79 characters)
+./tests/test_policy_rollout.py:11:80: E501 line too long (85 > 79 characters)
+./tests/test_policy_rollout.py:12:80: E501 line too long (86 > 79 characters)
+./tests/test_policy_rollout.py:24:80: E501 line too long (91 > 79 characters)
+./tests/test_replay_recovery.py:17:80: E501 line too long (84 > 79 characters)
+./tests/test_replay_recovery.py:44:80: E501 line too long (87 > 79 characters)
+./tests/test_replay_recovery.py:49:80: E501 line too long (88 > 79 characters)
+./tests/test_snapshot_roundtrip.py:1:80: E501 line too long (95 > 79 characters)
+Package 'governed_autonomy' cannot be type checked due to missing py.typed marker.
+See https://mypy.readthedocs.io/en/stable/installed_packages.html for more details
+=== RUN TESTS ===
+============================= test session starts ==============================
+platform linux -- Python 3.14.2, pytest-9.1.1, pluggy-1.6.0
+rootdir: /workspaces/governed-autonomy-substrate
+configfile: pyproject.toml
+testpaths: tests
+plugins: anyio-4.15.1, cov-7.1.0
+collected 125 items
+
+tests/conformance/test_conformance.py ................                   [ 12%]
+tests/test_a2a.py .......                                                [ 18%]
+tests/test_append_concurrency.py ..                                      [ 20%]
+tests/test_audit_api.py ...                                              [ 22%]
+tests/test_authorization.py ............                                 [ 32%]
+tests/test_bootstrap.py .                                                [ 32%]
+tests/test_compensation.py ..                                            [ 34%]
+tests/test_compliance.py F.                                              [ 36%]
+tests/test_concurrency.py .                                              [ 36%]
+tests/test_governance_rules.py ....                                      [ 40%]
+tests/test_health.py .                                                   [ 40%]
+tests/test_http_api.py ...                                               [ 43%]
+tests/test_issuer.py ...                                                 [ 45%]
+tests/test_issuer_limits.py .                                            [ 46%]
+tests/test_jobs.py ..                                                    [ 48%]
+tests/test_langchain_adapter.py .....                                    [ 52%]
+tests/test_mcp_gateway.py ........                                       [ 58%]
+tests/test_models.py ..........                                          [ 66%]
+tests/test_platform.py ...                                               [ 68%]
+tests/test_platform_admin.py ..                                          [ 70%]
+tests/test_policy.py .....                                               [ 74%]
+tests/test_policy_boundary.py ..                                         [ 76%]
+tests/test_policy_boundary_enforcement.py .                              [ 76%]
+tests/test_policy_limits.py .                                            [ 77%]
+tests/test_policy_manifest.py ....                                       [ 80%]
+tests/test_policy_registry.py ..                                         [ 82%]
+tests/test_policy_rollout.py ..                                          [ 84%]
+tests/test_policy_validation.py .....                                    [ 88%]
+tests/test_replay_recovery.py ....                                       [ 91%]
+tests/test_service.py ...                                                [ 93%]
+tests/test_service_audit.py .                                            [ 94%]
+tests/test_snapshot_roundtrip.py .                                       [ 95%]
+tests/test_sqlite_integrity.py .                                         [ 96%]
+tests/test_trust.py ..                                                   [ 97%]
+tests/test_trust_integrity.py ...                                        [100%]
+
+=================================== FAILURES ===================================
+______________________ test_compliance_auditor_clean_pass ______________________
+tests/test_compliance.py:38: in test_compliance_auditor_clean_pass
+    report = auditor.generate_report()
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+src/governed_autonomy/compliance.py:227: in generate_report
+    nist_evals = self.evaluate_nist_ai_rmf()
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/governed_autonomy/compliance.py:84: in evaluate_nist_ai_rmf
+    actions_count = sum(len(p.allowed_actions) for p in policies)
+                                                        ^^^^^^^^
+E   TypeError: 'method' object is not iterable
+=========================== short test summary info ============================
+FAILED tests/test_compliance.py::test_compliance_auditor_clean_pass - TypeErr...
+======================== 1 failed, 124 passed in 1.55s =========================
+=== END CI REPRO: Tue Sep 22 05:58:36 UTC 2026 ===
