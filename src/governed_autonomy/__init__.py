@@ -1,16 +1,8 @@
-﻿"""Governed Autonomy Substrate MVP."""
+"""Governed Autonomy Substrate MVP."""
 
 from .a2a import A2AGuard, A2ATaskDelegation
-from .bootstrap import build_demo_service, build_platform_demo, build_runtime_service
 from .compliance import ComplianceAuditor, ComplianceEvaluation
 from .crypto import KeyPair, verify_signature
-from .deployment import (
-    BoundedRateLimiter,
-    TLSConfig,
-    correlation_id,
-    security_headers,
-    validate_server_config,
-)
 from .engine import ExecutionBoundary
 from .errors import AuthorizationError
 from .federation import (
@@ -22,27 +14,16 @@ from .federation import (
     SignedSyncEvent,
 )
 from .governance import GovernanceRule, GovernanceRuleTranslator
-from .health import health_report
-from .http_api import AuthenticatedAPI, create_server, parse_server_args
 from .identity import (
     ExternalIdentity,
     IdentityValidationError,
     JWKSProvider,
     JWTValidator,
     OIDCValidator,
-    StaticJWKSProvider,
-    UrlJWKSProvider,
 )
 from .issuer import AuthorizationIssuer, PolicyDeniedError
-from .jobs import Job, SQLiteJobStore, run_once
-from .langchain_adapter import GASCallbackHandler, GASExecutionBarrierTool, GASToolOutput
-from .mcp_gateway import (
-    GASMCPGateway,
-    GASMCPServer,
-    MCPGatewayContext,
-    MCPToolDefinition,
-    MCPToolResult,
-)
+from .langchain_adapter import GASExecutionBarrierTool
+from .mcp_gateway import GASMCPGateway, GASMCPServer
 from .mesh import (
     GovernanceInput,
     GovernanceMesh,
@@ -58,110 +39,60 @@ from .platform import (
     ServicePrincipal,
     ServicePrincipalRegistry,
 )
-from .platform_admin import PolicyApproval, PolicyChangeManager, PolicyChangeProposal
 from .policy import (
     DeterministicArbiter,
     Policy,
     PolicyRegistry,
     SignedPolicyManifest,
-    signed_policy_manifest_from_dict,
 )
-from .replay import ReplayLog, SQLiteReplayLog
+from .replay import ReplayLog
 from .service import GovernedService
-from .signing import KMSSigner, LocalEd25519Signer, RemoteSigner, Signer
-from .storage import (
-    POSTGRES_NONCE_SCHEMA,
-    POSTGRES_REPLAY_SCHEMA,
-    NonceRepository,
-    PostgresNonceRepository,
-    PostgresReplayLog,
-    PostgresTrustStore,
-    SQLiteNonceRepository,
-)
+from .signing import KMSSigner, Signer
 from .trust import TrustStore
 
+# Expose only the high-level API surface required for substrate integration.
+# Storage implementations and internal schemas remain private to enforce strict architectural boundaries.
 __all__ = [
-    "AuthorizationError",
-    "AuthorizationIssuer",
+    # Core Engine & Arbitration
     "ExecutionBoundary",
-    "GovernanceAuthorizationArtifact",
-    "SignedApproval",
-    "GovernanceInput",
-    "GovernanceMesh",
-    "GovernanceMeshError",
-    "GovernancePreflightDecision",
-    "GovernanceSourceRegistry",
     "DeterministicArbiter",
-    "GovernanceRule",
-    "GovernanceRuleTranslator",
-    "KeyPair",
-    "verify_signature",
-    "Policy",
+    "AuthorizationIssuer",
     "PolicyRegistry",
+    "Policy",
     "SignedPolicyManifest",
-    "signed_policy_manifest_from_dict",
-    "PolicyDeniedError",
-    "ReplayLog",
-    "SQLiteReplayLog",
-    "TrustStore",
-    "FederationError",
-    "GovernanceReconciler",
-    "GovernanceSyncEnvelope",
-    "ReconciliationResult",
-    "RegistrySnapshot",
-    "SignedSyncEvent",
-    "GovernedService",
-    "health_report",
-    "build_demo_service",
-    "build_platform_demo",
-    "build_runtime_service",
-    "AuthenticatedAPI",
-    "create_server",
-    "parse_server_args",
+    "GovernanceRule",
+    
+    # Platform & Mesh
     "GovernancePlatform",
-    "PlatformDeploymentPolicy",
-    "RuntimeIdentity",
+    "GovernanceMesh",
+    "GovernedService",
     "ServicePrincipal",
-    "ServicePrincipalRegistry",
-    "PolicyApproval",
-    "PolicyChangeManager",
-    "PolicyChangeProposal",
+    "RuntimeIdentity",
+    
+    # Security, Identity & Trust
+    "TrustStore",
+    "KMSSigner",
+    "Signer",
     "ExternalIdentity",
-    "IdentityValidationError",
     "JWKSProvider",
     "OIDCValidator",
-    "JWTValidator",
-    "StaticJWKSProvider",
-    "UrlJWKSProvider",
-    "KMSSigner",
-    "LocalEd25519Signer",
-    "RemoteSigner",
-    "Signer",
-    "NonceRepository",
-    "SQLiteNonceRepository",
-    "PostgresNonceRepository",
-    "POSTGRES_NONCE_SCHEMA",
-    "PostgresReplayLog",
-    "PostgresTrustStore",
-    "POSTGRES_REPLAY_SCHEMA",
-    "BoundedRateLimiter",
-    "TLSConfig",
-    "correlation_id",
-    "security_headers",
-    "validate_server_config",
-    "Job",
-    "SQLiteJobStore",
-    "run_once",
-    "GASMCPGateway",
-    "GASMCPServer",
-    "MCPGatewayContext",
-    "MCPToolDefinition",
-    "MCPToolResult",
-    "GASExecutionBarrierTool",
-    "GASCallbackHandler",
-    "GASToolOutput",
-    "A2ATaskDelegation",
-    "A2AGuard",
+    
+    # Compliance & Audit
     "ComplianceAuditor",
-    "ComplianceEvaluation",
+    "ReplayLog",
+    "GovernanceAuthorizationArtifact",
+    "SignedApproval",
+    
+    # Federation & Agent Integrations
+    "GovernanceReconciler",
+    "RegistrySnapshot",
+    "A2AGuard",
+    "GASMCPGateway",
+    "GASExecutionBarrierTool",
+    
+    # Core Exceptions
+    "AuthorizationError",
+    "PolicyDeniedError",
+    "GovernanceMeshError",
+    "FederationError",
 ]
