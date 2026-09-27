@@ -454,7 +454,12 @@ class PostgresControlPlaneRepository:
         cursor = self.connection.cursor()
         try:
             cursor.execute("SELECT tenant_id, name, status FROM gas_tenants ORDER BY tenant_id")
-            return [TenantRecord(tenant_id=row[0], name=row[1], status=row[2]) for row in cursor.fetchall()]
+            rows = [TenantRecord(tenant_id=row[0], name=row[1], status=row[2]) for row in cursor.fetchall()]
+            self.connection.commit()
+            return rows
+        except Exception:
+            self.connection.rollback()
+            raise
         finally:
             cursor.close()
 
@@ -509,7 +514,7 @@ class PostgresControlPlaneRepository:
                 FROM gas_service_principals ORDER BY principal_id
                 """
             )
-            return [
+            rows = [
                 ServicePrincipalRecord(
                     principal_id=row[0],
                     tenant_id=row[1],
@@ -523,6 +528,11 @@ class PostgresControlPlaneRepository:
                 )
                 for row in cursor.fetchall()
             ]
+            self.connection.commit()
+            return rows
+        except Exception:
+            self.connection.rollback()
+            raise
         finally:
             cursor.close()
 
@@ -607,7 +617,7 @@ class PostgresControlPlaneRepository:
                 else "SELECT policy_id, version, policy_json::text, published FROM gas_policies ORDER BY policy_id, version"
             )
             cursor.execute(sql)
-            return [
+            rows = [
                 PolicyVersionRecord(
                     policy_id=row[0],
                     version=row[1],
@@ -616,6 +626,11 @@ class PostgresControlPlaneRepository:
                 )
                 for row in cursor.fetchall()
             ]
+            self.connection.commit()
+            return rows
+        except Exception:
+            self.connection.rollback()
+            raise
         finally:
             cursor.close()
 
@@ -756,7 +771,12 @@ class PostgresControlPlaneRepository:
             row = cursor.fetchone()
             if row is None:
                 raise KeyError(f"unknown authorization: {authorization_id}")
-            return self._row_to_authorization(row)
+            record = self._row_to_authorization(row)
+            self.connection.commit()
+            return record
+        except Exception:
+            self.connection.rollback()
+            raise
         finally:
             cursor.close()
 
@@ -775,7 +795,12 @@ class PostgresControlPlaneRepository:
                 (idempotency_key,),
             )
             row = cursor.fetchone()
-            return None if row is None else self._row_to_authorization(row)
+            record = None if row is None else self._row_to_authorization(row)
+            self.connection.commit()
+            return record
+        except Exception:
+            self.connection.rollback()
+            raise
         finally:
             cursor.close()
 
@@ -802,7 +827,12 @@ class PostgresControlPlaneRepository:
                 """
             )
             cursor.execute(sql, () if status is None else (status,))
-            return [self._row_to_authorization(row) for row in cursor.fetchall()]
+            rows = [self._row_to_authorization(row) for row in cursor.fetchall()]
+            self.connection.commit()
+            return rows
+        except Exception:
+            self.connection.rollback()
+            raise
         finally:
             cursor.close()
 
@@ -914,6 +944,12 @@ class PostgresControlPlaneRepository:
         cursor = self.connection.cursor()
         try:
             cursor.execute(
+                "SELECT 1 FROM gas_authorizations WHERE authorization_id=%s",
+                (authorization_id,),
+            )
+            if cursor.fetchone() is None:
+                raise KeyError(f"unknown authorization: {authorization_id}")
+            cursor.execute(
                 "INSERT INTO gas_approval_decisions(authorization_id, decision, actor_id, rationale) VALUES (%s, %s, %s, %s)",
                 (authorization_id, decision, actor_id, rationale),
             )
@@ -950,7 +986,7 @@ class PostgresControlPlaneRepository:
                 "SELECT decision, actor_id, rationale, EXTRACT(EPOCH FROM created_at) FROM gas_approval_decisions WHERE authorization_id=%s ORDER BY approval_id",
                 (authorization_id,),
             )
-            return [
+            rows = [
                 ApprovalDecisionRecord(
                     authorization_id=authorization_id,
                     decision=row[0],
@@ -960,6 +996,11 @@ class PostgresControlPlaneRepository:
                 )
                 for row in cursor.fetchall()
             ]
+            self.connection.commit()
+            return rows
+        except Exception:
+            self.connection.rollback()
+            raise
         finally:
             cursor.close()
 
@@ -1016,4 +1057,5 @@ def build_control_plane_repository(*, database_url: str | None = None) -> Contro
         import psycopg
     except ImportError as exc:  # pragma: no cover - optional dependency
         raise RuntimeError("install the postgres extra to use the PostgreSQL control plane") from exc
-    return PostgresControlPlaneRepository(psycopg.connect(database_url))
+    connection = psycopg.connect(database_url)
+    return PostgresControlPlaneRepository(connection)

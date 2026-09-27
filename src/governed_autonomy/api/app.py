@@ -6,7 +6,6 @@ import hmac
 import os
 import time
 from collections.abc import Callable
-from contextlib import suppress
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -21,7 +20,6 @@ from ..control_plane import (
     PolicyVersionRecord,
     ServicePrincipalRecord,
     build_control_plane_repository,
-    run_postgres_migrations,
     synchronize_policy_registry,
     synchronize_principal_registry,
 )
@@ -186,8 +184,6 @@ def _build_default_context() -> AppContext:
         if control_plane_database_url is None:
             raise RuntimeError("DATABASE_URL is required for postgres runtime mode")
         control_plane = build_control_plane_repository(database_url=control_plane_database_url)
-        with suppress(AttributeError):
-            run_postgres_migrations(control_plane.connection)  # type: ignore[attr-defined]
     principal_registry = platform.principal_registry or ServicePrincipalRegistry()
     if not control_plane.list_policies():
         for policy in platform.service.policies.policies():
@@ -514,7 +510,7 @@ def create_app(
                 error_text="authorization expired before approval",
             )
             return _authorization_response(expired, ctx.control_plane)
-        if record.status == "cancelled" or record.status == "failed":
+        if record.status != "awaiting_approval":
             return _authorization_response(record, ctx.control_plane)
         ctx.control_plane.record_approval(
             authorization_id,
@@ -584,6 +580,13 @@ def create_app(
         caller: AuthContext = Depends(auth),
     ):
         record = ctx.control_plane.get_authorization(body.authorization_id)
+        if record.status != "authorized":
+            return _problem(
+                request,
+                status.HTTP_409_CONFLICT,
+                "execution unavailable",
+                "authorization is not executable in its current state",
+            )
         artifact = record.artifact()
         if artifact is None:
             return _problem(
