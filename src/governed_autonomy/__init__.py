@@ -1,7 +1,25 @@
 ﻿"""Governed Autonomy Substrate MVP."""
 
 from .a2a import A2AGuard, A2ATaskDelegation
+from .api import create_app
 from .bootstrap import build_demo_service, build_platform_demo, build_runtime_service
+from .control_plane import (
+    CONTROL_PLANE_SCHEMA,
+    MIGRATIONS_DIR,
+    ApprovalDecisionRecord,
+    AuthorizationRecord,
+    ControlPlaneRepository,
+    InMemoryControlPlaneRepository,
+    MeshSourceRecord,
+    PolicyVersionRecord,
+    PostgresControlPlaneRepository,
+    ServicePrincipalRecord,
+    TenantRecord,
+    build_control_plane_repository,
+    run_postgres_migrations,
+    synchronize_policy_registry,
+    synchronize_principal_registry,
+)
 from .compliance import ComplianceAuditor, ComplianceEvaluation
 from .crypto import KeyPair, verify_signature
 from .deployment import (
@@ -115,6 +133,22 @@ __all__ = [
     "build_demo_service",
     "build_platform_demo",
     "build_runtime_service",
+    "create_app",
+    "ControlPlaneRepository",
+    "InMemoryControlPlaneRepository",
+    "PostgresControlPlaneRepository",
+    "AuthorizationRecord",
+    "ApprovalDecisionRecord",
+    "PolicyVersionRecord",
+    "TenantRecord",
+    "ServicePrincipalRecord",
+    "MeshSourceRecord",
+    "CONTROL_PLANE_SCHEMA",
+    "MIGRATIONS_DIR",
+    "build_control_plane_repository",
+    "run_postgres_migrations",
+    "synchronize_policy_registry",
+    "synchronize_principal_registry",
     "AuthenticatedAPI",
     "create_server",
     "parse_server_args",

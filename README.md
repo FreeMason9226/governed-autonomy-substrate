@@ -47,9 +47,11 @@ python -m pip install -e . pytest
 python -m pytest
 gas-demo
 GOVERNED_AUTONOMY_BEARER_TOKEN=my-secret gas-server --host 0.0.0.0 --port 8000
+gas-worker --poll-interval 1 --retry-delay 1
+gas tenant create demo-tenant
 ```
 
-`gas-demo` writes `replay.jsonl` in the current directory. `gas-server` starts the standard-library HTTP API with bearer-token auth for `/health`, `/audit`, `/authorize`, and `/execute`. For a production deployment, replace the in-memory replay index with a transactional durable store and provision public keys from a managed trust store.
+`gas-demo` writes `replay.jsonl` in the current directory. `gas-server` now starts the FastAPI platform surface with bearer-token auth and OpenAPI under `/v1/openapi.json`; `gas-worker` polls the control plane for authorized artifacts and executes them through the existing governance barrier; and `gas` exposes the control-plane CLI (`tenant create`, `principal register`, `principal revoke`, `policy publish`, `authorization inspect`, and `migrate`). The root `compose.yaml` and `examples/platform-compose/compose.yaml` files show one complete API + PostgreSQL control plane + worker deployment example.
 
 ## Production-sensible integration boundaries
 
@@ -67,13 +69,15 @@ These are integration-ready slices, not claims that this repository provisions a
 
 The repository also includes a durable SQLite job state model (`SQLiteJobStore`)
 with idempotency, bounded retries, dead-letter state, and compensation hooks;
-PostgreSQL replay/nonce schema and adapter boundaries; Prometheus text and
-OpenTelemetry-compatible hooks; versioned `/api/v1` endpoints and
-`/openapi.json`; and liveness/readiness/startup probes. `Dockerfile`,
-`compose.yaml`, `deploy/kubernetes.yaml`, `deploy/helm/values.yaml`, and
-`docs/operations.md` provide deployment and recovery starting points. They do
-not provision a database, identity provider, certificates, backup system, or
-cloud credentials.
+PostgreSQL replay/nonce schema and adapter boundaries; a PostgreSQL-backed
+control-plane repository layer with SQL migrations; Prometheus text and
+OpenTelemetry-compatible hooks; versioned `/v1` endpoints and
+`/v1/openapi.json`; and liveness/readiness probes. `Dockerfile`,
+`compose.yaml`, `examples/platform-compose/compose.yaml`,
+`deploy/kubernetes.yaml`, `deploy/helm/values.yaml`, and `docs/operations.md`
+provide deployment and recovery starting points. They do not provision a
+database, identity provider, certificates, backup system, or cloud
+credentials.
 
 ## Multi-organization federation
 
