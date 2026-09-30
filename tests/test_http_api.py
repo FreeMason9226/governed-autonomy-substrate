@@ -70,6 +70,18 @@ def test_http_api_authorizes_executes_reports_health_and_audit(server):
     assert audit["audit_summary"]["execution_count"] == 1
 
 
+def test_http_api_routes_query_bearing_urls_and_exposes_openapi_document(server):
+    status, health = request(server, "GET", "/health?verbose=true")
+    assert status == 200
+    assert health["ok"] is True
+
+    status, schema = request(server, "GET", "/openapi.json?format=json")
+    assert status == 200
+    assert schema["openapi"] == "3.0.3"
+    assert "/api/v1/authorize" in schema["paths"]
+    assert schema["components"]["securitySchemes"]["bearerAuth"]["scheme"] == "bearer"
+
+
 def test_http_api_accepts_mesh_inputs_for_runtime_preflight():
     source = KeyPair.generate("http-mesh-source")
     registry = GovernanceSourceRegistry()

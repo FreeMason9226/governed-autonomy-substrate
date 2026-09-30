@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
+from urllib.parse import urlsplit
 
 from .admin_ui import render_admin_ui
 from .bootstrap import build_runtime_service
@@ -50,19 +51,20 @@ class AuthenticatedAPI:
             server_version = "GovernedAutonomy/0.2"
 
             def do_GET(self) -> None:
+                route = urlsplit(self.path).path
                 if not api._allowed(self):
                     self._send(HTTPStatus.TOO_MANY_REQUESTS, {"error": "rate limit exceeded"})
                     return
                 if not api._authenticated(self):
                     self._send(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
                     return
-                if self.path.startswith("/admin") and not api._operator_authorized(self):
+                if route.startswith("/admin") and not api._operator_authorized(self):
                     self._send(
                         HTTPStatus.FORBIDDEN,
                         {"error": "operator authorization required"},
                     )
                     return
-                if self.path == "/admin":
+                if route == "/admin":
                     body = render_admin_ui()
                     self.send_response(HTTPStatus.OK)
                     self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -72,40 +74,41 @@ class AuthenticatedAPI:
                     self.end_headers()
                     self.wfile.write(body)
                     return
-                if self.path in {"/health", "/livez", "/readyz", "/startupz"}:
+                if route in {"/health", "/livez", "/readyz", "/startupz"}:
                     report = health_report(
                         replay_log=api.service.boundary.replay_log,
                         trust_store=api.service.boundary.trust_store,
                         policy_registry=api.service.policies,
                         mesh_source_registry=api.service.mesh_source_registry,
                     )
-                    if self.path == "/livez":
+                    if route == "/livez":
                         report = {"ok": True, "status": "live"}
-                    elif self.path == "/startupz":
+                    elif route == "/startupz":
                         report = {"ok": True, "status": "started"}
-                    elif self.path == "/readyz" and not report["ok"]:
+                    elif route == "/readyz" and not report["ok"]:
                         self._send(HTTPStatus.SERVICE_UNAVAILABLE, report)
                         return
                     self._send(HTTPStatus.OK, report)
                     return
-                if self.path == "/audit":
+                if route == "/audit":
                     self._send(HTTPStatus.OK, api.service.audit_report())
                     return
-                if self.path == "/admin/policies":
+                if route == "/admin/policies":
                     self._send(HTTPStatus.OK, {"policies": api.service.policies.to_dict()})
                     return
-                if self.path == "/admin/proposals":
+                if route == "/admin/proposals":
                     self._send(HTTPStatus.OK, {"proposals": []})
                     return
-                if self.path == "/admin/metrics":
+                if route == "/admin/metrics":
                     self._send(HTTPStatus.OK, api.service.audit_report()["audit_summary"])
                     return
-                if self.path == "/openapi.json":
+                if route == "/openapi.json":
                     self._send(HTTPStatus.OK, API_SCHEMA)
                     return
                 self._send(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
             def do_POST(self) -> None:
+                route = urlsplit(self.path).path
                 if not api._allowed(self):
                     self._send(HTTPStatus.TOO_MANY_REQUESTS, {"error": "rate limit exceeded"})
                     return
@@ -114,7 +117,7 @@ class AuthenticatedAPI:
                     return
                 try:
                     payload = api._read_json(self)
-                    if self.path in {"/authorize", "/api/v1/authorize"}:
+                    if route in {"/authorize", "/api/v1/authorize"}:
                         mesh_inputs = payload.get("mesh_inputs")
                         if mesh_inputs is not None:
                             mesh_inputs = tuple(
@@ -128,7 +131,7 @@ class AuthenticatedAPI:
                             mesh_inputs=mesh_inputs,
                         ).to_dict()
                         self._send(HTTPStatus.OK, result)
-                    elif self.path in {"/execute", "/api/v1/execute"}:
+                    elif route in {"/execute", "/api/v1/execute"}:
                         self._send(
                             HTTPStatus.OK, {"result": api.service.execute_dict(payload["artifact"])}
                         )
@@ -324,12 +327,62 @@ if __name__ == "__main__":
 
 
 API_SCHEMA = {
-    "openapi": "3.0.0",
-    "info": {"title": "Governed Autonomy Substrate", "version": "1.0"},
+    "openapi": "3.0.3",
+    "info": {
+        "title": "Governed Autonomy Substrate",
+        "version": "1.0",
+        "description": "Authenticated authorization, execution, health, and audit APIs.",
+    },
+    "servers": [{"url": "/"}],
+    "components": {
+        "securitySchemes": {
+            "bearerAuth": {"type": "http", "scheme": "bearer"},
+        },
+        "schemas": {
+            "AuthorizeRequest": {
+                "type": "object",
+                "required": ["policy_id", "request"],
+                "properties": {
+                    "policy_id": {"type": "string"},
+                    "request": {"type": "object", "additionalProperties": True},
+                    "ttl_seconds": {"type": "integer", "minimum": 1},
+                    "approvals": {"type": "array", "items": {"type": "object"}},
+                    "mesh_inputs": {"type": "array", "items": {"type": "object"}},
+                },
+            },
+            "ExecuteRequest": {
+                "type": "object",
+                "required": ["artifact"],
+                "properties": {"artifact": {"type": "object", "additionalProperties": True}},
+            },
+        },
+    },
     "paths": {
-        "/api/v1/authorize": {"post": {"requestBody": {"required": True}}},
-        "/api/v1/execute": {"post": {"requestBody": {"required": True}}},
-        "/health": {"get": {}},
-        "/readyz": {"get": {}},
+        "/api/v1/authorize": {
+            "post": {
+                "security": [{"bearerAuth": []}],
+                "requestBody": {
+                    "required": True,
+                    "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AuthorizeRequest"}}},
+                },
+                "responses": {"200": {"description": "Signed governance authorization artifact"}},
+            }
+        },
+        "/api/v1/execute": {
+            "post": {
+                "security": [{"bearerAuth": []}],
+                "requestBody": {
+                    "required": True,
+                    "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ExecuteRequest"}}},
+                },
+                "responses": {"200": {"description": "Action result"}},
+            }
+        },
+        "/health": {"get": {"responses": {"200": {"description": "Health report"}}}},
+        "/readyz": {"get": {"responses": {"200": {"description": "Readiness report"}}}},
+        "/livez": {"get": {"responses": {"200": {"description": "Liveness report"}}}},
+        "/startupz": {"get": {"responses": {"200": {"description": "Startup report"}}}},
+        "/audit": {"get": {"responses": {"200": {"description": "Audit summary"}}}},
+        "/openapi.json": {"get": {"responses": {"200": {"description": "OpenAPI document"}}}},
     },
 }
