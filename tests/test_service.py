@@ -82,3 +82,65 @@ def test_service_rejects_unknown_policy_and_action():
     )
     with pytest.raises(AuthorizationError, match="unknown executable action"):
         service.execute(tampered_request)
+
+
+def test_service_governance_log_records_durable_policy_and_trust_lifecycle_events():
+    from governed_autonomy import build_demo_service
+    from governed_autonomy.canonical import b64encode
+
+    service, issuer, _ = build_demo_service()
+    reviewer = KeyPair.generate("reviewer")
+    reviewer2 = KeyPair.generate("reviewer2")
+    service.boundary.trust_store.add(reviewer.key_id, reviewer.public_key)
+    service.boundary.trust_store.add(reviewer2.key_id, reviewer2.public_key)
+
+    assert service.governance_log() == ()
+
+    new_policy = Policy(
+        "demo-files-v2",
+        ("write_file",),
+        {"write_file": ("path", "content")},
+        {"write_file": {"path": "renamed.txt"}},
+    )
+    proposal = service.policy_change_manager.propose(
+        new_policy=new_policy, proposer=issuer, rationale="rename default output"
+    )
+    service.policy_change_manager.approve(proposal.proposal_id, approver=reviewer)
+    service.policy_change_manager.approve(proposal.proposal_id, approver=reviewer2)
+    service.policy_change_manager.activate(proposal.proposal_id)
+
+    new_key = KeyPair.generate("new-key")
+    new_public_key_b64 = b64encode(new_key.public_key_bytes())
+    prepared = service.trust_change_manager.prepare_add(
+        key_id=new_key.key_id,
+        public_key_b64=new_public_key_b64,
+        requested_by_key_id=issuer.key_id,
+    )
+    signature = issuer.sign(prepared["unsigned_payload"].encode("utf-8"))
+    service.trust_change_manager.submit_add(
+        key_id=new_key.key_id,
+        public_key_b64=new_public_key_b64,
+        requested_by_key_id=issuer.key_id,
+        signature=signature,
+    )
+
+    events = service.governance_log()
+    assert [event["event"] for event in events] == [
+        "policy.proposed",
+        "policy.approved",
+        "policy.approved",
+        "policy.activated",
+        "trust.key_added",
+    ]
+    assert [event["subject_id"] for event in events] == [
+        proposal.proposal_id,
+        proposal.proposal_id,
+        proposal.proposal_id,
+        proposal.proposal_id,
+        new_key.key_id,
+    ]
+    assert all(event["recorded_at"] for event in events)
+
+    # Governance events are recorded in the same durable replay log as
+    # authorization/execution events, but do not corrupt decision reconstruction.
+    assert service.boundary.replay_log.audit_summary()["decisions"] == {}

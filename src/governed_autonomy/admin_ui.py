@@ -102,6 +102,17 @@ mesh-governance fields (<code>required_mesh_inputs</code>,
 <h2>Audit report</h2>
 <button class="refresh" data-refresh="audit">Refresh</button>
 <pre id="audit-output" class="output">Not loaded.</pre>
+
+<h3>Governance log</h3>
+<p class="hint">
+Durable, hash-chained history of policy and trust governance actions
+(proposed, approved, activated, key added/revoked) recorded in the same
+replay log as authorization/execution events, independent of current
+proposal/trust state.
+</p>
+<table id="governance-log-table"><thead><tr>
+<th>Recorded at</th><th>Event</th><th>Subject</th>
+</tr></thead><tbody></tbody></table>
 </section>
 
 <section id="tab-trust" class="tab-panel">
@@ -327,6 +338,28 @@ def render_admin_js() -> bytes:
       output.textContent = JSON.stringify(await api("/audit"), null, 2);
     } catch (err) {
       output.textContent = "Error: " + err.message;
+    }
+    await loadGovernanceLog();
+  }
+
+  async function loadGovernanceLog() {
+    const tbody = document.querySelector("#governance-log-table tbody");
+    tbody.innerHTML = "";
+    try {
+      const data = await api("/admin/governance-log");
+      const events = [...(data.events || [])].reverse();
+      for (const event of events) {
+        const tr = document.createElement("tr");
+        tr.innerHTML =
+          "<td>" + escapeHtml(event.recorded_at || "") + "</td>" +
+          "<td>" + escapeHtml(event.event || "") + "</td>" +
+          "<td>" + escapeHtml(event.subject_id || "") + "</td>";
+        tbody.appendChild(tr);
+      }
+    } catch (err) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = "<td colspan=\"3\">Error: " + escapeHtml(err.message) + "</td>";
+      tbody.appendChild(tr);
     }
   }
 

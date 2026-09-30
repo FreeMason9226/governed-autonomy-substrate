@@ -530,6 +530,14 @@ def test_http_api_admin_trust_add_and_revoke_key_round_trip():
         )
         assert status == 200
         assert new_key.key_id in revoked_snapshot["revoked"]
+
+        status, governance_log = _admin_request(instance, "GET", "/admin/governance-log")
+        assert status == 200
+        events = [event["event"] for event in governance_log["events"]]
+        subjects = [event["subject_id"] for event in governance_log["events"]]
+        assert events == ["trust.key_added", "trust.key_revoked"]
+        assert subjects == [new_key.key_id, new_key.key_id]
+        assert all(event["recorded_at"] for event in governance_log["events"])
     finally:
         instance.shutdown()
         instance.server_close()

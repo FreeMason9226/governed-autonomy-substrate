@@ -107,6 +107,9 @@ class AuthenticatedAPI:
                 if route == "/admin/trust":
                     self._send(HTTPStatus.OK, api.trust_snapshot())
                     return
+                if route == "/admin/governance-log":
+                    self._send(HTTPStatus.OK, {"events": list(api.service.governance_log())})
+                    return
                 if route == "/admin/metrics":
                     self._send(HTTPStatus.OK, api.service.audit_report()["audit_summary"])
                     return
@@ -643,6 +646,19 @@ API_SCHEMA = {
             "get": {
                 "security": [{"bearerAuth": []}],
                 "responses": {"200": {"description": "Trusted signing keys snapshot"}},
+            }
+        },
+        "/admin/governance-log": {
+            "get": {
+                "security": [{"bearerAuth": []}],
+                "responses": {
+                    "200": {
+                        "description": (
+                            "Durable, hash-chained history of policy/trust governance "
+                            "events (proposed, approved, activated, key_added, key_revoked)"
+                        )
+                    }
+                },
             }
         },
         "/admin/proposals": {
