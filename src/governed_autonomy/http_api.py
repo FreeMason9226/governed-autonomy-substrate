@@ -14,7 +14,12 @@ from .bootstrap import build_runtime_service
 from .deployment import BoundedRateLimiter, TLSConfig, correlation_id, security_headers
 from .errors import AuthorizationError
 from .health import health_report
-from .identity import IdentityValidationError, OIDCValidator, UrlJWKSProvider
+from .identity import (
+    IdentityValidationError,
+    OIDCValidator,
+    UrlJWKSProvider,
+    oidc_validator_from_discovery,
+)
 from .issuer import PolicyDeniedError
 from .mesh import GovernanceInput
 from .service import GovernedService
@@ -221,6 +226,10 @@ class AuthenticatedAPI:
         return payload
 
 
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def parse_server_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the Governed Autonomy HTTP API server.")
     parser.add_argument("--host", default="127.0.0.1")
@@ -229,6 +238,15 @@ def parse_server_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--oidc-issuer", default=os.environ.get("OIDC_ISSUER"))
     parser.add_argument("--oidc-audience", default=os.environ.get("OIDC_AUDIENCE"))
     parser.add_argument("--oidc-jwks-url", default=os.environ.get("OIDC_JWKS_URL"))
+    parser.add_argument(
+        "--oidc-discovery",
+        action="store_true",
+        default=_env_flag("OIDC_DISCOVERY"),
+        help=(
+            "Resolve the JWKS endpoint via the issuer's "
+            "/.well-known/openid-configuration document instead of --oidc-jwks-url."
+        ),
+    )
     parser.add_argument(
         "--operator-token", default=os.environ.get("GOVERNED_AUTONOMY_OPERATOR_TOKEN")
     )
@@ -285,17 +303,30 @@ def create_server(
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_server_args(argv)
     oidc_validator = None
-    oidc_args = (args.oidc_issuer, args.oidc_audience, args.oidc_jwks_url)
-    if any(oidc_args) and not all(oidc_args):
-        raise SystemExit(
-            "OIDC_ISSUER, OIDC_AUDIENCE, and OIDC_JWKS_URL must be configured together"
-        )
-    if all(oidc_args):
-        oidc_validator = OIDCValidator(
-            issuer=args.oidc_issuer,
-            audience=args.oidc_audience,
-            jwks_provider=UrlJWKSProvider(args.oidc_jwks_url),
-        )
+    if args.oidc_discovery:
+        if not args.oidc_issuer or not args.oidc_audience:
+            raise SystemExit("OIDC_ISSUER and OIDC_AUDIENCE are required for OIDC discovery")
+        if args.oidc_jwks_url:
+            raise SystemExit("--oidc-jwks-url must not be set when --oidc-discovery is used")
+        try:
+            oidc_validator = oidc_validator_from_discovery(
+                issuer=args.oidc_issuer, audience=args.oidc_audience
+            )
+        except IdentityValidationError as exc:
+            raise SystemExit(f"OIDC discovery failed: {exc}") from exc
+    else:
+        oidc_args = (args.oidc_issuer, args.oidc_audience, args.oidc_jwks_url)
+        if any(oidc_args) and not all(oidc_args):
+            raise SystemExit(
+                "OIDC_ISSUER, OIDC_AUDIENCE, and OIDC_JWKS_URL must be configured together "
+                "(or use --oidc-discovery with just issuer and audience)"
+            )
+        if all(oidc_args):
+            oidc_validator = OIDCValidator(
+                issuer=args.oidc_issuer,
+                audience=args.oidc_audience,
+                jwks_provider=UrlJWKSProvider(args.oidc_jwks_url),
+            )
     if not args.bearer_token and oidc_validator is None:
         raise SystemExit(
             "GOVERNED_AUTONOMY_BEARER_TOKEN or complete OIDC configuration is required"

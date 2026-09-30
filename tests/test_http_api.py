@@ -171,3 +171,61 @@ def test_http_api_parse_server_args_supports_cli_options():
     assert args.host == "0.0.0.0"
     assert args.port == 9000
     assert args.bearer_token == "super-secret"
+
+
+def test_http_api_parse_server_args_supports_oidc_discovery_flag():
+    args = parse_server_args(
+        [
+            "--oidc-discovery",
+            "--oidc-issuer",
+            "https://issuer.example.com",
+            "--oidc-audience",
+            "gas-api",
+        ]
+    )
+
+    assert args.oidc_discovery is True
+    assert args.oidc_issuer == "https://issuer.example.com"
+    assert args.oidc_jwks_url is None
+
+
+def test_http_api_main_rejects_discovery_with_explicit_jwks_url(monkeypatch):
+    from governed_autonomy import http_api
+
+    monkeypatch.setattr(
+        http_api,
+        "parse_server_args",
+        lambda argv=None: type(
+            "Args",
+            (),
+            {
+                "oidc_discovery": True,
+                "oidc_issuer": "https://issuer.example.com",
+                "oidc_audience": "gas-api",
+                "oidc_jwks_url": "https://issuer.example.com/jwks.json",
+            },
+        )(),
+    )
+    with pytest.raises(SystemExit, match="must not be set"):
+        http_api.main([])
+
+
+def test_http_api_main_rejects_incomplete_discovery_configuration(monkeypatch):
+    from governed_autonomy import http_api
+
+    monkeypatch.setattr(
+        http_api,
+        "parse_server_args",
+        lambda argv=None: type(
+            "Args",
+            (),
+            {
+                "oidc_discovery": True,
+                "oidc_issuer": None,
+                "oidc_audience": "gas-api",
+                "oidc_jwks_url": None,
+            },
+        )(),
+    )
+    with pytest.raises(SystemExit, match="required for OIDC discovery"):
+        http_api.main([])

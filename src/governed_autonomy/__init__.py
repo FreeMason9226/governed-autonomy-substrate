@@ -29,9 +29,12 @@ from .identity import (
     IdentityValidationError,
     JWKSProvider,
     JWTValidator,
+    OIDCDiscoveryDocument,
     OIDCValidator,
     StaticJWKSProvider,
     UrlJWKSProvider,
+    discover_oidc_configuration,
+    oidc_validator_from_discovery,
 )
 from .issuer import AuthorizationIssuer, PolicyDeniedError
 from .jobs import Job, SQLiteJobStore, run_once
@@ -121,9 +124,12 @@ __all__ = [
     "IdentityValidationError",
     "JWKSProvider",
     "JWTValidator",
+    "OIDCDiscoveryDocument",
     "OIDCValidator",
     "StaticJWKSProvider",
     "UrlJWKSProvider",
+    "discover_oidc_configuration",
+    "oidc_validator_from_discovery",
 
     # Compliance & Audit
     "ComplianceAuditor",

@@ -47,6 +47,7 @@ class UrlJWKSProvider:
         self.timeout_seconds = timeout_seconds
         self._jwks: dict[str, Any] | None = None
         self._expires_at = 0.0
+        self._last_rotated_at = 0.0
 
     def get_jwks(self) -> dict[str, Any]:
         if self._jwks is None or time.time() >= self._expires_at:
@@ -64,8 +65,100 @@ class UrlJWKSProvider:
             raise IdentityValidationError("JWKS endpoint is unavailable") from exc
         if not isinstance(document, dict) or not isinstance(document.get("keys"), list):
             raise IdentityValidationError("JWKS document is invalid")
+        previous_kids = (
+            {item.get("kid") for item in self._jwks.get("keys", []) if isinstance(item, dict)}
+            if isinstance(self._jwks, dict)
+            else set()
+        )
+        current_kids = {item.get("kid") for item in document["keys"] if isinstance(item, dict)}
+        now = time.time()
+        if self._jwks is not None and current_kids != previous_kids:
+            self._last_rotated_at = now
         self._jwks = document
-        self._expires_at = time.time() + self.cache_seconds
+        self._expires_at = now + self.cache_seconds
+
+    @property
+    def last_rotated_at(self) -> float:
+        """Unix timestamp of the last observed change in the JWKS key set (0.0 if none yet)."""
+        return self._last_rotated_at
+
+
+@dataclass(frozen=True)
+class OIDCDiscoveryDocument:
+    issuer: str
+    jwks_uri: str
+    authorization_endpoint: str | None = None
+    token_endpoint: str | None = None
+    raw: dict[str, Any] | None = None
+
+
+def discover_oidc_configuration(
+    issuer: str, *, timeout_seconds: int = 5
+) -> OIDCDiscoveryDocument:
+    """Fetch and validate an OIDC ``.well-known/openid-configuration`` document.
+
+    Fails closed: any network error, malformed JSON, missing ``jwks_uri``, or an
+    ``issuer`` field that does not match the requested issuer raises
+    ``IdentityValidationError`` rather than returning a partial/unsafe result.
+    """
+    if not issuer.startswith("https://"):
+        raise ValueError("OIDC issuer must use HTTPS")
+    if timeout_seconds <= 0:
+        raise ValueError("timeout_seconds must be positive")
+    discovery_url = issuer.rstrip("/") + "/.well-known/openid-configuration"
+    request = Request(discovery_url, headers={"Accept": "application/json"})
+    try:
+        with urlopen(request, timeout=timeout_seconds) as response:
+            document = json.loads(response.read())
+    except Exception as exc:
+        raise IdentityValidationError("OIDC discovery endpoint is unavailable") from exc
+    if not isinstance(document, dict):
+        raise IdentityValidationError("OIDC discovery document is invalid")
+    discovered_issuer = document.get("issuer")
+    jwks_uri = document.get("jwks_uri")
+    if not isinstance(discovered_issuer, str) or discovered_issuer != issuer:
+        raise IdentityValidationError("OIDC discovery document issuer mismatch")
+    if not isinstance(jwks_uri, str) or not jwks_uri.startswith("https://"):
+        raise IdentityValidationError("OIDC discovery document is missing a valid jwks_uri")
+    authorization_endpoint = document.get("authorization_endpoint")
+    token_endpoint = document.get("token_endpoint")
+    return OIDCDiscoveryDocument(
+        issuer=discovered_issuer,
+        jwks_uri=jwks_uri,
+        authorization_endpoint=(
+            authorization_endpoint if isinstance(authorization_endpoint, str) else None
+        ),
+        token_endpoint=token_endpoint if isinstance(token_endpoint, str) else None,
+        raw=document,
+    )
+
+
+def oidc_validator_from_discovery(
+    *,
+    issuer: str,
+    audience: str | tuple[str, ...],
+    algorithms: tuple[str, ...] = ("RS256", "ES256", "EdDSA"),
+    cache_seconds: int = 300,
+    timeout_seconds: int = 5,
+    clock: Any = time.time,
+) -> "OIDCValidator":
+    """Build an ``OIDCValidator`` by resolving the JWKS endpoint via OIDC discovery.
+
+    This lets operators configure only the issuer (and audience) instead of a
+    hardcoded JWKS URL, so key rotation and JWKS endpoint changes on the
+    identity provider side require no redeployment.
+    """
+    discovery = discover_oidc_configuration(issuer, timeout_seconds=timeout_seconds)
+    jwks_provider = UrlJWKSProvider(
+        discovery.jwks_uri, cache_seconds=cache_seconds, timeout_seconds=timeout_seconds
+    )
+    return OIDCValidator(
+        issuer=issuer,
+        audience=audience,
+        jwks_provider=jwks_provider,
+        algorithms=algorithms,
+        clock=clock,
+    )
 
 
 def _b64(value: str) -> bytes:
