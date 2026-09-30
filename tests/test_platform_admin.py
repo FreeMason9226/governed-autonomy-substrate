@@ -68,3 +68,98 @@ def test_policy_change_manager_rejects_tampered_proposals():
         raise AssertionError("tampered proposal should be rejected")
     except ValueError:
         pass
+
+
+def test_policy_change_manager_prepare_and_signed_workflow_round_trips():
+    """Exercises the pre-signed (prepare -> sign externally -> submit) workflow
+
+    used by the admin browser UI, where the server never sees a private key.
+    """
+    trusted = TrustStore()
+    proposer = KeyPair.generate("policy-owner")
+    reviewer = KeyPair.generate("reviewer")
+    trusted.add(proposer.key_id, proposer.public_key)
+    trusted.add(reviewer.key_id, reviewer.public_key)
+    registry = PolicyRegistry()
+    manager = PolicyChangeManager(registry=registry, trust_store=trusted, required_approvals=1)
+    policy = Policy(
+        policy_id="op-limit-v2",
+        allowed_actions=("read",),
+        required_fields={"read": ("resource",)},
+        exact_fields={"read": {}},
+    )
+
+    prepared = manager.prepare_proposal(
+        new_policy=policy, proposer_key_id=proposer.key_id, rationale="externally signed"
+    )
+    signature = proposer.sign(prepared["unsigned_payload"].encode("utf-8"))
+    proposal = manager.propose_signed(
+        new_policy=policy,
+        proposer_key_id=proposer.key_id,
+        signature=signature,
+        rationale="externally signed",
+        proposal_id=prepared["proposal_id"],
+    )
+    assert proposal.status == "pending"
+    assert proposal.proposal_id == prepared["proposal_id"]
+
+    prepared_approval = manager.prepare_approval(proposal.proposal_id, approver_key_id=reviewer.key_id)
+    approval_signature = reviewer.sign(prepared_approval["unsigned_payload"].encode("utf-8"))
+    approved = manager.approve_signed(
+        proposal.proposal_id,
+        approver_key_id=reviewer.key_id,
+        signature=approval_signature,
+    )
+    assert approved.approval_count() == 1
+
+    activated = manager.activate(proposal.proposal_id)
+    assert activated.policy_id == "op-limit-v2"
+    assert registry.get("op-limit-v2") is not None
+
+
+def test_policy_change_manager_propose_signed_rejects_bad_signature():
+    trusted = TrustStore()
+    proposer = KeyPair.generate("policy-owner")
+    trusted.add(proposer.key_id, proposer.public_key)
+    registry = PolicyRegistry()
+    manager = PolicyChangeManager(registry=registry, trust_store=trusted, required_approvals=1)
+    policy = Policy(
+        policy_id="op-limit-v3",
+        allowed_actions=("read",),
+        required_fields={"read": ("resource",)},
+        exact_fields={"read": {}},
+    )
+    try:
+        manager.propose_signed(
+            new_policy=policy,
+            proposer_key_id=proposer.key_id,
+            signature="not-a-real-signature",
+            rationale="",
+        )
+        raise AssertionError("invalid signature should be rejected")
+    except ValueError:
+        pass
+
+
+def test_policy_change_manager_approve_signed_rejects_duplicate_and_self_approval():
+    trusted = TrustStore()
+    proposer = KeyPair.generate("policy-owner")
+    trusted.add(proposer.key_id, proposer.public_key)
+    registry = PolicyRegistry()
+    manager = PolicyChangeManager(registry=registry, trust_store=trusted, required_approvals=1)
+    policy = Policy(
+        policy_id="op-limit-v4",
+        allowed_actions=("read",),
+        required_fields={"read": ("resource",)},
+        exact_fields={"read": {}},
+    )
+    proposal = manager.propose(new_policy=policy, proposer=proposer)
+    prepared_approval = manager.prepare_approval(proposal.proposal_id, approver_key_id=proposer.key_id)
+    self_signature = proposer.sign(prepared_approval["unsigned_payload"].encode("utf-8"))
+    try:
+        manager.approve_signed(
+            proposal.proposal_id, approver_key_id=proposer.key_id, signature=self_signature
+        )
+        raise AssertionError("proposer should not be able to approve their own change")
+    except ValueError:
+        pass

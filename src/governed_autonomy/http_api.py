@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import urlsplit
 
-from .admin_ui import render_admin_ui
+from .admin_ui import render_admin_css, render_admin_js, render_admin_ui
 from .bootstrap import build_runtime_service
 from .deployment import BoundedRateLimiter, TLSConfig, correlation_id, security_headers
 from .errors import AuthorizationError
@@ -22,6 +22,7 @@ from .identity import (
 )
 from .issuer import PolicyDeniedError
 from .mesh import GovernanceInput
+from .policy import policy_from_dict
 from .service import GovernedService
 
 
@@ -70,14 +71,13 @@ class AuthenticatedAPI:
                     )
                     return
                 if route == "/admin":
-                    body = render_admin_ui()
-                    self.send_response(HTTPStatus.OK)
-                    self.send_header("Content-Type", "text/html; charset=utf-8")
-                    self.send_header("Content-Length", str(len(body)))
-                    for k, v in security_headers().items():
-                        self.send_header(k, v)
-                    self.end_headers()
-                    self.wfile.write(body)
+                    self._send_static(render_admin_ui(), "text/html; charset=utf-8")
+                    return
+                if route == "/admin/app.js":
+                    self._send_static(render_admin_js(), "text/javascript; charset=utf-8")
+                    return
+                if route == "/admin/app.css":
+                    self._send_static(render_admin_css(), "text/css; charset=utf-8")
                     return
                 if route in {"/health", "/livez", "/readyz", "/startupz"}:
                     report = health_report(
@@ -102,7 +102,10 @@ class AuthenticatedAPI:
                     self._send(HTTPStatus.OK, {"policies": api.service.policies.to_dict()})
                     return
                 if route == "/admin/proposals":
-                    self._send(HTTPStatus.OK, {"proposals": []})
+                    self._send(HTTPStatus.OK, api.list_proposals())
+                    return
+                if route == "/admin/trust":
+                    self._send(HTTPStatus.OK, api.trust_snapshot())
                     return
                 if route == "/admin/metrics":
                     self._send(HTTPStatus.OK, api.service.audit_report()["audit_summary"])
@@ -119,6 +122,15 @@ class AuthenticatedAPI:
                     return
                 if not api._authenticated(self):
                     self._send(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
+                    return
+                if route.startswith("/admin") and not api._operator_authorized(self):
+                    self._send(
+                        HTTPStatus.FORBIDDEN,
+                        {"error": "operator authorization required"},
+                    )
+                    return
+                if route.startswith("/admin/proposals"):
+                    self._handle_admin_proposals_post(route)
                     return
                 try:
                     payload = api._read_json(self)
@@ -149,6 +161,42 @@ class AuthenticatedAPI:
                 except (AuthorizationError, KeyError, TypeError, ValueError):
                     self._send(HTTPStatus.BAD_REQUEST, {"error": "invalid request"})
 
+            def _handle_admin_proposals_post(self, route: str) -> None:
+                """Dispatch /admin/proposals[...] POST routes.
+
+                Errors are reported with their message text: these routes are
+                already gated by operator authorization, so exposing precise
+                validation failures (e.g. "approval quorum not met") helps the
+                admin UI without leaking anything to unauthenticated callers.
+                """
+                remainder = route[len("/admin/proposals") :].strip("/")
+                parts = [part for part in remainder.split("/") if part]
+                try:
+                    if route == "/admin/proposals/prepare":
+                        payload = api._read_json(self)
+                        self._send(HTTPStatus.OK, api.prepare_proposal(payload))
+                    elif route == "/admin/proposals":
+                        payload = api._read_json(self)
+                        self._send(HTTPStatus.CREATED, api.submit_proposal(payload))
+                    elif len(parts) == 2 and parts[1] == "prepare-approval":
+                        payload = api._read_json(self)
+                        self._send(
+                            HTTPStatus.OK,
+                            api.prepare_approval(parts[0], payload["approver_key_id"]),
+                        )
+                    elif len(parts) == 2 and parts[1] == "approve":
+                        payload = api._read_json(self)
+                        self._send(HTTPStatus.OK, api.submit_approval(parts[0], payload))
+                    elif len(parts) == 2 and parts[1] == "activate":
+                        self._send(HTTPStatus.OK, api.activate_proposal(parts[0]))
+                    else:
+                        self._send(HTTPStatus.NOT_FOUND, {"error": "not found"})
+                except KeyError as exc:
+                    message = str(exc).strip("'\"") or "not found"
+                    self._send(HTTPStatus.NOT_FOUND, {"error": message})
+                except (TypeError, ValueError) as exc:
+                    self._send(HTTPStatus.BAD_REQUEST, {"error": str(exc) or "invalid request"})
+
             def log_message(self, *_: Any) -> None:
                 return
 
@@ -162,6 +210,28 @@ class AuthenticatedAPI:
                     self.send_header(k, v)
                 self.end_headers()
                 self.wfile.write(encoded)
+
+            def _send_static(self, body: bytes, content_type: str) -> None:
+                """Serve a same-origin admin UI asset with a relaxed, still-strict CSP.
+
+                The default ``default-src 'none'`` policy used for JSON
+                responses would also block the admin page's own external
+                script/style tags and its authenticated ``fetch`` calls, so
+                these assets get a scoped policy that only allows same-origin
+                loads instead of disabling CSP altogether.
+                """
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(body)))
+                for k, v in security_headers().items():
+                    if k == "Content-Security-Policy":
+                        v = (
+                            "default-src 'none'; script-src 'self'; style-src 'self'; "
+                            "connect-src 'self'; base-uri 'none'"
+                        )
+                    self.send_header(k, v)
+                self.end_headers()
+                self.wfile.write(body)
 
         return Handler
 
@@ -224,6 +294,64 @@ class AuthenticatedAPI:
         if not isinstance(payload, dict):
             raise ValueError("request JSON must be an object")
         return payload
+
+    def _require_policy_change_manager(self):
+        manager = self.service.policy_change_manager
+        if manager is None:
+            raise ValueError("policy change workflow is unavailable without a trust store")
+        return manager
+
+    def prepare_proposal(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Return the exact bytes a proposer must sign; see PolicyChangeManager.prepare_proposal."""
+        manager = self._require_policy_change_manager()
+        return manager.prepare_proposal(
+            new_policy=policy_from_dict(payload["policy"]),
+            proposer_key_id=payload["proposer_key_id"],
+            rationale=payload.get("rationale", ""),
+            proposal_id=payload.get("proposal_id"),
+        )
+
+    def submit_proposal(self, payload: dict[str, Any]) -> dict[str, Any]:
+        manager = self._require_policy_change_manager()
+        proposal = manager.propose_signed(
+            new_policy=policy_from_dict(payload["policy"]),
+            proposer_key_id=payload["proposer_key_id"],
+            signature=payload["signature"],
+            rationale=payload.get("rationale", ""),
+            proposal_id=payload.get("proposal_id"),
+        )
+        return proposal.to_summary_dict()
+
+    def prepare_approval(self, proposal_id: str, approver_key_id: str) -> dict[str, Any]:
+        manager = self._require_policy_change_manager()
+        return manager.prepare_approval(proposal_id, approver_key_id=approver_key_id)
+
+    def submit_approval(self, proposal_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        manager = self._require_policy_change_manager()
+        proposal = manager.approve_signed(
+            proposal_id,
+            approver_key_id=payload["approver_key_id"],
+            signature=payload["signature"],
+        )
+        return proposal.to_summary_dict()
+
+    def activate_proposal(self, proposal_id: str) -> dict[str, Any]:
+        manager = self._require_policy_change_manager()
+        policy = manager.activate(proposal_id)
+        return {"policy_id": policy.policy_id, "policy_digest": policy.digest()}
+
+    def list_proposals(self) -> dict[str, Any]:
+        manager = self.service.policy_change_manager
+        if manager is None:
+            return {"proposals": [], "required_approvals": None}
+        return {
+            "proposals": [proposal.to_summary_dict() for proposal in manager.proposals()],
+            "required_approvals": manager.required_approvals,
+        }
+
+    def trust_snapshot(self) -> dict[str, Any]:
+        trust_store = self.service.boundary.trust_store
+        return trust_store.to_dict() if trust_store is not None else {"keys": {}, "revoked": []}
 
 
 def _env_flag(name: str) -> bool:
@@ -415,5 +543,80 @@ API_SCHEMA = {
         "/startupz": {"get": {"responses": {"200": {"description": "Startup report"}}}},
         "/audit": {"get": {"responses": {"200": {"description": "Audit summary"}}}},
         "/openapi.json": {"get": {"responses": {"200": {"description": "OpenAPI document"}}}},
+        "/admin": {
+            "get": {
+                "security": [{"bearerAuth": []}],
+                "responses": {"200": {"description": "Governance admin dashboard (HTML)"}},
+            }
+        },
+        "/admin/app.js": {
+            "get": {
+                "security": [{"bearerAuth": []}],
+                "responses": {"200": {"description": "Admin dashboard client-side script"}},
+            }
+        },
+        "/admin/app.css": {
+            "get": {
+                "security": [{"bearerAuth": []}],
+                "responses": {"200": {"description": "Admin dashboard stylesheet"}},
+            }
+        },
+        "/admin/policies": {
+            "get": {
+                "security": [{"bearerAuth": []}],
+                "responses": {"200": {"description": "Registered policies"}},
+            }
+        },
+        "/admin/metrics": {
+            "get": {
+                "security": [{"bearerAuth": []}],
+                "responses": {"200": {"description": "Runtime metrics"}},
+            }
+        },
+        "/admin/trust": {
+            "get": {
+                "security": [{"bearerAuth": []}],
+                "responses": {"200": {"description": "Trusted signing keys snapshot"}},
+            }
+        },
+        "/admin/proposals": {
+            "get": {
+                "security": [{"bearerAuth": []}],
+                "responses": {"200": {"description": "Policy change proposals"}},
+            },
+            "post": {
+                "security": [{"bearerAuth": []}],
+                "description": "Submit a proposal signed externally with the payload from /admin/proposals/prepare.",
+                "responses": {"201": {"description": "Created proposal summary"}},
+            },
+        },
+        "/admin/proposals/prepare": {
+            "post": {
+                "security": [{"bearerAuth": []}],
+                "description": "Return the exact bytes a proposer must sign.",
+                "responses": {"200": {"description": "Unsigned proposal payload"}},
+            }
+        },
+        "/admin/proposals/{proposal_id}/prepare-approval": {
+            "post": {
+                "security": [{"bearerAuth": []}],
+                "description": "Return the exact bytes an approver must sign.",
+                "responses": {"200": {"description": "Unsigned approval payload"}},
+            }
+        },
+        "/admin/proposals/{proposal_id}/approve": {
+            "post": {
+                "security": [{"bearerAuth": []}],
+                "description": "Submit an approval signed externally with the payload from prepare-approval.",
+                "responses": {"200": {"description": "Updated proposal summary"}},
+            }
+        },
+        "/admin/proposals/{proposal_id}/activate": {
+            "post": {
+                "security": [{"bearerAuth": []}],
+                "description": "Activate a proposal that has met its approval quorum.",
+                "responses": {"200": {"description": "Activated policy summary"}},
+            }
+        },
     },
 }

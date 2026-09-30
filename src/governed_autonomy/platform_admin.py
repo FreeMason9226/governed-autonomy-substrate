@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from typing import Any
 
 from .canonical import canonical_json
 from .crypto import KeyPair, verify_signature
@@ -129,6 +130,24 @@ class PolicyChangeProposal:
     def approval_count(self) -> int:
         return len({approval.approver_key_id for approval in self.approvals})
 
+    def to_summary_dict(self) -> dict[str, Any]:
+        """JSON-safe summary suitable for HTTP responses (no private key material)."""
+        return {
+            "proposal_id": self.proposal_id,
+            "policy_id": self.policy_id,
+            "current_policy_digest": self.current_policy_digest,
+            "proposed_policy": self.proposed_policy.to_dict(),
+            "proposed_policy_digest": self.proposed_policy.digest(),
+            "proposed_by_key_id": self.proposed_by_key_id,
+            "rationale": self.rationale,
+            "status": self.status,
+            "approval_count": self.approval_count(),
+            "approvals": [
+                {"approver_key_id": approval.approver_key_id}
+                for approval in sorted(self.approvals, key=lambda item: item.approver_key_id)
+            ],
+        }
+
 
 class PolicyChangeManager:
     """Review and activate policy changes with explicit quorum approval."""
@@ -151,6 +170,16 @@ class PolicyChangeManager:
         self.audit_hook = audit_hook
         self._proposals: dict[str, PolicyChangeProposal] = {}
 
+    def _proposal_id_and_digest(
+        self, new_policy: Policy, proposal_id: str | None
+    ) -> tuple[str, str]:
+        existing = self.registry.get(new_policy.policy_id)
+        current_digest = existing.digest() if existing is not None else ""
+        resolved_id = proposal_id or (
+            f"policy-proposal:{new_policy.policy_id}:{current_digest or 'new'}"
+        )
+        return resolved_id, current_digest
+
     def propose(
         self,
         *,
@@ -162,13 +191,9 @@ class PolicyChangeManager:
         key = self.trust_store.resolve(proposer.key_id)
         if key is None:
             raise ValueError("proposer key is not trusted")
-        existing = self.registry.get(new_policy.policy_id)
-        current_digest = existing.digest() if existing is not None else ""
-        proposal_id = (
-            proposal_id or f"policy-proposal:{new_policy.policy_id}:{current_digest or 'new'}"
-        )
+        resolved_id, current_digest = self._proposal_id_and_digest(new_policy, proposal_id)
         proposal = PolicyChangeProposal.propose(
-            proposal_id=proposal_id,
+            proposal_id=resolved_id,
             policy=new_policy,
             proposer=proposer,
             rationale=rationale,
@@ -176,10 +201,82 @@ class PolicyChangeManager:
         )
         if not proposal.verify(self.trust_store):
             raise ValueError("proposal signature is invalid")
+        self._register_new_proposal(proposal)
+        return proposal
+
+    def prepare_proposal(
+        self,
+        *,
+        new_policy: Policy,
+        proposer_key_id: str,
+        rationale: str = "",
+        proposal_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Return the exact bytes an external signer must sign to submit this proposal.
+
+        Used by clients (e.g. the admin browser UI) that hold a private key
+        outside the server process: they fetch this payload, sign it locally,
+        and submit the signature to :meth:`propose_signed` without ever having
+        to reimplement the server's canonicalization logic. ``proposer_key_id``
+        must match the key used to sign, since it is part of the signed
+        payload (see :meth:`PolicyChangeProposal.unsigned_payload`).
+        """
+        resolved_id, current_digest = self._proposal_id_and_digest(new_policy, proposal_id)
+        draft = PolicyChangeProposal(
+            proposal_id=resolved_id,
+            policy_id=new_policy.policy_id,
+            current_policy_digest=current_digest,
+            proposed_policy=new_policy,
+            proposed_by_key_id=proposer_key_id,
+            rationale=rationale,
+            status="pending",
+        )
+        return {
+            "proposal_id": resolved_id,
+            "current_policy_digest": current_digest,
+            "unsigned_payload": draft.unsigned_payload().decode("utf-8"),
+        }
+
+    def propose_signed(
+        self,
+        *,
+        new_policy: Policy,
+        proposer_key_id: str,
+        signature: str,
+        rationale: str = "",
+        proposal_id: str | None = None,
+    ) -> PolicyChangeProposal:
+        """Register a proposal whose signature was produced outside this process.
+
+        The signature must cover the exact payload returned by
+        :meth:`prepare_proposal` for the same ``new_policy``/``rationale``/
+        ``proposal_id`` (a mismatch of any field changes the signed bytes and
+        fails verification, closing the loop safely).
+        """
+        if self.trust_store.resolve(proposer_key_id) is None:
+            raise ValueError("proposer key is not trusted")
+        resolved_id, current_digest = self._proposal_id_and_digest(new_policy, proposal_id)
+        proposal = PolicyChangeProposal(
+            proposal_id=resolved_id,
+            policy_id=new_policy.policy_id,
+            current_policy_digest=current_digest,
+            proposed_policy=new_policy,
+            proposed_by_key_id=proposer_key_id,
+            rationale=rationale,
+            status="pending",
+            signature=signature,
+        )
+        if not proposal.verify(self.trust_store):
+            raise ValueError("proposal signature is invalid")
+        self._register_new_proposal(proposal)
+        return proposal
+
+    def _register_new_proposal(self, proposal: PolicyChangeProposal) -> None:
+        if proposal.proposal_id in self._proposals:
+            raise ValueError(f"proposal already exists: {proposal.proposal_id}")
         self._proposals[proposal.proposal_id] = proposal
         if self.audit_hook is not None:
             self.audit_hook("policy.proposed", proposal.proposal_id)
-        return proposal
 
     def approve(
         self,
@@ -202,6 +299,76 @@ class PolicyChangeManager:
             policy_id=proposal.policy_id,
             policy_digest=proposal.proposed_policy.digest(),
             approver=approver,
+        )
+        if not approval.verify(self.trust_store):
+            raise ValueError("approval signature is invalid")
+        approvals = tuple(
+            sorted(
+                [*proposal.approvals, approval],
+                key=lambda item: item.approver_key_id,
+            )
+        )
+        updated = replace(proposal, approvals=approvals)
+        self._proposals[proposal_id] = updated
+        if self.audit_hook is not None:
+            self.audit_hook("policy.approved", proposal_id)
+        return updated
+
+    def prepare_approval(self, proposal_id: str, *, approver_key_id: str) -> dict[str, Any]:
+        """Return the exact bytes an external approver must sign for this proposal.
+
+        Mirrors :meth:`prepare_proposal` for the approval step, so a browser
+        client never needs to reconstruct the server's canonical JSON.
+        ``approver_key_id`` must match the key used to sign, since it is part
+        of the signed payload (see :meth:`PolicyApproval.unsigned_payload`).
+        """
+        proposal = self._proposals.get(proposal_id)
+        if proposal is None:
+            raise KeyError(f"unknown policy proposal: {proposal_id}")
+        if proposal.status != "pending":
+            raise ValueError("proposal is no longer pending")
+        policy_digest = proposal.proposed_policy.digest()
+        draft = PolicyApproval(
+            proposal_id=proposal.proposal_id,
+            policy_id=proposal.policy_id,
+            policy_digest=policy_digest,
+            approver_key_id=approver_key_id,
+            signature="",
+        )
+        return {
+            "policy_digest": policy_digest,
+            "unsigned_payload": draft.unsigned_payload().decode("utf-8"),
+        }
+
+    def approve_signed(
+        self,
+        proposal_id: str,
+        *,
+        approver_key_id: str,
+        signature: str,
+    ) -> PolicyChangeProposal:
+        """Record an approval whose signature was produced outside this process.
+
+        The signature must cover the exact payload returned by
+        :meth:`prepare_approval` for this proposal.
+        """
+        proposal = self._proposals.get(proposal_id)
+        if proposal is None:
+            raise KeyError(f"unknown policy proposal: {proposal_id}")
+        if proposal.status != "pending":
+            raise ValueError("proposal is no longer pending")
+        if self.enforce_separation_of_duties and approver_key_id == proposal.proposed_by_key_id:
+            raise ValueError("proposer cannot approve the same policy change")
+        if approver_key_id in {approval.approver_key_id for approval in proposal.approvals}:
+            raise ValueError("this key has already approved the proposal")
+        if self.trust_store.resolve(approver_key_id) is None:
+            raise ValueError("approver key is not trusted")
+        approval = PolicyApproval(
+            proposal_id=proposal.proposal_id,
+            policy_id=proposal.policy_id,
+            policy_digest=proposal.proposed_policy.digest(),
+            approver_key_id=approver_key_id,
+            signature=signature,
         )
         if not approval.verify(self.trust_store):
             raise ValueError("approval signature is invalid")
