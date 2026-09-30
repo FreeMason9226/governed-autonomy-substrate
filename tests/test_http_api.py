@@ -396,6 +396,72 @@ def test_http_api_admin_proposal_routes_require_operator_authorization():
         thread.join(timeout=2)
 
 
+def test_http_api_admin_proposal_supports_mesh_governance_policy_fields():
+    instance, thread, proposer, reviewer = _admin_server()
+    try:
+        policy = {
+            "policy_id": "mesh-admin-v1",
+            "allowed_actions": ["deploy"],
+            "required_fields": {"deploy": ["target"]},
+            "exact_fields": {"deploy": {}},
+            "required_context": [],
+            "exact_context": {},
+            "max_request_bytes": 1024,
+            "max_ttl_seconds": 60,
+            "required_mesh_inputs": {"deploy": 2},
+            "required_mesh_sources": {"deploy": ["sensor-a", "sensor-b"]},
+            "mesh_required_actions": ["deploy"],
+            "mesh_required_environments": ["prod"],
+        }
+        status, prepared = _admin_request(
+            instance,
+            "POST",
+            "/admin/proposals/prepare",
+            {"policy": policy, "proposer_key_id": proposer.key_id},
+        )
+        assert status == 200
+        signature = proposer.sign(prepared["unsigned_payload"].encode("utf-8"))
+        status, proposal = _admin_request(
+            instance,
+            "POST",
+            "/admin/proposals",
+            {
+                "policy": policy,
+                "proposal_id": prepared["proposal_id"],
+                "proposer_key_id": proposer.key_id,
+                "signature": signature,
+            },
+        )
+        assert status == 201
+        assert proposal["status"] == "pending"
+
+        status, prepared_approval = _admin_request(
+            instance,
+            "POST",
+            f"/admin/proposals/{prepared['proposal_id']}/prepare-approval",
+            {"approver_key_id": reviewer.key_id},
+        )
+        assert status == 200
+        approval_signature = reviewer.sign(prepared_approval["unsigned_payload"].encode("utf-8"))
+        status, _approved = _admin_request(
+            instance,
+            "POST",
+            f"/admin/proposals/{prepared['proposal_id']}/approve",
+            {"approver_key_id": reviewer.key_id, "signature": approval_signature},
+        )
+        assert status == 200
+
+        activated = _admin_request(
+            instance, "POST", f"/admin/proposals/{prepared['proposal_id']}/activate"
+        )
+        assert activated[0] == 200
+        assert activated[1]["policy_id"] == "mesh-admin-v1"
+    finally:
+        instance.shutdown()
+        instance.server_close()
+        thread.join(timeout=2)
+
+
 def test_http_api_admin_activate_unknown_proposal_returns_404():
     instance, thread, _proposer, _reviewer = _admin_server()
     try:

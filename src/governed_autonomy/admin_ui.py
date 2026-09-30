@@ -70,9 +70,15 @@ Signing happens entirely in this browser tab using the Web Crypto API: your
 private key is pasted below only to compute an Ed25519 signature locally and
 is never sent to the server or stored anywhere.
 </p>
+<p class="hint">
+Policy JSON supports the full <code>Policy.to_dict()</code> schema, including
+mesh-governance fields (<code>required_mesh_inputs</code>,
+<code>required_mesh_sources</code>, <code>mesh_required_actions</code>,
+<code>mesh_required_environments</code>).
+</p>
 <form id="propose-form">
 <label>Policy JSON (Policy.to_dict schema)
-<textarea id="propose-policy" rows="8" placeholder='{"policy_id": "...", "allowed_actions": [...], ...}'></textarea>
+<textarea id="propose-policy" rows="8" placeholder='{"policy_id": "...", "allowed_actions": [...], "required_mesh_inputs": {"deploy": 2}, ...}'></textarea>
 </label>
 <label>Rationale <input id="propose-rationale" type="text"></label>
 <label>Proposer key ID <input id="propose-key-id" type="text"></label>

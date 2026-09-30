@@ -113,3 +113,23 @@ def test_policy_supports_explicit_approval_thresholds_in_snapshot_roundtrip():
 
     assert restored.required_approvals == {"deploy": 3}
     assert restored.digest() == policy.digest()
+
+
+def test_policy_from_dict_round_trips_mesh_governance_fields():
+    policy = Policy(
+        policy_id="mesh-v1",
+        allowed_actions=("deploy",),
+        required_fields={"deploy": ("target",)},
+        exact_fields={"deploy": {}},
+        required_mesh_inputs={"deploy": 2},
+        required_mesh_sources={"deploy": ("sensor-a", "sensor-b")},
+        mesh_required_actions=("deploy",),
+        mesh_required_environments=("prod", "staging"),
+    )
+    restored = policy_from_dict(policy.to_dict())
+
+    assert restored.required_mesh_inputs == {"deploy": 2}
+    assert restored.required_mesh_sources == {"deploy": ("sensor-a", "sensor-b")}
+    assert restored.mesh_required_actions == ("deploy",)
+    assert restored.mesh_required_environments == ("prod", "staging")
+    assert restored.digest() == policy.digest()

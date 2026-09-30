@@ -452,7 +452,14 @@ def policy_from_dict(value: dict[str, Any]) -> Policy:
         "max_request_bytes",
         "max_ttl_seconds",
     }
-    valid_keys = required | {"required_approvals"}
+    optional = {
+        "required_approvals",
+        "required_mesh_inputs",
+        "required_mesh_sources",
+        "mesh_required_actions",
+        "mesh_required_environments",
+    }
+    valid_keys = required | optional
     if not set(value).issubset(valid_keys):
         raise ValueError("policy manifest has an invalid schema")
     if not set(value).issuperset(required):
@@ -469,6 +476,13 @@ def policy_from_dict(value: dict[str, Any]) -> Policy:
         max_request_bytes=value["max_request_bytes"],
         max_ttl_seconds=value["max_ttl_seconds"],
         required_approvals=value.get("required_approvals", {}),
+        required_mesh_inputs=value.get("required_mesh_inputs", {}),
+        required_mesh_sources={
+            action: tuple(sources)
+            for action, sources in value.get("required_mesh_sources", {}).items()
+        },
+        mesh_required_actions=tuple(value.get("mesh_required_actions", ())),
+        mesh_required_environments=tuple(value.get("mesh_required_environments", ())),
     )
 
 
