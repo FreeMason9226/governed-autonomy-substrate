@@ -1,4 +1,12 @@
-from governed_autonomy import KeyPair, Policy, PolicyChangeManager, PolicyRegistry, TrustStore
+from governed_autonomy import (
+    KeyPair,
+    Policy,
+    PolicyChangeManager,
+    PolicyRegistry,
+    TrustChangeManager,
+    TrustStore,
+)
+from governed_autonomy.canonical import b64encode
 
 
 def test_policy_change_manager_requires_quorum_before_activation():
@@ -161,5 +169,90 @@ def test_policy_change_manager_approve_signed_rejects_duplicate_and_self_approva
             proposal.proposal_id, approver_key_id=proposer.key_id, signature=self_signature
         )
         raise AssertionError("proposer should not be able to approve their own change")
+    except ValueError:
+        pass
+
+
+def test_trust_change_manager_add_requires_signature_from_trusted_key():
+    trusted = TrustStore()
+    admin = KeyPair.generate("admin")
+    trusted.add(admin.key_id, admin.public_key)
+    manager = TrustChangeManager(trust_store=trusted)
+    new_key = KeyPair.generate("new-reviewer")
+    new_public_key_b64 = b64encode(new_key.public_key_bytes())
+
+    prepared = manager.prepare_add(
+        key_id=new_key.key_id, public_key_b64=new_public_key_b64, requested_by_key_id=admin.key_id
+    )
+    signature = admin.sign(prepared["unsigned_payload"].encode("utf-8"))
+    snapshot = manager.submit_add(
+        key_id=new_key.key_id,
+        public_key_b64=new_public_key_b64,
+        requested_by_key_id=admin.key_id,
+        signature=signature,
+    )
+    assert new_key.key_id in snapshot["keys"]
+    assert trusted.resolve(new_key.key_id) is not None
+
+
+def test_trust_change_manager_add_rejects_untrusted_requester():
+    trusted = TrustStore()
+    admin = KeyPair.generate("admin")
+    trusted.add(admin.key_id, admin.public_key)
+    manager = TrustChangeManager(trust_store=trusted)
+    outsider = KeyPair.generate("outsider")
+    new_key = KeyPair.generate("new-reviewer")
+    new_public_key_b64 = b64encode(new_key.public_key_bytes())
+
+    prepared = manager.prepare_add(
+        key_id=new_key.key_id, public_key_b64=new_public_key_b64, requested_by_key_id=outsider.key_id
+    )
+    signature = outsider.sign(prepared["unsigned_payload"].encode("utf-8"))
+    try:
+        manager.submit_add(
+            key_id=new_key.key_id,
+            public_key_b64=new_public_key_b64,
+            requested_by_key_id=outsider.key_id,
+            signature=signature,
+        )
+        raise AssertionError("untrusted requester should not be able to add a key")
+    except ValueError:
+        pass
+    assert trusted.resolve(new_key.key_id) is None
+
+
+def test_trust_change_manager_revoke_round_trips_and_then_blocks_the_revoked_key():
+    trusted = TrustStore()
+    admin = KeyPair.generate("admin")
+    reviewer = KeyPair.generate("reviewer")
+    trusted.add(admin.key_id, admin.public_key)
+    trusted.add(reviewer.key_id, reviewer.public_key)
+    manager = TrustChangeManager(trust_store=trusted)
+
+    prepared = manager.prepare_revoke(reviewer.key_id, requested_by_key_id=admin.key_id)
+    signature = admin.sign(prepared["unsigned_payload"].encode("utf-8"))
+    snapshot = manager.submit_revoke(
+        reviewer.key_id, requested_by_key_id=admin.key_id, signature=signature
+    )
+    assert reviewer.key_id in snapshot["revoked"]
+    assert trusted.resolve(reviewer.key_id) is None
+
+    # A revoked key can no longer authorize further trust changes.
+    another_key = KeyPair.generate("another")
+    another_public_key_b64 = b64encode(another_key.public_key_bytes())
+    prepared_by_revoked = manager.prepare_add(
+        key_id=another_key.key_id,
+        public_key_b64=another_public_key_b64,
+        requested_by_key_id=reviewer.key_id,
+    )
+    forged_signature = reviewer.sign(prepared_by_revoked["unsigned_payload"].encode("utf-8"))
+    try:
+        manager.submit_add(
+            key_id=another_key.key_id,
+            public_key_b64=another_public_key_b64,
+            requested_by_key_id=reviewer.key_id,
+            signature=forged_signature,
+        )
+        raise AssertionError("a revoked key should not be able to authorize new trust changes")
     except ValueError:
         pass

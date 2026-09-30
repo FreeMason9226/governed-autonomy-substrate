@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Any
 
-from .canonical import canonical_json
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+from .canonical import b64decode, canonical_json
 from .crypto import KeyPair, verify_signature
 from .policy import Policy, PolicyRegistry
 from .trust import TrustStore
@@ -406,3 +408,110 @@ class PolicyChangeManager:
 
     def proposals(self) -> tuple[PolicyChangeProposal, ...]:
         return tuple(self._proposals[key] for key in sorted(self._proposals))
+
+
+@dataclass(frozen=True)
+class TrustChangeRequest:
+    """A signed request to add or revoke a trusted issuer key.
+
+    Trust changes take effect immediately once signed by any *currently
+    trusted, non-revoked* key -- unlike policy changes there is no separate
+    approval quorum, since trust is the root of authority the quorum itself
+    depends on. Bootstrapping the very first trusted key remains an
+    out-of-band operation (see ``bootstrap.py``).
+    """
+
+    action: str
+    key_id: str
+    public_key_b64: str
+    requested_by_key_id: str
+    signature: str = ""
+
+    def __post_init__(self) -> None:
+        if self.action not in {"add", "revoke"}:
+            raise ValueError("action must be 'add' or 'revoke'")
+
+    def unsigned_payload(self) -> bytes:
+        return canonical_json(
+            {
+                "action": self.action,
+                "key_id": self.key_id,
+                "public_key_b64": self.public_key_b64,
+                "requested_by_key_id": self.requested_by_key_id,
+            }
+        )
+
+    def verify(self, trust_store: TrustStore) -> bool:
+        key = trust_store.resolve(self.requested_by_key_id)
+        return key is not None and verify_signature(
+            key,
+            self.unsigned_payload(),
+            self.signature,
+        )
+
+
+class TrustChangeManager:
+    """Add and revoke trusted issuer keys via signatures from existing trusted keys."""
+
+    def __init__(self, *, trust_store: TrustStore, audit_hook=None) -> None:
+        self.trust_store = trust_store
+        self.audit_hook = audit_hook
+
+    def prepare_add(self, *, key_id: str, public_key_b64: str, requested_by_key_id: str) -> dict[str, Any]:
+        draft = TrustChangeRequest(
+            action="add",
+            key_id=key_id,
+            public_key_b64=public_key_b64,
+            requested_by_key_id=requested_by_key_id,
+        )
+        return {"unsigned_payload": draft.unsigned_payload().decode("utf-8")}
+
+    def submit_add(
+        self,
+        *,
+        key_id: str,
+        public_key_b64: str,
+        requested_by_key_id: str,
+        signature: str,
+    ) -> dict[str, Any]:
+        request = TrustChangeRequest(
+            action="add",
+            key_id=key_id,
+            public_key_b64=public_key_b64,
+            requested_by_key_id=requested_by_key_id,
+            signature=signature,
+        )
+        if not request.verify(self.trust_store):
+            raise ValueError("trust change signature is invalid")
+        try:
+            public_key = Ed25519PublicKey.from_public_bytes(b64decode(public_key_b64))
+        except (ValueError, TypeError) as exc:
+            raise ValueError("public_key_b64 is not a valid Ed25519 public key") from exc
+        self.trust_store.add(key_id, public_key)
+        if self.audit_hook is not None:
+            self.audit_hook("trust.key_added", key_id)
+        return self.trust_store.to_dict()
+
+    def prepare_revoke(self, key_id: str, *, requested_by_key_id: str) -> dict[str, Any]:
+        draft = TrustChangeRequest(
+            action="revoke",
+            key_id=key_id,
+            public_key_b64="",
+            requested_by_key_id=requested_by_key_id,
+        )
+        return {"unsigned_payload": draft.unsigned_payload().decode("utf-8")}
+
+    def submit_revoke(self, key_id: str, *, requested_by_key_id: str, signature: str) -> dict[str, Any]:
+        request = TrustChangeRequest(
+            action="revoke",
+            key_id=key_id,
+            public_key_b64="",
+            requested_by_key_id=requested_by_key_id,
+            signature=signature,
+        )
+        if not request.verify(self.trust_store):
+            raise ValueError("trust change signature is invalid")
+        self.trust_store.revoke(key_id)
+        if self.audit_hook is not None:
+            self.audit_hook("trust.key_revoked", key_id)
+        return self.trust_store.to_dict()

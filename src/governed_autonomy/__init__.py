@@ -61,7 +61,13 @@ from .platform import (
     ServicePrincipal,
     ServicePrincipalRegistry,
 )
-from .platform_admin import PolicyApproval, PolicyChangeManager, PolicyChangeProposal
+from .platform_admin import (
+    PolicyApproval,
+    PolicyChangeManager,
+    PolicyChangeProposal,
+    TrustChangeManager,
+    TrustChangeRequest,
+)
 from .policy import (
     DeterministicArbiter,
     Policy,
@@ -111,6 +117,8 @@ __all__ = [
     "PolicyApproval",
     "PolicyChangeManager",
     "PolicyChangeProposal",
+    "TrustChangeManager",
+    "TrustChangeRequest",
 
     # Security, Identity & Trust
     "TrustStore",

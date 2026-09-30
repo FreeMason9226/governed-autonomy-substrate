@@ -7,7 +7,7 @@ from .health import health_report
 from .issuer import AuthorizationIssuer
 from .mesh import GovernanceInput, GovernanceSourceRegistry
 from .models import GovernanceAuthorizationArtifact, SignedApproval
-from .platform_admin import PolicyChangeManager
+from .platform_admin import PolicyChangeManager, TrustChangeManager
 from .policy import Policy, PolicyRegistry
 
 
@@ -23,6 +23,7 @@ class GovernedService:
         actions: dict[str, Callable[[dict[str, Any]], Any]],
         mesh_source_registry: GovernanceSourceRegistry | None = None,
         policy_change_manager: PolicyChangeManager | None = None,
+        trust_change_manager: TrustChangeManager | None = None,
     ) -> None:
         self.issuer = issuer
         self.boundary = boundary
@@ -41,6 +42,12 @@ class GovernedService:
             )
         else:
             self.policy_change_manager = None
+        if trust_change_manager is not None:
+            self.trust_change_manager = trust_change_manager
+        elif self.boundary.trust_store is not None:
+            self.trust_change_manager = TrustChangeManager(trust_store=self.boundary.trust_store)
+        else:
+            self.trust_change_manager = None
 
     def authorize(
         self,

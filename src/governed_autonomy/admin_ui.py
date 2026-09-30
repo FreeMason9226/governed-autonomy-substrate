@@ -38,6 +38,7 @@ enter here is persisted: it is held only in this page's memory and is lost on re
 <button data-tab="health" class="tab-button active">Health</button>
 <button data-tab="policies" class="tab-button">Policies</button>
 <button data-tab="proposals" class="tab-button">Policy Proposals</button>
+<button data-tab="trust" class="tab-button">Trusted Keys</button>
 <button data-tab="audit" class="tab-button">Audit</button>
 <button data-tab="metrics" class="tab-button">Metrics</button>
 </nav>
@@ -101,6 +102,39 @@ mesh-governance fields (<code>required_mesh_inputs</code>,
 <h2>Audit report</h2>
 <button class="refresh" data-refresh="audit">Refresh</button>
 <pre id="audit-output" class="output">Not loaded.</pre>
+</section>
+
+<section id="tab-trust" class="tab-panel">
+<h2>Trusted issuer keys</h2>
+<button class="refresh" data-refresh="trust">Refresh</button>
+<table id="trust-table"><thead><tr>
+<th>Key ID</th><th>Public key (base64url)</th><th>Status</th><th>Actions</th>
+</tr></thead><tbody></tbody></table>
+
+<h3>Add a trusted key</h3>
+<p class="hint">
+Trust changes take effect immediately once signed: they are not subject to the
+policy-proposal approval quorum, since trust is the root of authority the
+quorum itself depends on. Only a currently trusted, non-revoked key can
+authorize adding or revoking another key.
+</p>
+<form id="trust-add-form">
+<label>New key ID <input id="trust-add-key-id" type="text"></label>
+<label>New public key (base64url, raw 32 bytes) <input id="trust-add-public-key" type="text"></label>
+<label>Requesting (already trusted) key ID <input id="trust-add-requester-key-id" type="text"></label>
+<label>Requesting private key (base64url, raw 32 bytes) <input id="trust-add-private-key" type="password" autocomplete="off"></label>
+<button type="submit">Sign and add key</button>
+</form>
+<pre id="trust-add-output" class="output"></pre>
+
+<h3>Revoke a trusted key</h3>
+<form id="trust-revoke-form">
+<label>Key ID to revoke <input id="trust-revoke-key-id" type="text"></label>
+<label>Requesting (already trusted) key ID <input id="trust-revoke-requester-key-id" type="text"></label>
+<label>Requesting private key (base64url, raw 32 bytes) <input id="trust-revoke-private-key" type="password" autocomplete="off"></label>
+<button type="submit">Sign and revoke key</button>
+</form>
+<pre id="trust-revoke-output" class="output"></pre>
 </section>
 
 <section id="tab-metrics" class="tab-panel">
@@ -432,10 +466,105 @@ def render_admin_js() -> bytes:
     });
   }
 
+  async function loadTrust() {
+    const tbody = document.querySelector("#trust-table tbody");
+    tbody.innerHTML = "";
+    try {
+      const data = await api("/admin/trust");
+      const revoked = new Set(data.revoked || []);
+      for (const [keyId, publicKey] of Object.entries(data.keys || {})) {
+        const tr = document.createElement("tr");
+        const isRevoked = revoked.has(keyId);
+        tr.innerHTML =
+          "<td>" + escapeHtml(keyId) + "</td>" +
+          "<td>" + escapeHtml(publicKey) + "</td>" +
+          "<td>" + (isRevoked ? "revoked" : "trusted") + "</td>" +
+          "<td>" + (isRevoked
+            ? ""
+            : '<button data-prefill-revoke="' + escapeHtml(keyId) + '">Revoke\u2026</button>') +
+          "</td>";
+        tbody.appendChild(tr);
+      }
+      tbody.querySelectorAll("[data-prefill-revoke]").forEach((button) => {
+        button.addEventListener("click", () => {
+          document.getElementById("trust-revoke-key-id").value = button.dataset.prefillRevoke;
+        });
+      });
+    } catch (err) {
+      tbody.innerHTML = "<tr><td colspan=4>Error: " + escapeHtml(err.message) + "</td></tr>";
+    }
+  }
+
+  function wireTrustAddForm() {
+    document.getElementById("trust-add-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const output = document.getElementById("trust-add-output");
+      output.textContent = "Signing...";
+      try {
+        const keyId = document.getElementById("trust-add-key-id").value;
+        const publicKeyB64 = document.getElementById("trust-add-public-key").value;
+        const requesterKeyId = document.getElementById("trust-add-requester-key-id").value;
+        const privateKey = document.getElementById("trust-add-private-key").value;
+        const prepared = await api("/admin/trust/keys/prepare", {
+          method: "POST",
+          body: JSON.stringify({
+            key_id: keyId,
+            public_key_b64: publicKeyB64,
+            requested_by_key_id: requesterKeyId,
+          }),
+        });
+        const signature = await signEd25519(privateKey, prepared.unsigned_payload);
+        const result = await api("/admin/trust/keys", {
+          method: "POST",
+          body: JSON.stringify({
+            key_id: keyId,
+            public_key_b64: publicKeyB64,
+            requested_by_key_id: requesterKeyId,
+            signature,
+          }),
+        });
+        output.textContent = "Added:\n" + JSON.stringify(result, null, 2);
+        document.getElementById("trust-add-private-key").value = "";
+        await loadTrust();
+      } catch (err) {
+        output.textContent = "Error: " + err.message;
+      }
+    });
+  }
+
+  function wireTrustRevokeForm() {
+    document.getElementById("trust-revoke-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const output = document.getElementById("trust-revoke-output");
+      output.textContent = "Signing...";
+      try {
+        const keyId = document.getElementById("trust-revoke-key-id").value;
+        const requesterKeyId = document.getElementById("trust-revoke-requester-key-id").value;
+        const privateKey = document.getElementById("trust-revoke-private-key").value;
+        const encodedId = encodeURIComponent(keyId);
+        const prepared = await api("/admin/trust/keys/" + encodedId + "/revoke/prepare", {
+          method: "POST",
+          body: JSON.stringify({ requested_by_key_id: requesterKeyId }),
+        });
+        const signature = await signEd25519(privateKey, prepared.unsigned_payload);
+        const result = await api("/admin/trust/keys/" + encodedId + "/revoke", {
+          method: "POST",
+          body: JSON.stringify({ requested_by_key_id: requesterKeyId, signature }),
+        });
+        output.textContent = "Revoked:\n" + JSON.stringify(result, null, 2);
+        document.getElementById("trust-revoke-private-key").value = "";
+        await loadTrust();
+      } catch (err) {
+        output.textContent = "Error: " + err.message;
+      }
+    });
+  }
+
   const loaders = {
     health: loadHealth,
     policies: loadPolicies,
     proposals: loadProposals,
+    trust: loadTrust,
     audit: loadAudit,
     metrics: loadMetrics,
   };
@@ -467,6 +596,8 @@ def render_admin_js() -> bytes:
     });
     wireProposeForm();
     wireApproveForm();
+    wireTrustAddForm();
+    wireTrustRevokeForm();
   });
 })();
 """

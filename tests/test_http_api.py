@@ -472,3 +472,131 @@ def test_http_api_admin_activate_unknown_proposal_returns_404():
         instance.shutdown()
         instance.server_close()
         thread.join(timeout=2)
+
+
+def test_http_api_admin_trust_add_and_revoke_key_round_trip():
+    instance, thread, proposer, _reviewer = _admin_server()
+    try:
+        new_key = KeyPair.generate("new-trusted-key")
+        from governed_autonomy.canonical import b64encode
+
+        new_public_key_b64 = b64encode(new_key.public_key_bytes())
+
+        status, prepared = _admin_request(
+            instance,
+            "POST",
+            "/admin/trust/keys/prepare",
+            {
+                "key_id": new_key.key_id,
+                "public_key_b64": new_public_key_b64,
+                "requested_by_key_id": proposer.key_id,
+            },
+        )
+        assert status == 200
+        signature = proposer.sign(prepared["unsigned_payload"].encode("utf-8"))
+
+        status, snapshot = _admin_request(
+            instance,
+            "POST",
+            "/admin/trust/keys",
+            {
+                "key_id": new_key.key_id,
+                "public_key_b64": new_public_key_b64,
+                "requested_by_key_id": proposer.key_id,
+                "signature": signature,
+            },
+        )
+        assert status == 201
+        assert new_key.key_id in snapshot["keys"]
+
+        status, listing = _admin_request(instance, "GET", "/admin/trust")
+        assert status == 200
+        assert new_key.key_id in listing["keys"]
+
+        status, prepared_revoke = _admin_request(
+            instance,
+            "POST",
+            f"/admin/trust/keys/{new_key.key_id}/revoke/prepare",
+            {"requested_by_key_id": proposer.key_id},
+        )
+        assert status == 200
+        revoke_signature = proposer.sign(prepared_revoke["unsigned_payload"].encode("utf-8"))
+
+        status, revoked_snapshot = _admin_request(
+            instance,
+            "POST",
+            f"/admin/trust/keys/{new_key.key_id}/revoke",
+            {"requested_by_key_id": proposer.key_id, "signature": revoke_signature},
+        )
+        assert status == 200
+        assert new_key.key_id in revoked_snapshot["revoked"]
+    finally:
+        instance.shutdown()
+        instance.server_close()
+        thread.join(timeout=2)
+
+
+def test_http_api_admin_trust_add_rejects_untrusted_requester():
+    instance, thread, _proposer, _reviewer = _admin_server()
+    try:
+        outsider = KeyPair.generate("outsider")
+        new_key = KeyPair.generate("new-trusted-key-2")
+        from governed_autonomy.canonical import b64encode
+
+        new_public_key_b64 = b64encode(new_key.public_key_bytes())
+
+        status, prepared = _admin_request(
+            instance,
+            "POST",
+            "/admin/trust/keys/prepare",
+            {
+                "key_id": new_key.key_id,
+                "public_key_b64": new_public_key_b64,
+                "requested_by_key_id": outsider.key_id,
+            },
+        )
+        assert status == 200
+        signature = outsider.sign(prepared["unsigned_payload"].encode("utf-8"))
+
+        status, result = _admin_request(
+            instance,
+            "POST",
+            "/admin/trust/keys",
+            {
+                "key_id": new_key.key_id,
+                "public_key_b64": new_public_key_b64,
+                "requested_by_key_id": outsider.key_id,
+                "signature": signature,
+            },
+        )
+        assert status == 400
+        assert "signature" in result["error"]
+    finally:
+        instance.shutdown()
+        instance.server_close()
+        thread.join(timeout=2)
+
+
+def test_http_api_admin_trust_revoke_unknown_key_returns_404():
+    instance, thread, proposer, _reviewer = _admin_server()
+    try:
+        status, prepared = _admin_request(
+            instance,
+            "POST",
+            "/admin/trust/keys/does-not-exist/revoke/prepare",
+            {"requested_by_key_id": proposer.key_id},
+        )
+        assert status == 200
+        signature = proposer.sign(prepared["unsigned_payload"].encode("utf-8"))
+        status, result = _admin_request(
+            instance,
+            "POST",
+            "/admin/trust/keys/does-not-exist/revoke",
+            {"requested_by_key_id": proposer.key_id, "signature": signature},
+        )
+        assert status == 404
+        assert "does-not-exist" in result["error"]
+    finally:
+        instance.shutdown()
+        instance.server_close()
+        thread.join(timeout=2)

@@ -132,6 +132,9 @@ class AuthenticatedAPI:
                 if route.startswith("/admin/proposals"):
                     self._handle_admin_proposals_post(route)
                     return
+                if route.startswith("/admin/trust/keys"):
+                    self._handle_admin_trust_post(route)
+                    return
                 try:
                     payload = api._read_json(self)
                     if route in {"/authorize", "/api/v1/authorize"}:
@@ -197,7 +200,35 @@ class AuthenticatedAPI:
                 except (TypeError, ValueError) as exc:
                     self._send(HTTPStatus.BAD_REQUEST, {"error": str(exc) or "invalid request"})
 
-            def log_message(self, *_: Any) -> None:
+            def _handle_admin_trust_post(self, route: str) -> None:
+                """Dispatch /admin/trust/keys[...] POST routes.
+
+                Mirrors _handle_admin_proposals_post: errors are reported with
+                their message text since these routes are already gated by
+                operator authorization.
+                """
+                remainder = route[len("/admin/trust/keys") :].strip("/")
+                parts = [part for part in remainder.split("/") if part]
+                try:
+                    if route == "/admin/trust/keys/prepare":
+                        payload = api._read_json(self)
+                        self._send(HTTPStatus.OK, api.prepare_trust_add(payload))
+                    elif route == "/admin/trust/keys":
+                        payload = api._read_json(self)
+                        self._send(HTTPStatus.CREATED, api.submit_trust_add(payload))
+                    elif len(parts) == 3 and parts[1:] == ["revoke", "prepare"]:
+                        payload = api._read_json(self)
+                        self._send(HTTPStatus.OK, api.prepare_trust_revoke(parts[0], payload))
+                    elif len(parts) == 2 and parts[1] == "revoke":
+                        payload = api._read_json(self)
+                        self._send(HTTPStatus.OK, api.submit_trust_revoke(parts[0], payload))
+                    else:
+                        self._send(HTTPStatus.NOT_FOUND, {"error": "not found"})
+                except KeyError as exc:
+                    message = str(exc).strip("'\"") or "not found"
+                    self._send(HTTPStatus.NOT_FOUND, {"error": message})
+                except (TypeError, ValueError) as exc:
+                    self._send(HTTPStatus.BAD_REQUEST, {"error": str(exc) or "invalid request"})
                 return
 
             def _send(self, status: HTTPStatus, payload: dict[str, Any]) -> None:
@@ -348,6 +379,41 @@ class AuthenticatedAPI:
             "proposals": [proposal.to_summary_dict() for proposal in manager.proposals()],
             "required_approvals": manager.required_approvals,
         }
+
+    def _require_trust_change_manager(self):
+        manager = self.service.trust_change_manager
+        if manager is None:
+            raise ValueError("trust key management is unavailable without a trust store")
+        return manager
+
+    def prepare_trust_add(self, payload: dict[str, Any]) -> dict[str, Any]:
+        manager = self._require_trust_change_manager()
+        return manager.prepare_add(
+            key_id=payload["key_id"],
+            public_key_b64=payload["public_key_b64"],
+            requested_by_key_id=payload["requested_by_key_id"],
+        )
+
+    def submit_trust_add(self, payload: dict[str, Any]) -> dict[str, Any]:
+        manager = self._require_trust_change_manager()
+        return manager.submit_add(
+            key_id=payload["key_id"],
+            public_key_b64=payload["public_key_b64"],
+            requested_by_key_id=payload["requested_by_key_id"],
+            signature=payload["signature"],
+        )
+
+    def prepare_trust_revoke(self, key_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        manager = self._require_trust_change_manager()
+        return manager.prepare_revoke(key_id, requested_by_key_id=payload["requested_by_key_id"])
+
+    def submit_trust_revoke(self, key_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        manager = self._require_trust_change_manager()
+        return manager.submit_revoke(
+            key_id,
+            requested_by_key_id=payload["requested_by_key_id"],
+            signature=payload["signature"],
+        )
 
     def trust_snapshot(self) -> dict[str, Any]:
         trust_store = self.service.boundary.trust_store
@@ -616,6 +682,34 @@ API_SCHEMA = {
                 "security": [{"bearerAuth": []}],
                 "description": "Activate a proposal that has met its approval quorum.",
                 "responses": {"200": {"description": "Activated policy summary"}},
+            }
+        },
+        "/admin/trust/keys/prepare": {
+            "post": {
+                "security": [{"bearerAuth": []}],
+                "description": "Return the exact bytes an existing trusted key must sign to add a new trusted key.",
+                "responses": {"200": {"description": "Unsigned trust-add payload"}},
+            }
+        },
+        "/admin/trust/keys": {
+            "post": {
+                "security": [{"bearerAuth": []}],
+                "description": "Add a trusted key, signed externally by an existing trusted key.",
+                "responses": {"201": {"description": "Updated trust store snapshot"}},
+            }
+        },
+        "/admin/trust/keys/{key_id}/revoke/prepare": {
+            "post": {
+                "security": [{"bearerAuth": []}],
+                "description": "Return the exact bytes an existing trusted key must sign to revoke a trusted key.",
+                "responses": {"200": {"description": "Unsigned trust-revoke payload"}},
+            }
+        },
+        "/admin/trust/keys/{key_id}/revoke": {
+            "post": {
+                "security": [{"bearerAuth": []}],
+                "description": "Revoke a trusted key, signed externally by an existing trusted key.",
+                "responses": {"200": {"description": "Updated trust store snapshot"}},
             }
         },
     },
