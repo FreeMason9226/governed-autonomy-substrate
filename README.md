@@ -40,6 +40,30 @@ The included HTTP adapter supports bearer authentication, request correlation, s
 
 For the patent draft mapping, see [PATENT_TO_CODE_MAPPING.md](PATENT_TO_CODE_MAPPING.md).
 
+## Patent draft with NIST integration
+
+This repository also contains a provisional patent draft excerpt for the
+Governed Autonomy Operating System (GAOS), integrated with a mapping to the
+NIST Cybersecurity Framework (CSF) and NIST incident response guidance
+(SP 800-61r2 / 800-53).
+
+Files:
+
+- `patent_with_nist_integration.md` — Patent draft excerpt with NIST mappings
+- `compliance_mapping.csv` — Tabular mapping of GAOS components to NIST controls
+- `ir_playbooks/` — Example IR playbooks aligned to SP 800-61r2
+
+Usage:
+
+- Use the GIR to ingest regulatory sources and generate machine-enforceable
+  governance objects.
+- Use the replay engine and integrity ledger for deterministic replay and
+  forensic validation.
+- Follow the IR playbooks in `ir_playbooks/` for incident handling and
+  evidence preservation.
+
+License: Proprietary (Provisional patent pending). Contact: Mason (repo owner).
+
 ## Run
 
 ```powershell

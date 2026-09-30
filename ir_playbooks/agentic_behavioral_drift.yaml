@@ -1,0 +1,111 @@
+# Incident Response Playbook: Agentic Behavioral Drift
+#
+# Aligned to NIST SP 800-61r2 incident handling phases:
+# detection, analysis, containment, eradication, recovery, post-incident.
+#
+# Trigger: Continuous Authorization Monitoring (CAM) raises the Agency Risk
+# Index (ARI) above a configured threshold for an authorized agent action.
+
+name: agentic_behavioral_drift
+version: "1.0"
+description: >
+  Incident response playbook for an Agency Risk Index (ARI) threshold
+  breach detected by Continuous Authorization Monitoring (CAM). Provides
+  graduated containment, deterministic replay-based analysis, and
+  recovery validation.
+trigger:
+  source: continuous_authorization_monitoring
+  condition: ari_score > ari_threshold
+  severity_levels:
+    - name: low
+      ari_range: [ari_threshold, ari_threshold_medium]
+      containment_action: conditional
+    - name: medium
+      ari_range: [ari_threshold_medium, ari_threshold_high]
+      containment_action: delayed
+    - name: high
+      ari_range: [ari_threshold_high, 1.0]
+      containment_action: quarantine
+
+phases:
+  detect:
+    description: >
+      CAM raises ARI above threshold; create an incident ticket bound to
+      the replay frame that produced the anomalous decision.
+    actions:
+      - create_incident_ticket:
+          fields:
+            - replay_frame_cid
+            - ari_score
+            - agent_id
+            - request_id
+            - timestamp
+
+  analyze:
+    description: >
+      Replay the governance pipeline from the referenced replay frame to
+      compute the divergence metric D and classify incident severity.
+    actions:
+      - replay_frame:
+          input: replay_frame_cid
+          output: divergence_metric_d
+      - classify_severity:
+          input: [ari_score, divergence_metric_d]
+          output: severity_level
+
+  contain:
+    description: >
+      Apply graduated containment corresponding to the classified severity.
+      Issue a GAA revocation when containment requires halting an
+      in-flight or previously authorized action.
+    actions:
+      - apply_graduated_containment:
+          input: severity_level
+          options: [conditional, delayed, human_review, secondary_arbitration, quarantine, deny]
+      - revoke_gaa:
+          condition: severity_level in [high]
+          input: gaa_reference
+
+  eradicate:
+    description: >
+      Apply a model rollback or policy patch through the Governance
+      Intelligence Registry (GIR) and record the action as Distributed
+      Rollback Anchor (DRA) evidence.
+    actions:
+      - apply_policy_patch_or_rollback:
+          via: governance_intelligence_registry
+      - record_dra_evidence:
+          fields:
+            - rollback_target
+            - policy_patch_id
+            - operator
+            - timestamp
+
+  recover:
+    description: >
+      Re-execute the validated replay to confirm restored behavior before
+      closing the incident.
+    actions:
+      - re_execute_validated_replay:
+          input: replay_frame_cid
+          expected_divergence: 0
+      - close_incident:
+          condition: divergence_metric_d == 0
+          attach: recovery_evidence_bundle_reb
+
+  post_incident:
+    description: >
+      Produce a complete incident report referencing replay frames,
+      divergence metrics, GAA logs, and the remediation timeline.
+    actions:
+      - generate_ir_report:
+          include:
+            - replay_frames
+            - divergence_metrics
+            - gaa_logs
+            - remediation_timeline
+
+references:
+  nist:
+    - "NIST SP 800-61r2: Computer Security Incident Handling Guide"
+    - "NIST Cybersecurity Framework (CSF): DE.CM, RS.MI, RS.AN, RC.RP"

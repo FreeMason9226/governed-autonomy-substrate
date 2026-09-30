@@ -1,0 +1,10 @@
+GAOS Component,NIST CSF Category,NIST SP 800-61r2 / 800-53 Controls,Notes
+Governance Authorization Artifact (GAA),"PR.AC, PR.PT","AC-2, AC-3, AU-9, SI-4","Execution boundary enforcement; non-repudiation; audit evidence"
+Governance Intelligence Registry (GIR),"ID.GV, ID.RA","PM-1, CM-2, RA-3","Policy inventory, versioning, risk mapping"
+Agency Risk Index (ARI),"DE.CM, RS.MI","SI-4, IR-4, RA-5","Continuous monitoring, incident scoring"
+Continuous Authorization Monitoring,DE.CM,"SI-4, AU-6","Telemetry capture, anomaly detection"
+Deterministic Arbiter Selection,"PR.IP, DE.AE","AU-9, IA-5, SI-7","Tamper-resistant selection proofs"
+Replay Frame / Replay Buffer,"RS.AN, RC.RP","IR-4, AU-10, CP-9","Forensics, evidence preservation, recovery validation"
+Divergence Metric D,"DE.AE, RS.AN","SI-4, IR-4",Reproducibility verification
+Distributed Rollback Anchor (DRA),"RS.MI, RC.RP","IR-4, CP-2",Coordinated containment and recovery across tenants
+Integrity Ledger (compact anchors),"PR.PT, PR.DS","AU-9, SI-7",Tamper-evident anchoring of evidence
