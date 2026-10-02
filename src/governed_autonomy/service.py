@@ -14,25 +14,26 @@ from .policy import Policy, PolicyRegistry
 from .replay import ReplayLog
 
 
-def _governance_audit_hook(replay_log: ReplayLog) -> Callable[[str, str], None]:
+def _governance_audit_hook(replay_log: ReplayLog) -> Callable[[str, str, str], None]:
     """Record policy/trust governance lifecycle events in the durable replay log.
 
-    Proposals, approvals, activations, and trust changes are otherwise only
-    reflected as *current state* (the live proposal dict, the live trust
-    store) with no historical record of who acted and when. Appending a
+    Proposals, approvals, activations, and trust/operator key changes are
+    otherwise only reflected as *current state* (the live proposal dict, the
+    live trust store) with no historical record of who acted and when. Appending a
     ``"governance"``-typed frame per event gives that history the same
     durability and hash-chain tamper-evidence as authorization/execution
     events, without disturbing :meth:`ReplayLog.reconstruct_decisions` (which
     only inspects ``"authorization"``/``"execution"`` frames).
     """
 
-    def hook(event: str, subject_id: str) -> None:
+    def hook(event: str, subject_id: str, actor_id: str) -> None:
         replay_log.append(
             f"governance:{uuid.uuid4().hex}",
             {
                 "type": "governance",
                 "event": event,
                 "subject_id": subject_id,
+                "actor_id": actor_id,
                 "recorded_at": datetime.datetime.now(datetime.UTC).isoformat(),
             },
         )
@@ -63,22 +64,31 @@ class GovernedService:
             else PolicyRegistry(tuple(policies.values()))
         )
         self.actions = dict(actions)
-        governance_audit_hook = _governance_audit_hook(self.boundary.replay_log)
+        self._governance_audit_hook = governance_audit_hook = _governance_audit_hook(
+            self.boundary.replay_log
+        )
+        self.policy_change_manager: PolicyChangeManager | None
         if policy_change_manager is not None:
             self.policy_change_manager = policy_change_manager
+            if self.policy_change_manager.actor_audit_hook is None:
+                self.policy_change_manager.actor_audit_hook = governance_audit_hook
         elif self.boundary.trust_store is not None:
             self.policy_change_manager = PolicyChangeManager(
                 registry=self.policies,
                 trust_store=self.boundary.trust_store,
-                audit_hook=governance_audit_hook,
+                actor_audit_hook=governance_audit_hook,
             )
         else:
             self.policy_change_manager = None
+        self.trust_change_manager: TrustChangeManager | None
         if trust_change_manager is not None:
             self.trust_change_manager = trust_change_manager
+            if self.trust_change_manager.actor_audit_hook is None:
+                self.trust_change_manager.actor_audit_hook = governance_audit_hook
         elif self.boundary.trust_store is not None:
             self.trust_change_manager = TrustChangeManager(
-                trust_store=self.boundary.trust_store, audit_hook=governance_audit_hook
+                trust_store=self.boundary.trust_store,
+                actor_audit_hook=governance_audit_hook,
             )
         else:
             self.trust_change_manager = None
@@ -107,6 +117,8 @@ class GovernedService:
 
     def execute(self, artifact: GovernanceAuthorizationArtifact) -> Any:
         action_name = artifact.action_request.get("action")
+        if not isinstance(action_name, str):
+            raise AuthorizationError("unknown executable action: None")
         action = self.actions.get(action_name)
         if action is None:
             raise AuthorizationError(f"unknown executable action: {action_name}")
@@ -125,11 +137,15 @@ class GovernedService:
 
         Each entry is a ``"governance"``-typed replay frame event (see
         :func:`_governance_audit_hook`): who proposed, approved, activated a
-        policy change, or added/revoked a trusted key, and when. This is
-        distinct from :meth:`audit_report`, which summarizes authorization
-        and execution decisions, not governance lifecycle events.
+        policy change, or added/revoked a trusted/operator key, and when.
+        This is distinct from :meth:`audit_report`, which summarizes
+        authorization and execution decisions, not governance lifecycle events.
         """
         return self.boundary.replay_log.events("governance")
+
+    def record_governance_event(self, event: str, subject_id: str, *, actor_id: str) -> None:
+        """Append a governance event performed outside the policy/trust managers."""
+        self._governance_audit_hook(event, subject_id, actor_id)
 
     def audit_report(self) -> dict[str, Any]:
         """Return a deterministic summary of service policy, actions, health, and replay state."""

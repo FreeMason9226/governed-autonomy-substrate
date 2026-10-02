@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -161,7 +162,8 @@ class PolicyChangeManager:
         trust_store: TrustStore,
         required_approvals: int = 2,
         enforce_separation_of_duties: bool = True,
-        audit_hook=None,
+        audit_hook: Callable[[str, str], None] | None = None,
+        actor_audit_hook: Callable[[str, str, str], None] | None = None,
     ) -> None:
         if required_approvals <= 0:
             raise ValueError("required_approvals must be positive")
@@ -170,7 +172,14 @@ class PolicyChangeManager:
         self.required_approvals = required_approvals
         self.enforce_separation_of_duties = enforce_separation_of_duties
         self.audit_hook = audit_hook
+        self.actor_audit_hook = actor_audit_hook
         self._proposals: dict[str, PolicyChangeProposal] = {}
+
+    def _audit(self, event: str, subject_id: str, actor_id: str) -> None:
+        if self.audit_hook is not None:
+            self.audit_hook(event, subject_id)
+        if self.actor_audit_hook is not None:
+            self.actor_audit_hook(event, subject_id, actor_id)
 
     def _proposal_id_and_digest(
         self, new_policy: Policy, proposal_id: str | None
@@ -189,6 +198,7 @@ class PolicyChangeManager:
         proposer: KeyPair,
         rationale: str = "",
         proposal_id: str | None = None,
+        actor_id: str = "system",
     ) -> PolicyChangeProposal:
         key = self.trust_store.resolve(proposer.key_id)
         if key is None:
@@ -203,7 +213,7 @@ class PolicyChangeManager:
         )
         if not proposal.verify(self.trust_store):
             raise ValueError("proposal signature is invalid")
-        self._register_new_proposal(proposal)
+        self._register_new_proposal(proposal, actor_id=actor_id)
         return proposal
 
     def prepare_proposal(
@@ -247,6 +257,7 @@ class PolicyChangeManager:
         signature: str,
         rationale: str = "",
         proposal_id: str | None = None,
+        actor_id: str = "system",
     ) -> PolicyChangeProposal:
         """Register a proposal whose signature was produced outside this process.
 
@@ -270,21 +281,21 @@ class PolicyChangeManager:
         )
         if not proposal.verify(self.trust_store):
             raise ValueError("proposal signature is invalid")
-        self._register_new_proposal(proposal)
+        self._register_new_proposal(proposal, actor_id=actor_id)
         return proposal
 
-    def _register_new_proposal(self, proposal: PolicyChangeProposal) -> None:
+    def _register_new_proposal(self, proposal: PolicyChangeProposal, *, actor_id: str) -> None:
         if proposal.proposal_id in self._proposals:
             raise ValueError(f"proposal already exists: {proposal.proposal_id}")
         self._proposals[proposal.proposal_id] = proposal
-        if self.audit_hook is not None:
-            self.audit_hook("policy.proposed", proposal.proposal_id)
+        self._audit("policy.proposed", proposal.proposal_id, actor_id)
 
     def approve(
         self,
         proposal_id: str,
         *,
         approver: KeyPair,
+        actor_id: str = "system",
     ) -> PolicyChangeProposal:
         proposal = self._proposals.get(proposal_id)
         if proposal is None:
@@ -312,8 +323,7 @@ class PolicyChangeManager:
         )
         updated = replace(proposal, approvals=approvals)
         self._proposals[proposal_id] = updated
-        if self.audit_hook is not None:
-            self.audit_hook("policy.approved", proposal_id)
+        self._audit("policy.approved", proposal_id, actor_id)
         return updated
 
     def prepare_approval(self, proposal_id: str, *, approver_key_id: str) -> dict[str, Any]:
@@ -348,6 +358,7 @@ class PolicyChangeManager:
         *,
         approver_key_id: str,
         signature: str,
+        actor_id: str = "system",
     ) -> PolicyChangeProposal:
         """Record an approval whose signature was produced outside this process.
 
@@ -382,11 +393,10 @@ class PolicyChangeManager:
         )
         updated = replace(proposal, approvals=approvals)
         self._proposals[proposal_id] = updated
-        if self.audit_hook is not None:
-            self.audit_hook("policy.approved", proposal_id)
+        self._audit("policy.approved", proposal_id, actor_id)
         return updated
 
-    def activate(self, proposal_id: str) -> Policy:
+    def activate(self, proposal_id: str, *, actor_id: str = "system") -> Policy:
         proposal = self._proposals.get(proposal_id)
         if proposal is None:
             raise KeyError(f"unknown policy proposal: {proposal_id}")
@@ -399,8 +409,7 @@ class PolicyChangeManager:
         self.registry.register(proposal.proposed_policy)
         updated = replace(proposal, status="activated")
         self._proposals[proposal_id] = updated
-        if self.audit_hook is not None:
-            self.audit_hook("policy.activated", proposal_id)
+        self._audit("policy.activated", proposal_id, actor_id)
         return proposal.proposed_policy
 
     def get(self, proposal_id: str) -> PolicyChangeProposal | None:
@@ -453,11 +462,26 @@ class TrustChangeRequest:
 class TrustChangeManager:
     """Add and revoke trusted issuer keys via signatures from existing trusted keys."""
 
-    def __init__(self, *, trust_store: TrustStore, audit_hook=None) -> None:
+    def __init__(
+        self,
+        *,
+        trust_store: TrustStore,
+        audit_hook: Callable[[str, str], None] | None = None,
+        actor_audit_hook: Callable[[str, str, str], None] | None = None,
+    ) -> None:
         self.trust_store = trust_store
         self.audit_hook = audit_hook
+        self.actor_audit_hook = actor_audit_hook
 
-    def prepare_add(self, *, key_id: str, public_key_b64: str, requested_by_key_id: str) -> dict[str, Any]:
+    def _audit(self, event: str, subject_id: str, actor_id: str) -> None:
+        if self.audit_hook is not None:
+            self.audit_hook(event, subject_id)
+        if self.actor_audit_hook is not None:
+            self.actor_audit_hook(event, subject_id, actor_id)
+
+    def prepare_add(
+        self, *, key_id: str, public_key_b64: str, requested_by_key_id: str
+    ) -> dict[str, Any]:
         draft = TrustChangeRequest(
             action="add",
             key_id=key_id,
@@ -473,6 +497,7 @@ class TrustChangeManager:
         public_key_b64: str,
         requested_by_key_id: str,
         signature: str,
+        actor_id: str = "system",
     ) -> dict[str, Any]:
         request = TrustChangeRequest(
             action="add",
@@ -488,8 +513,7 @@ class TrustChangeManager:
         except (ValueError, TypeError) as exc:
             raise ValueError("public_key_b64 is not a valid Ed25519 public key") from exc
         self.trust_store.add(key_id, public_key)
-        if self.audit_hook is not None:
-            self.audit_hook("trust.key_added", key_id)
+        self._audit("trust.key_added", key_id, actor_id)
         return self.trust_store.to_dict()
 
     def prepare_revoke(self, key_id: str, *, requested_by_key_id: str) -> dict[str, Any]:
@@ -501,7 +525,14 @@ class TrustChangeManager:
         )
         return {"unsigned_payload": draft.unsigned_payload().decode("utf-8")}
 
-    def submit_revoke(self, key_id: str, *, requested_by_key_id: str, signature: str) -> dict[str, Any]:
+    def submit_revoke(
+        self,
+        key_id: str,
+        *,
+        requested_by_key_id: str,
+        signature: str,
+        actor_id: str = "system",
+    ) -> dict[str, Any]:
         request = TrustChangeRequest(
             action="revoke",
             key_id=key_id,
@@ -512,6 +543,5 @@ class TrustChangeManager:
         if not request.verify(self.trust_store):
             raise ValueError("trust change signature is invalid")
         self.trust_store.revoke(key_id)
-        if self.audit_hook is not None:
-            self.audit_hook("trust.key_revoked", key_id)
+        self._audit("trust.key_revoked", key_id, actor_id)
         return self.trust_store.to_dict()

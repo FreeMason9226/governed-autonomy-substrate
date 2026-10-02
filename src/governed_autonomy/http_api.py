@@ -2,6 +2,7 @@ import argparse
 import hmac
 import json
 import os
+import sqlite3
 import ssl
 from collections.abc import Sequence
 from http import HTTPStatus
@@ -22,6 +23,8 @@ from .identity import (
 )
 from .issuer import PolicyDeniedError
 from .mesh import GovernanceInput
+from .operator_auth import OperatorKeyStore
+from .platform_admin import PolicyChangeManager, TrustChangeManager
 from .policy import policy_from_dict
 from .service import GovernedService
 
@@ -35,6 +38,7 @@ class AuthenticatedAPI:
         oidc_validator: OIDCValidator | None = None,
         operator_token: str | None = None,
         operator_role: str = "gas-admin",
+        operator_key_store: OperatorKeyStore | None = None,
         max_body_bytes: int = 64 * 1024,
         rate_limit: int = 120,
     ) -> None:
@@ -47,8 +51,27 @@ class AuthenticatedAPI:
         self.oidc_validator = oidc_validator
         self.operator_token = operator_token
         self.operator_role = operator_role
+        self.operator_key_store = operator_key_store
         self.max_body_bytes = max_body_bytes
         self.rate_limiter = BoundedRateLimiter(rate_limit)
+        if (
+            self.service.policy_change_manager is not None
+            and self.service.policy_change_manager.actor_audit_hook is None
+        ):
+            self.service.policy_change_manager.actor_audit_hook = (
+                lambda event, subject_id, actor_id: self.service.record_governance_event(
+                    event, subject_id, actor_id=actor_id
+                )
+            )
+        if (
+            self.service.trust_change_manager is not None
+            and self.service.trust_change_manager.actor_audit_hook is None
+        ):
+            self.service.trust_change_manager.actor_audit_hook = (
+                lambda event, subject_id, actor_id: self.service.record_governance_event(
+                    event, subject_id, actor_id=actor_id
+                )
+            )
 
     def handler(self) -> type[BaseHTTPRequestHandler]:
         api = self
@@ -61,7 +84,15 @@ class AuthenticatedAPI:
                 if not api._allowed(self):
                     self._send(HTTPStatus.TOO_MANY_REQUESTS, {"error": "rate limit exceeded"})
                     return
-                if not api._authenticated(self):
+                try:
+                    authenticated = api._authenticated(self)
+                except sqlite3.Error:
+                    self._send(
+                        HTTPStatus.SERVICE_UNAVAILABLE,
+                        {"error": "authentication backend unavailable"},
+                    )
+                    return
+                if not authenticated:
                     self._send(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
                     return
                 if route.startswith("/admin") and not api._operator_authorized(self):
@@ -107,6 +138,21 @@ class AuthenticatedAPI:
                 if route == "/admin/trust":
                     self._send(HTTPStatus.OK, api.trust_snapshot())
                     return
+                if route == "/admin/operator-keys":
+                    if api.operator_key_store is None:
+                        self._send(
+                            HTTPStatus.SERVICE_UNAVAILABLE,
+                            {"error": "operator API key management is not configured"},
+                        )
+                        return
+                    try:
+                        self._send(HTTPStatus.OK, api.list_operator_keys())
+                    except sqlite3.Error:
+                        self._send(
+                            HTTPStatus.SERVICE_UNAVAILABLE,
+                            {"error": "operator key store unavailable"},
+                        )
+                    return
                 if route == "/admin/governance-log":
                     self._send(HTTPStatus.OK, {"events": list(api.service.governance_log())})
                     return
@@ -123,7 +169,15 @@ class AuthenticatedAPI:
                 if not api._allowed(self):
                     self._send(HTTPStatus.TOO_MANY_REQUESTS, {"error": "rate limit exceeded"})
                     return
-                if not api._authenticated(self):
+                try:
+                    authenticated = api._authenticated(self)
+                except sqlite3.Error:
+                    self._send(
+                        HTTPStatus.SERVICE_UNAVAILABLE,
+                        {"error": "authentication backend unavailable"},
+                    )
+                    return
+                if not authenticated:
                     self._send(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
                     return
                 if route.startswith("/admin") and not api._operator_authorized(self):
@@ -137,6 +191,15 @@ class AuthenticatedAPI:
                     return
                 if route.startswith("/admin/trust/keys"):
                     self._handle_admin_trust_post(route)
+                    return
+                if route.startswith("/admin/operator-keys"):
+                    if api.operator_key_store is None:
+                        self._send(
+                            HTTPStatus.SERVICE_UNAVAILABLE,
+                            {"error": "operator API key management is not configured"},
+                        )
+                        return
+                    self._handle_admin_operator_keys_post(route)
                     return
                 try:
                     payload = api._read_json(self)
@@ -183,7 +246,10 @@ class AuthenticatedAPI:
                         self._send(HTTPStatus.OK, api.prepare_proposal(payload))
                     elif route == "/admin/proposals":
                         payload = api._read_json(self)
-                        self._send(HTTPStatus.CREATED, api.submit_proposal(payload))
+                        self._send(
+                            HTTPStatus.CREATED,
+                            api.submit_proposal(payload, actor_id=api._actor_id(self)),
+                        )
                     elif len(parts) == 2 and parts[1] == "prepare-approval":
                         payload = api._read_json(self)
                         self._send(
@@ -192,9 +258,17 @@ class AuthenticatedAPI:
                         )
                     elif len(parts) == 2 and parts[1] == "approve":
                         payload = api._read_json(self)
-                        self._send(HTTPStatus.OK, api.submit_approval(parts[0], payload))
+                        self._send(
+                            HTTPStatus.OK,
+                            api.submit_approval(
+                                parts[0], payload, actor_id=api._actor_id(self)
+                            ),
+                        )
                     elif len(parts) == 2 and parts[1] == "activate":
-                        self._send(HTTPStatus.OK, api.activate_proposal(parts[0]))
+                        self._send(
+                            HTTPStatus.OK,
+                            api.activate_proposal(parts[0], actor_id=api._actor_id(self)),
+                        )
                     else:
                         self._send(HTTPStatus.NOT_FOUND, {"error": "not found"})
                 except KeyError as exc:
@@ -202,7 +276,6 @@ class AuthenticatedAPI:
                     self._send(HTTPStatus.NOT_FOUND, {"error": message})
                 except (TypeError, ValueError) as exc:
                     self._send(HTTPStatus.BAD_REQUEST, {"error": str(exc) or "invalid request"})
-
             def _handle_admin_trust_post(self, route: str) -> None:
                 """Dispatch /admin/trust/keys[...] POST routes.
 
@@ -218,13 +291,21 @@ class AuthenticatedAPI:
                         self._send(HTTPStatus.OK, api.prepare_trust_add(payload))
                     elif route == "/admin/trust/keys":
                         payload = api._read_json(self)
-                        self._send(HTTPStatus.CREATED, api.submit_trust_add(payload))
+                        self._send(
+                            HTTPStatus.CREATED,
+                            api.submit_trust_add(payload, actor_id=api._actor_id(self)),
+                        )
                     elif len(parts) == 3 and parts[1:] == ["revoke", "prepare"]:
                         payload = api._read_json(self)
                         self._send(HTTPStatus.OK, api.prepare_trust_revoke(parts[0], payload))
                     elif len(parts) == 2 and parts[1] == "revoke":
                         payload = api._read_json(self)
-                        self._send(HTTPStatus.OK, api.submit_trust_revoke(parts[0], payload))
+                        self._send(
+                            HTTPStatus.OK,
+                            api.submit_trust_revoke(
+                                parts[0], payload, actor_id=api._actor_id(self)
+                            ),
+                        )
                     else:
                         self._send(HTTPStatus.NOT_FOUND, {"error": "not found"})
                 except KeyError as exc:
@@ -233,6 +314,33 @@ class AuthenticatedAPI:
                 except (TypeError, ValueError) as exc:
                     self._send(HTTPStatus.BAD_REQUEST, {"error": str(exc) or "invalid request"})
                 return
+
+            def _handle_admin_operator_keys_post(self, route: str) -> None:
+                remainder = route[len("/admin/operator-keys") :].strip("/")
+                parts = [part for part in remainder.split("/") if part]
+                actor_id = api._actor_id(self)
+                try:
+                    if route == "/admin/operator-keys":
+                        payload = api._read_json(self)
+                        self._send(
+                            HTTPStatus.CREATED,
+                            api.create_operator_key(payload, actor_id=actor_id),
+                        )
+                    elif len(parts) == 2 and parts[1] == "revoke":
+                        api.revoke_operator_key(parts[0], actor_id=actor_id)
+                        self._send(HTTPStatus.OK, {"revoked": True, "key_id": parts[0]})
+                    else:
+                        self._send(HTTPStatus.NOT_FOUND, {"error": "not found"})
+                except KeyError as exc:
+                    message = str(exc).strip("'\"") or "not found"
+                    self._send(HTTPStatus.NOT_FOUND, {"error": message})
+                except (TypeError, ValueError) as exc:
+                    self._send(HTTPStatus.BAD_REQUEST, {"error": str(exc) or "invalid request"})
+                except sqlite3.Error:
+                    self._send(
+                        HTTPStatus.SERVICE_UNAVAILABLE,
+                        {"error": "operator key store unavailable"},
+                    )
 
             def _send(self, status: HTTPStatus, payload: dict[str, Any]) -> None:
                 encoded = json.dumps(payload, sort_keys=True).encode("utf-8")
@@ -271,9 +379,19 @@ class AuthenticatedAPI:
 
     def _authenticated(self, request: BaseHTTPRequestHandler) -> bool:
         supplied = request.headers.get("Authorization", "")
-        if self.oidc_validator is not None and supplied.startswith("Bearer "):
+        scheme, separator, credential = supplied.partition(" ")
+        bearer_credential = credential.strip() if separator and scheme.lower() == "bearer" else ""
+        if self.operator_key_store is not None and bearer_credential:
+            operator_key = self.operator_key_store.authenticate(bearer_credential)
+            if operator_key is not None:
+                if not urlsplit(request.path).path.startswith("/admin"):
+                    return False
+                request.gas_operator_id = operator_key.operator_id  # type: ignore[attr-defined]
+                request.gas_operator_key_id = operator_key.key_id  # type: ignore[attr-defined]
+                return True
+        if self.oidc_validator is not None and bearer_credential:
             try:
-                request.gas_identity = self.oidc_validator.validate(supplied[7:].strip())  # type: ignore[attr-defined]
+                request.gas_identity = self.oidc_validator.validate(bearer_credential)  # type: ignore[attr-defined]
             except IdentityValidationError:
                 return False
             return True
@@ -289,7 +407,20 @@ class AuthenticatedAPI:
             supplied, self.bearer_token
         )
 
+    @staticmethod
+    def _actor_id(request: BaseHTTPRequestHandler) -> str:
+        operator_id = getattr(request, "gas_operator_id", None)
+        if operator_id is not None:
+            key_id = getattr(request, "gas_operator_key_id", None)
+            return f"api-key:{operator_id}:{key_id}" if key_id else f"api-key:{operator_id}"
+        identity = getattr(request, "gas_identity", None)
+        if identity is not None:
+            return f"oidc:{identity.issuer}:{identity.subject}"
+        return "shared-token"
+
     def _operator_authorized(self, request: BaseHTTPRequestHandler) -> bool:
+        if getattr(request, "gas_operator_id", None) is not None:
+            return True
         identity = getattr(request, "gas_identity", None)
         if identity is not None:
             roles = identity.claims.get("roles", [])
@@ -329,7 +460,7 @@ class AuthenticatedAPI:
             raise ValueError("request JSON must be an object")
         return payload
 
-    def _require_policy_change_manager(self):
+    def _require_policy_change_manager(self) -> PolicyChangeManager:
         manager = self.service.policy_change_manager
         if manager is None:
             raise ValueError("policy change workflow is unavailable without a trust store")
@@ -345,7 +476,9 @@ class AuthenticatedAPI:
             proposal_id=payload.get("proposal_id"),
         )
 
-    def submit_proposal(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def submit_proposal(
+        self, payload: dict[str, Any], *, actor_id: str = "system"
+    ) -> dict[str, Any]:
         manager = self._require_policy_change_manager()
         proposal = manager.propose_signed(
             new_policy=policy_from_dict(payload["policy"]),
@@ -353,6 +486,7 @@ class AuthenticatedAPI:
             signature=payload["signature"],
             rationale=payload.get("rationale", ""),
             proposal_id=payload.get("proposal_id"),
+            actor_id=actor_id,
         )
         return proposal.to_summary_dict()
 
@@ -360,18 +494,21 @@ class AuthenticatedAPI:
         manager = self._require_policy_change_manager()
         return manager.prepare_approval(proposal_id, approver_key_id=approver_key_id)
 
-    def submit_approval(self, proposal_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def submit_approval(
+        self, proposal_id: str, payload: dict[str, Any], *, actor_id: str = "system"
+    ) -> dict[str, Any]:
         manager = self._require_policy_change_manager()
         proposal = manager.approve_signed(
             proposal_id,
             approver_key_id=payload["approver_key_id"],
             signature=payload["signature"],
+            actor_id=actor_id,
         )
         return proposal.to_summary_dict()
 
-    def activate_proposal(self, proposal_id: str) -> dict[str, Any]:
+    def activate_proposal(self, proposal_id: str, *, actor_id: str = "system") -> dict[str, Any]:
         manager = self._require_policy_change_manager()
-        policy = manager.activate(proposal_id)
+        policy = manager.activate(proposal_id, actor_id=actor_id)
         return {"policy_id": policy.policy_id, "policy_digest": policy.digest()}
 
     def list_proposals(self) -> dict[str, Any]:
@@ -383,7 +520,7 @@ class AuthenticatedAPI:
             "required_approvals": manager.required_approvals,
         }
 
-    def _require_trust_change_manager(self):
+    def _require_trust_change_manager(self) -> TrustChangeManager:
         manager = self.service.trust_change_manager
         if manager is None:
             raise ValueError("trust key management is unavailable without a trust store")
@@ -397,30 +534,63 @@ class AuthenticatedAPI:
             requested_by_key_id=payload["requested_by_key_id"],
         )
 
-    def submit_trust_add(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def submit_trust_add(
+        self, payload: dict[str, Any], *, actor_id: str = "system"
+    ) -> dict[str, Any]:
         manager = self._require_trust_change_manager()
         return manager.submit_add(
             key_id=payload["key_id"],
             public_key_b64=payload["public_key_b64"],
             requested_by_key_id=payload["requested_by_key_id"],
             signature=payload["signature"],
+            actor_id=actor_id,
         )
 
     def prepare_trust_revoke(self, key_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         manager = self._require_trust_change_manager()
         return manager.prepare_revoke(key_id, requested_by_key_id=payload["requested_by_key_id"])
 
-    def submit_trust_revoke(self, key_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def submit_trust_revoke(
+        self, key_id: str, payload: dict[str, Any], *, actor_id: str = "system"
+    ) -> dict[str, Any]:
         manager = self._require_trust_change_manager()
         return manager.submit_revoke(
             key_id,
             requested_by_key_id=payload["requested_by_key_id"],
             signature=payload["signature"],
+            actor_id=actor_id,
         )
 
     def trust_snapshot(self) -> dict[str, Any]:
         trust_store = self.service.boundary.trust_store
         return trust_store.to_dict() if trust_store is not None else {"keys": {}, "revoked": []}
+
+    def _require_operator_key_store(self) -> OperatorKeyStore:
+        if self.operator_key_store is None:
+            raise ValueError("operator API key management is not configured")
+        return self.operator_key_store
+
+    def list_operator_keys(self) -> dict[str, Any]:
+        return {"keys": list(self._require_operator_key_store().list_keys())}
+
+    def create_operator_key(
+        self, payload: dict[str, Any], *, actor_id: str
+    ) -> dict[str, str]:
+        key_store = self._require_operator_key_store()
+        operator_id = payload.get("operator_id")
+        if not isinstance(operator_id, str):
+            raise ValueError("operator_id must be a string")
+        created = key_store.create(operator_id)
+        self.service.record_governance_event(
+            "operator.key_added", created["key_id"], actor_id=actor_id
+        )
+        return created
+
+    def revoke_operator_key(self, key_id: str, *, actor_id: str) -> None:
+        self._require_operator_key_store().revoke(key_id)
+        self.service.record_governance_event(
+            "operator.key_revoked", key_id, actor_id=actor_id
+        )
 
 
 def _env_flag(name: str) -> bool:
@@ -448,6 +618,11 @@ def parse_server_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--operator-token", default=os.environ.get("GOVERNED_AUTONOMY_OPERATOR_TOKEN")
     )
     parser.add_argument(
+        "--operator-key-store",
+        default=os.environ.get("GOVERNED_AUTONOMY_OPERATOR_KEY_STORE"),
+        help="Path to the SQLite database used for revocable operator API keys.",
+    )
+    parser.add_argument(
         "--operator-role", default=os.environ.get("OIDC_OPERATOR_ROLE", "gas-admin")
     )
     parser.add_argument("--max-body-bytes", type=int, default=64 * 1024)
@@ -467,6 +642,7 @@ def create_server(
     oidc_validator: OIDCValidator | None = None,
     operator_token: str | None = None,
     operator_role: str = "gas-admin",
+    operator_key_store: OperatorKeyStore | None = None,
 ) -> ThreadingHTTPServer:
     server = ThreadingHTTPServer(
         (host, port),
@@ -476,6 +652,7 @@ def create_server(
             oidc_validator=oidc_validator,
             operator_token=operator_token,
             operator_role=operator_role,
+            operator_key_store=operator_key_store,
             max_body_bytes=max_body_bytes,
             rate_limit=rate_limit,
         ).handler(),
@@ -529,12 +706,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             "GOVERNED_AUTONOMY_BEARER_TOKEN or complete OIDC configuration is required"
         )
     service, _, _ = build_runtime_service()
+    operator_key_store = (
+        OperatorKeyStore(args.operator_key_store) if args.operator_key_store else None
+    )
     server = create_server(
         service,
         bearer_token=args.bearer_token,
         oidc_validator=oidc_validator,
         operator_token=args.operator_token,
         operator_role=args.operator_role,
+        operator_key_store=operator_key_store,
         host=args.host,
         port=args.port,
         max_body_bytes=args.max_body_bytes,
@@ -547,6 +728,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         pass
     finally:
         server.server_close()
+        if operator_key_store is not None:
+            operator_key_store.close()
     return 0
 
 
@@ -646,6 +829,40 @@ API_SCHEMA = {
             "get": {
                 "security": [{"bearerAuth": []}],
                 "responses": {"200": {"description": "Trusted signing keys snapshot"}},
+            }
+        },
+        "/admin/operator-keys": {
+            "get": {
+                "security": [{"bearerAuth": []}],
+                "responses": {"200": {"description": "Operator API keys (secrets omitted)"}},
+            },
+            "post": {
+                "security": [{"bearerAuth": []}],
+                "requestBody": {
+                    "required": True,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "required": ["operator_id"],
+                                "properties": {"operator_id": {"type": "string"}},
+                            }
+                        }
+                    },
+                },
+                "responses": {
+                    "201": {
+                        "description": (
+                            "Created operator key; bearer token is returned once and is not stored"
+                        )
+                    }
+                },
+            },
+        },
+        "/admin/operator-keys/{key_id}/revoke": {
+            "post": {
+                "security": [{"bearerAuth": []}],
+                "responses": {"200": {"description": "Operator API key revoked"}},
             }
         },
         "/admin/governance-log": {

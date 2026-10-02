@@ -54,6 +54,7 @@ from .mesh import (
     GovernanceSourceRegistry,
 )
 from .models import GovernanceAuthorizationArtifact, SignedApproval
+from .operator_auth import OperatorAPIKey, OperatorKeyStore
 from .platform import (
     GovernancePlatform,
     PlatformDeploymentPolicy,
@@ -119,6 +120,8 @@ __all__ = [
     "PolicyChangeProposal",
     "TrustChangeManager",
     "TrustChangeRequest",
+    "OperatorAPIKey",
+    "OperatorKeyStore",
 
     # Security, Identity & Trust
     "TrustStore",

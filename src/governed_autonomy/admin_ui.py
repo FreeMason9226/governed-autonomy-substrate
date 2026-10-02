@@ -39,6 +39,7 @@ enter here is persisted: it is held only in this page's memory and is lost on re
 <button data-tab="policies" class="tab-button">Policies</button>
 <button data-tab="proposals" class="tab-button">Policy Proposals</button>
 <button data-tab="trust" class="tab-button">Trusted Keys</button>
+<button data-tab="operators" class="tab-button">Operator Access</button>
 <button data-tab="audit" class="tab-button">Audit</button>
 <button data-tab="metrics" class="tab-button">Metrics</button>
 </nav>
@@ -105,13 +106,12 @@ mesh-governance fields (<code>required_mesh_inputs</code>,
 
 <h3>Governance log</h3>
 <p class="hint">
-Durable, hash-chained history of policy and trust governance actions
-(proposed, approved, activated, key added/revoked) recorded in the same
-replay log as authorization/execution events, independent of current
-proposal/trust state.
+Durable, hash-chained history of policy, trust, and operator-key changes
+(proposed, approved, activated, key added/revoked), including the authenticated
+actor, recorded alongside authorization/execution events.
 </p>
 <table id="governance-log-table"><thead><tr>
-<th>Recorded at</th><th>Event</th><th>Subject</th>
+<th>Recorded at</th><th>Event</th><th>Subject</th><th>Actor</th>
 </tr></thead><tbody></tbody></table>
 </section>
 
@@ -146,6 +146,25 @@ authorize adding or revoking another key.
 <button type="submit">Sign and revoke key</button>
 </form>
 <pre id="trust-revoke-output" class="output"></pre>
+</section>
+
+<section id="tab-operators" class="tab-panel">
+<h2>Operator API keys</h2>
+<p class="hint">
+Keys are stored as hashes in the configured SQLite database and can access
+only <code>/admin</code> routes. The full token is shown once when created;
+copy it now and store it in your secret manager.
+</p>
+<button class="refresh" data-refresh="operators">Refresh</button>
+<table id="operator-keys-table"><thead><tr>
+<th>Operator</th><th>Key ID</th><th>Created</th><th>Status</th><th>Actions</th>
+</tr></thead><tbody></tbody></table>
+<h3>Create an operator key</h3>
+<form id="operator-key-form">
+<label>Operator ID <input id="operator-key-operator-id" type="text" maxlength="256"></label>
+<button type="submit">Create operator key</button>
+</form>
+<pre id="operator-key-output" class="output"></pre>
 </section>
 
 <section id="tab-metrics" class="tab-panel">
@@ -291,7 +310,8 @@ def render_admin_js() -> bytes:
   }
 
   async function api(path, options = {}) {
-    const headers = Object.assign({}, options.headers, { Authorization: authToken });
+    const authorization = authToken.startsWith("gasop_") ? "Bearer " + authToken : authToken;
+    const headers = Object.assign({}, options.headers, { Authorization: authorization });
     if (options.body) headers["Content-Type"] = "application/json";
     const response = await fetch(path, Object.assign({}, options, { headers }));
     const text = await response.text();
@@ -353,12 +373,13 @@ def render_admin_js() -> bytes:
         tr.innerHTML =
           "<td>" + escapeHtml(event.recorded_at || "") + "</td>" +
           "<td>" + escapeHtml(event.event || "") + "</td>" +
-          "<td>" + escapeHtml(event.subject_id || "") + "</td>";
+          "<td>" + escapeHtml(event.subject_id || "") + "</td>" +
+          "<td>" + escapeHtml(event.actor_id || "system") + "</td>";
         tbody.appendChild(tr);
       }
     } catch (err) {
       const tr = document.createElement("tr");
-      tr.innerHTML = "<td colspan=\"3\">Error: " + escapeHtml(err.message) + "</td>";
+      tr.innerHTML = "<td colspan=\"4\">Error: " + escapeHtml(err.message) + "</td>";
       tbody.appendChild(tr);
     }
   }
@@ -593,11 +614,77 @@ def render_admin_js() -> bytes:
     });
   }
 
+  async function loadOperatorKeys() {
+    const tbody = document.querySelector("#operator-keys-table tbody");
+    tbody.innerHTML = "";
+    try {
+      const data = await api("/admin/operator-keys");
+      for (const key of data.keys || []) {
+        const tr = document.createElement("tr");
+        tr.innerHTML =
+          "<td>" + escapeHtml(key.operator_id) + "</td>" +
+          "<td>" + escapeHtml(key.key_id) + "</td>" +
+          "<td>" + escapeHtml(key.created_at) + "</td>" +
+          "<td>" + (key.revoked ? "Revoked" : "Active") + "</td>" +
+          "<td>" + (key.revoked ? "" :
+            "<button type=\"button\" data-revoke-operator-key=\"" +
+            escapeHtml(key.key_id) + "\">Revoke</button>") + "</td>";
+        tbody.appendChild(tr);
+      }
+    } catch (err) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = "<td colspan=\"5\">Error: " + escapeHtml(err.message) + "</td>";
+      tbody.appendChild(tr);
+    }
+  }
+
+  function wireOperatorKeyForm() {
+    document.getElementById("operator-key-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const output = document.getElementById("operator-key-output");
+      output.textContent = "Creating key...";
+      try {
+        const operatorId = document.getElementById("operator-key-operator-id").value.trim();
+        const created = await api("/admin/operator-keys", {
+          method: "POST",
+          body: JSON.stringify({ operator_id: operatorId }),
+        });
+        output.textContent =
+          "Copy and securely store this token now; it will not be shown again:\n" +
+          created.token + "\n\nOperator: " + created.operator_id +
+          "\nKey ID: " + created.key_id;
+        document.getElementById("operator-key-operator-id").value = "";
+        await loadOperatorKeys();
+      } catch (err) {
+        output.textContent = "Error: " + err.message;
+      }
+    });
+    document.querySelector("#operator-keys-table tbody").addEventListener("click", async (event) => {
+      const button = event.target.closest("[data-revoke-operator-key]");
+      if (!button) return;
+      const keyId = button.dataset.revokeOperatorKey;
+      if (!window.confirm("Revoke this operator key? Requests using it will fail immediately.")) {
+        return;
+      }
+      const output = document.getElementById("operator-key-output");
+      try {
+        await api("/admin/operator-keys/" + encodeURIComponent(keyId) + "/revoke", {
+          method: "POST",
+        });
+        output.textContent = "Operator key revoked: " + keyId;
+        await loadOperatorKeys();
+      } catch (err) {
+        output.textContent = "Error: " + err.message;
+      }
+    });
+  }
+
   const loaders = {
     health: loadHealth,
     policies: loadPolicies,
     proposals: loadProposals,
     trust: loadTrust,
+    operators: loadOperatorKeys,
     audit: loadAudit,
     metrics: loadMetrics,
   };
@@ -609,7 +696,11 @@ def render_admin_js() -> bytes:
       return;
     }
     setStatus("Connected (token held in memory only).", true);
-    loaders.health();
+    if (authToken.startsWith("gasop_")) {
+      loaders.operators();
+    } else {
+      loaders.health();
+    }
   }
 
   document.addEventListener("DOMContentLoaded", () => {
@@ -631,6 +722,7 @@ def render_admin_js() -> bytes:
     wireApproveForm();
     wireTrustAddForm();
     wireTrustRevokeForm();
+    wireOperatorKeyForm();
   });
 })();
 """

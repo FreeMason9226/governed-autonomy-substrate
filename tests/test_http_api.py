@@ -16,7 +16,7 @@ from governed_autonomy import (
 
 @pytest.fixture
 def server():
-    service, _, _ = build_demo_service()
+    service, issuer, _ = build_demo_service()
     instance = create_server(service, bearer_token="test-token")
     thread = threading.Thread(target=instance.serve_forever, daemon=True)
     thread.start()
@@ -79,6 +79,8 @@ def test_http_api_routes_query_bearing_urls_and_exposes_openapi_document(server)
     assert status == 200
     assert schema["openapi"] == "3.0.3"
     assert "/api/v1/authorize" in schema["paths"]
+    assert "/admin/operator-keys" in schema["paths"]
+    assert "/admin/operator-keys/{key_id}/revoke" in schema["paths"]
     assert schema["components"]["securitySchemes"]["bearerAuth"]["scheme"] == "bearer"
 
 
@@ -166,11 +168,23 @@ def test_http_api_requires_operator_token_for_admin():
 
 
 def test_http_api_parse_server_args_supports_cli_options():
-    args = parse_server_args(["--host", "0.0.0.0", "--port", "9000", "--bearer-token", "super-secret"])
+    args = parse_server_args(
+        [
+            "--host",
+            "0.0.0.0",
+            "--port",
+            "9000",
+            "--bearer-token",
+            "super-secret",
+            "--operator-key-store",
+            "var/operator-keys.sqlite",
+        ]
+    )
 
     assert args.host == "0.0.0.0"
     assert args.port == 9000
     assert args.bearer_token == "super-secret"
+    assert args.operator_key_store == "var/operator-keys.sqlite"
 
 
 def test_http_api_parse_server_args_supports_oidc_discovery_flag():
@@ -579,6 +593,208 @@ def test_http_api_admin_trust_add_rejects_untrusted_requester():
         )
         assert status == 400
         assert "signature" in result["error"]
+    finally:
+        instance.shutdown()
+        instance.server_close()
+        thread.join(timeout=2)
+
+
+def test_http_api_operator_keys_are_revocable_and_governance_events_attribute_actors(tmp_path):
+    import sqlite3
+
+    from governed_autonomy.operator_auth import OperatorKeyStore
+
+    service, issuer, _ = build_demo_service()
+    operator_store = OperatorKeyStore(tmp_path / "operator-keys.sqlite")
+    instance = create_server(
+        service,
+        bearer_token="test-token",
+        operator_token="bootstrap-operator-token",
+        operator_key_store=operator_store,
+    )
+    thread = threading.Thread(target=instance.serve_forever, daemon=True)
+    thread.start()
+
+    def operator_request(method, path, payload=None, token="bootstrap-operator-token"):
+        connection = HTTPConnection(*instance.server_address)
+        body = json.dumps(payload).encode() if payload is not None else None
+        headers = {"Authorization": f"Bearer {token}"}
+        if body is not None:
+            headers["Content-Type"] = "application/json"
+            headers["Content-Length"] = str(len(body))
+        connection.request(method, path, body=body, headers=headers)
+        response = connection.getresponse()
+        result = json.loads(response.read())
+        connection.close()
+        return response.status, result
+
+    try:
+        status, first = operator_request(
+            "POST", "/admin/operator-keys", {"operator_id": "alice"}
+        )
+        assert status == 201
+        assert first["token"].startswith("gasop_")
+        with sqlite3.connect(tmp_path / "operator-keys.sqlite") as connection:
+            token_hash = connection.execute(
+                "SELECT token_hash FROM operator_api_keys WHERE key_id = ?",
+                (first["key_id"],),
+            ).fetchone()[0]
+        assert first["token"] not in token_hash
+
+        status, second = operator_request(
+            "POST",
+            "/admin/operator-keys",
+            {"operator_id": "bob"},
+            token=first["token"],
+        )
+        assert status == 201
+
+        from governed_autonomy.canonical import b64encode
+
+        delegated_key = KeyPair.generate("delegated-trusted-key")
+        public_key_b64 = b64encode(delegated_key.public_key_bytes())
+        status, prepared = operator_request(
+            "POST",
+            "/admin/trust/keys/prepare",
+            {
+                "key_id": delegated_key.key_id,
+                "public_key_b64": public_key_b64,
+                "requested_by_key_id": issuer.key_id,
+            },
+            token=second["token"],
+        )
+        assert status == 200
+        trust_signature = issuer.sign(prepared["unsigned_payload"].encode("utf-8"))
+        status, _ = operator_request(
+            "POST",
+            "/admin/trust/keys",
+            {
+                "key_id": delegated_key.key_id,
+                "public_key_b64": public_key_b64,
+                "requested_by_key_id": issuer.key_id,
+                "signature": trust_signature,
+            },
+            token=second["token"],
+        )
+        assert status == 201
+
+        status, key_list = operator_request(
+            "GET", "/admin/operator-keys", token=second["token"]
+        )
+        assert status == 200
+        assert {key["operator_id"] for key in key_list["keys"]} == {"alice", "bob"}
+        assert all("token" not in key and "token_hash" not in key for key in key_list["keys"])
+
+        status, _ = operator_request("GET", "/health", token=second["token"])
+        assert status == 401
+
+        status, revoked = operator_request(
+            "POST",
+            f"/admin/operator-keys/{first['key_id']}/revoke",
+            token=second["token"],
+        )
+        assert status == 200
+        assert revoked["revoked"] is True
+
+        status, _ = operator_request("GET", "/admin/operator-keys", token=first["token"])
+        assert status == 401
+
+        status, audit = operator_request(
+            "GET", "/admin/governance-log", token=second["token"]
+        )
+        assert status == 200
+        events = audit["events"]
+        assert [event["event"] for event in events] == [
+            "operator.key_added",
+            "operator.key_added",
+            "trust.key_added",
+            "operator.key_revoked",
+        ]
+        assert events[0]["actor_id"] == "shared-token"
+        assert events[1]["actor_id"] == f"api-key:alice:{first['key_id']}"
+        assert events[2]["actor_id"] == f"api-key:bob:{second['key_id']}"
+        assert events[3]["actor_id"] == f"api-key:bob:{second['key_id']}"
+    finally:
+        instance.shutdown()
+        instance.server_close()
+        thread.join(timeout=2)
+        operator_store.close()
+
+
+def test_http_api_oidc_subject_is_recorded_as_governance_actor():
+    from governed_autonomy import ExternalIdentity
+
+    class StubOIDCValidator:
+        def validate(self, token):
+            assert token == "signed-oidc-token"
+            return ExternalIdentity(
+                subject="operator-42",
+                issuer="https://identity.example",
+                claims={"roles": ["gas-admin"]},
+            )
+
+    service, issuer, _ = build_demo_service()
+    instance = create_server(
+        service,
+        bearer_token="unused",
+        oidc_validator=StubOIDCValidator(),
+    )
+    thread = threading.Thread(target=instance.serve_forever, daemon=True)
+    thread.start()
+
+    def oidc_request(method, path, payload=None):
+        connection = HTTPConnection(*instance.server_address)
+        body = json.dumps(payload).encode() if payload is not None else None
+        headers = {"Authorization": "Bearer signed-oidc-token"}
+        if body is not None:
+            headers["Content-Type"] = "application/json"
+            headers["Content-Length"] = str(len(body))
+        connection.request(method, path, body=body, headers=headers)
+        response = connection.getresponse()
+        result = json.loads(response.read())
+        connection.close()
+        return response.status, result
+
+    try:
+        policy = {
+            "policy_id": "oidc-attributed-policy",
+            "allowed_actions": ["write_file"],
+            "required_fields": {"write_file": ["path", "content"]},
+            "exact_fields": {"write_file": {"path": "oidc.txt"}},
+            "required_context": [],
+            "exact_context": {},
+            "max_request_bytes": 1024,
+            "max_ttl_seconds": 60,
+        }
+        status, prepared = oidc_request(
+            "POST",
+            "/admin/proposals/prepare",
+            {
+                "policy": policy,
+                "proposer_key_id": issuer.key_id,
+                "rationale": "test operator identity attribution",
+            },
+        )
+        assert status == 200
+        signature = issuer.sign(prepared["unsigned_payload"].encode("utf-8"))
+
+        status, _ = oidc_request(
+            "POST",
+            "/admin/proposals",
+            {
+                "policy": policy,
+                "proposer_key_id": issuer.key_id,
+                "rationale": "test operator identity attribution",
+                "signature": signature,
+            },
+        )
+        assert status == 201
+
+        status, audit = oidc_request("GET", "/admin/governance-log")
+        assert status == 200
+        assert audit["events"][0]["actor_id"] == (
+            "oidc:https://identity.example:operator-42"
+        )
     finally:
         instance.shutdown()
         instance.server_close()
