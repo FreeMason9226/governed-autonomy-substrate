@@ -1,0 +1,17 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowGasPlatformToSignAndVerify",
+      "Effect": "Allow",
+      "Action": ["kms:Sign", "kms:GetPublicKey", "kms:DescribeKey"],
+      "Resource": ["arn:aws:kms:REGION:ACCOUNT_ID:key/KEY_ID"]
+    },
+    {
+      "Sid": "ExplicitDenyExportAndDecrypt",
+      "Effect": "Deny",
+      "Action": ["kms:Decrypt", "kms:ExportKeyMaterial", "kms:GenerateDataKey"],
+      "Resource": "*"
+    }
+  ]
+}
