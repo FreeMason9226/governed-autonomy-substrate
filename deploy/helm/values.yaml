@@ -60,3 +60,23 @@ postgres:
     image: postgres:16.4
     pvcName: gas-postgres-backups
     storage: 50Gi
+worker:
+  enabled: false
+  replicaCount: 2
+  image:
+    repository: ghcr.io/example/governed-autonomy-substrate
+    tag: latest
+  command: ["gas-worker"]
+  # Comma-separated allow-listed sandbox images (GAS_WORKER_IMAGES)
+  allowedImages: ""
+  vaultAddr: https://vault.security.svc.cluster.local:8200
+  vaultNamespace: security
+  vaultTokenSecret: ""
+  sandbox:
+    dropCapabilities: ["ALL"]
+    readOnlyRootFilesystem: true
+    runAsUser: 10001
+    runAsGroup: 10001
+  resources:
+    requests: {cpu: 250m, memory: 256Mi}
+    limits: {cpu: 1, memory: 512Mi}

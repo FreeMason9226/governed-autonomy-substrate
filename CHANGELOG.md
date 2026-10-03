@@ -8,6 +8,8 @@ maintains a separate **GAS Protocol Version** for wire-format changes.
 
 ### Added
 
+- Roadmap platform slice: `AwsKmsBackend` (Ed25519 KMS signing for `KMSSigner`), `KeyLifecycleManager`, `WorkerRuntime`/`ContainerSandbox`/`VaultSecretProvider` (authorizer-gated, hardened sandbox, fail-closed secrets), `gas` operator CLI, worker Helm manifests, KMS IAM / Vault policy templates
+
 - `SPEC.md` — language-agnostic GAS Protocol Specification v1.0
 - `tests/conformance/` — language-agnostic conformance test vector suite
 - `CONTRIBUTING.md` — RFC process and contributor guide

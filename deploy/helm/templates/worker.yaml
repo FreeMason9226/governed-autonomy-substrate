@@ -1,0 +1,101 @@
+{{- if .Values.worker.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "governed-autonomy.fullname" . }}-worker
+  labels:
+    {{- include "governed-autonomy.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.worker.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "governed-autonomy.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "governed-autonomy.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: worker
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ .Values.worker.sandbox.runAsUser }}
+        runAsGroup: {{ .Values.worker.sandbox.runAsGroup }}
+        fsGroup: {{ .Values.worker.sandbox.runAsGroup }}
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: worker
+          image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: {{ toJson .Values.worker.command }}
+          env:
+            - name: GAS_RUNTIME_MODE
+              value: {{ .Values.runtimeMode | quote }}
+            - name: GAS_WORKER_IMAGES
+              value: {{ required "values.worker.allowedImages is required" .Values.worker.allowedImages | quote }}
+            - name: GAS_ISSUER_KEY_ID
+              valueFrom:
+                secretKeyRef: {name: {{ .Values.runtimeSecret }}, key: issuer-key-id}
+            - name: GAS_ISSUER_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef: {name: {{ .Values.runtimeSecret }}, key: issuer-private-key}
+            - name: VAULT_ADDR
+              value: {{ .Values.worker.vaultAddr | quote }}
+            {{- if .Values.worker.vaultTokenSecret }}
+            - name: VAULT_TOKEN
+              valueFrom:
+                secretKeyRef: {name: {{ .Values.worker.vaultTokenSecret | quote }}, key: token}
+            {{- end }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.databaseUrlSecret }}
+                  key: url
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: {{ .Values.worker.sandbox.readOnlyRootFilesystem }}
+            capabilities:
+              drop: {{ toJson .Values.worker.sandbox.dropCapabilities }}
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "governed-autonomy.fullname" . }}-worker
+  labels:
+    {{- include "governed-autonomy.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: worker
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - to: [{namespaceSelector: {}}]
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: {{ .Values.worker.vaultNamespace | quote }}}
+      ports:
+        - {protocol: TCP, port: 8200}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/name: postgres
+      ports:
+        - {protocol: TCP, port: 5432}
+{{- end }}
