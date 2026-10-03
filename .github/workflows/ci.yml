@@ -91,7 +91,7 @@ jobs:
       - name: Run PostgreSQL integration tests
         env:
           GAS_POSTGRES_TEST_URL: postgresql://gas:gas-ci-password@127.0.0.1:5432/gas
-        run: python -m pytest tests/test_postgres_integration.py -q
+        run: python -m pytest tests/test_postgres_integration.py tests/test_postgres_jobs.py -q
 
   package:
     name: Build Python package and container

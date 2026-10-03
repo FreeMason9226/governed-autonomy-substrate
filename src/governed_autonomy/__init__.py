@@ -37,7 +37,8 @@ from .identity import (
     oidc_validator_from_discovery,
 )
 from .issuer import AuthorizationIssuer, PolicyDeniedError
-from .jobs import Job, SQLiteJobStore, run_once
+from .jobs import Job, JobStore, SQLiteJobStore, run_once
+from .jobs_postgres import POSTGRES_JOBS_SCHEMA, PostgresJobStore
 from .langchain_adapter import GASCallbackHandler, GASExecutionBarrierTool, GASToolOutput
 from .mcp_gateway import (
     GASMCPGateway,
@@ -176,7 +177,10 @@ __all__ = [
     "create_server",
     "parse_server_args",
     "Job",
+    "JobStore",
     "SQLiteJobStore",
+    "PostgresJobStore",
+    "POSTGRES_JOBS_SCHEMA",
     "run_once",
     "NonceRepository",
     "SQLiteNonceRepository",

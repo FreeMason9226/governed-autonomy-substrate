@@ -11,7 +11,7 @@ import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 
 @dataclass(frozen=True)
@@ -24,6 +24,13 @@ class Job:
     max_attempts: int
     available_at: float
     last_error: str | None = None
+
+
+class JobStore(Protocol):
+    def claim(self) -> Job | None: ...
+    def complete(self, job_id: str) -> None: ...
+    def fail(self, job_id: str, error: str, *, retry_delay: float = 1.0) -> None: ...
+    def get(self, job_id: str) -> Job: ...
 
 
 class SQLiteJobStore:
@@ -112,7 +119,7 @@ class SQLiteJobStore:
 
 
 def run_once(
-    store: SQLiteJobStore,
+    store: JobStore,
     handler: Callable[[dict[str, Any]], None],
     compensation: Callable[[Job, Exception], None] | None = None,
     retry_delay: float = 1.0,
