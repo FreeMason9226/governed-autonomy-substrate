@@ -824,3 +824,52 @@ def test_http_api_admin_trust_revoke_unknown_key_returns_404():
         instance.shutdown()
         instance.server_close()
         thread.join(timeout=2)
+
+def test_admin_jobs_endpoint_enqueues_and_is_idempotent():
+    from governed_autonomy import SQLiteJobStore
+
+    service, _, _ = build_demo_service()
+    store = SQLiteJobStore()
+    instance = create_server(service, bearer_token="test-token", job_store=store)
+    thread = threading.Thread(target=instance.serve_forever, daemon=True)
+    thread.start()
+    try:
+        body = {"artifact": {"x": 1}, "idempotency_key": "k1"}
+        status, first = request(instance, "POST", "/admin/jobs", body)
+        assert status == 403  # operator authorization required
+    finally:
+        instance.shutdown()
+        instance.server_close()
+        thread.join(timeout=2)
+
+    instance = create_server(
+        service, bearer_token="test-token", operator_token="test-token", job_store=store
+    )
+    thread = threading.Thread(target=instance.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, first = request(instance, "POST", "/admin/jobs", body)
+        assert status == 202 and first["status"] == "queued"
+        status, again = request(instance, "POST", "/admin/jobs", body)
+        assert again["job_id"] == first["job_id"]
+        status, _ = request(instance, "POST", "/admin/jobs", {"artifact": "no", "idempotency_key": "k"})
+        assert status == 400
+        assert store.claim().payload == {"artifact": {"x": 1}}
+    finally:
+        instance.shutdown()
+        instance.server_close()
+        thread.join(timeout=2)
+
+
+def test_admin_jobs_endpoint_unconfigured_returns_503():
+    service, _, _ = build_demo_service()
+    instance = create_server(service, bearer_token="test-token", operator_token="test-token")
+    thread = threading.Thread(target=instance.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, _ = request(instance, "POST", "/admin/jobs", {})
+        assert status == 503
+    finally:
+        instance.shutdown()
+        instance.server_close()
+        thread.join(timeout=2)

@@ -22,6 +22,7 @@ from .identity import (
     oidc_validator_from_discovery,
 )
 from .issuer import PolicyDeniedError
+from .jobs import SQLiteJobStore
 from .mesh import GovernanceInput
 from .operator_auth import OperatorKeyStore
 from .platform_admin import PolicyChangeManager, TrustChangeManager
@@ -39,6 +40,7 @@ class AuthenticatedAPI:
         operator_token: str | None = None,
         operator_role: str = "gas-admin",
         operator_key_store: OperatorKeyStore | None = None,
+        job_store: Any | None = None,
         max_body_bytes: int = 64 * 1024,
         rate_limit: int = 120,
     ) -> None:
@@ -52,6 +54,7 @@ class AuthenticatedAPI:
         self.operator_token = operator_token
         self.operator_role = operator_role
         self.operator_key_store = operator_key_store
+        self.job_store = job_store
         self.max_body_bytes = max_body_bytes
         self.rate_limiter = BoundedRateLimiter(rate_limit)
         if (
@@ -201,6 +204,9 @@ class AuthenticatedAPI:
                         return
                     self._handle_admin_operator_keys_post(route)
                     return
+                if route == "/admin/jobs":
+                    self._handle_admin_jobs_post()
+                    return
                 try:
                     payload = api._read_json(self)
                     if route in {"/authorize", "/api/v1/authorize"}:
@@ -314,6 +320,24 @@ class AuthenticatedAPI:
                 except (TypeError, ValueError) as exc:
                     self._send(HTTPStatus.BAD_REQUEST, {"error": str(exc) or "invalid request"})
                 return
+
+            def _handle_admin_jobs_post(self) -> None:
+                if api.job_store is None:
+                    self._send(
+                        HTTPStatus.SERVICE_UNAVAILABLE,
+                        {"error": "job queue is not configured"},
+                    )
+                    return
+                try:
+                    payload = api._read_json(self)
+                    job = api.submit_job(payload, actor_id=api._actor_id(self))
+                    self._send(HTTPStatus.ACCEPTED, job)
+                except (KeyError, TypeError, ValueError) as exc:
+                    self._send(HTTPStatus.BAD_REQUEST, {"error": str(exc) or "invalid request"})
+                except sqlite3.Error:
+                    self._send(
+                        HTTPStatus.SERVICE_UNAVAILABLE, {"error": "job store unavailable"}
+                    )
 
             def _handle_admin_operator_keys_post(self, route: str) -> None:
                 remainder = route[len("/admin/operator-keys") :].strip("/")
@@ -586,6 +610,23 @@ class AuthenticatedAPI:
         )
         return created
 
+    def submit_job(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
+        """Enqueue a signed GAA for the worker; the worker re-authorizes it."""
+        artifact = payload.get("artifact")
+        key = payload.get("idempotency_key")
+        attempts = payload.get("max_attempts", 3)
+        if not isinstance(artifact, dict):
+            raise ValueError("artifact must be an object")
+        if not isinstance(key, str) or not key:
+            raise ValueError("idempotency_key must be a non-empty string")
+        if not isinstance(attempts, int) or isinstance(attempts, bool) or not 0 < attempts <= 20:
+            raise ValueError("max_attempts must be an integer between 1 and 20")
+        job = self.job_store.enqueue(
+            {"artifact": artifact}, idempotency_key=key, max_attempts=attempts
+        )
+        self.service.record_governance_event("job.submitted", job.job_id, actor_id=actor_id)
+        return {"job_id": job.job_id, "status": job.status}
+
     def revoke_operator_key(self, key_id: str, *, actor_id: str) -> None:
         self._require_operator_key_store().revoke(key_id)
         self.service.record_governance_event(
@@ -618,6 +659,11 @@ def parse_server_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--operator-token", default=os.environ.get("GOVERNED_AUTONOMY_OPERATOR_TOKEN")
     )
     parser.add_argument(
+        "--job-store",
+        default=os.environ.get("GOVERNED_AUTONOMY_JOB_STORE"),
+        help="Path to the SQLite database used for POST /admin/jobs submissions.",
+    )
+    parser.add_argument(
         "--operator-key-store",
         default=os.environ.get("GOVERNED_AUTONOMY_OPERATOR_KEY_STORE"),
         help="Path to the SQLite database used for revocable operator API keys.",
@@ -643,6 +689,7 @@ def create_server(
     operator_token: str | None = None,
     operator_role: str = "gas-admin",
     operator_key_store: OperatorKeyStore | None = None,
+    job_store: Any | None = None,
 ) -> ThreadingHTTPServer:
     server = ThreadingHTTPServer(
         (host, port),
@@ -653,6 +700,7 @@ def create_server(
             operator_token=operator_token,
             operator_role=operator_role,
             operator_key_store=operator_key_store,
+            job_store=job_store,
             max_body_bytes=max_body_bytes,
             rate_limit=rate_limit,
         ).handler(),
@@ -709,8 +757,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     operator_key_store = (
         OperatorKeyStore(args.operator_key_store) if args.operator_key_store else None
     )
+    job_store = SQLiteJobStore(args.job_store) if args.job_store else None
     server = create_server(
         service,
+        job_store=job_store,
         bearer_token=args.bearer_token,
         oidc_validator=oidc_validator,
         operator_token=args.operator_token,

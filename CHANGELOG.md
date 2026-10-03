@@ -68,3 +68,5 @@ First working slice of the governance authorization and execution barrier.
 - Prometheus text and OpenTelemetry-compatible observability hooks
 - `Dockerfile`, `compose.yaml`, `deploy/kubernetes.yaml`, `deploy/helm/`,
   `docs/operations.md` — deployment and recovery starting points
+
+- Added `POST /admin/jobs` (enable with `--job-store` / `GOVERNED_AUTONOMY_JOB_STORE`) to enqueue signed GAAs for the worker; emits a `job.submitted` governance event.
