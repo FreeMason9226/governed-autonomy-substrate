@@ -24,3 +24,20 @@ the OpenAPI document is served at `/openapi.json`.
    check `/readyz` and run `deploy/scripts/rollback-smoke.sh`.
 6. Roll back with `helm rollback gas <revision> -n gas` if verification fails
    (restore the backup only if a migration must be reverted).
+
+## Configuration reference
+
+Flags override nothing implicitly; environment variables supply defaults.
+
+| Variable | Purpose |
+|---|---|
+| `GOVERNED_AUTONOMY_BEARER_TOKEN` | Static bearer token (required unless OIDC is configured) |
+| `GOVERNED_AUTONOMY_HOST` | Listen address (default `127.0.0.1`; image sets `0.0.0.0`) |
+| `GOVERNED_AUTONOMY_CORS_ORIGINS` | Exact-origin CORS allow-list |
+| `GOVERNED_AUTONOMY_LOG_LEVEL` | `DEBUG`..`CRITICAL` (default `INFO`) |
+| `GOVERNED_AUTONOMY_LOG_FORMAT` | `json` (default) or `text` |
+| `OIDC_ISSUER`, `OIDC_AUDIENCE`, `OIDC_JWKS_URL`, `OIDC_DISCOVERY` | Operator SSO |
+| `DATABASE_URL` | PostgreSQL for replay log and job queue |
+
+Run `gas-server --help` for the full flag list. Invalid configuration fails
+at startup, before the listener binds.

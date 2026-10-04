@@ -986,3 +986,11 @@ def test_versioned_read_routes_map_to_canonical():
     assert _unversioned("/api/v1/readyz") == "/readyz"
     assert _unversioned("/api/v1/admin/jobs") == "/api/v1/admin/jobs"
     assert _unversioned("/readyz") == "/readyz"
+
+
+def test_openapi_admin_operations_have_schemas():
+    from governed_autonomy.http_api import API_SCHEMA
+
+    assert "/api/v1/readyz" in API_SCHEMA["paths"]
+    resp = API_SCHEMA["paths"]["/admin/policies"]["get"]["responses"]
+    assert "content" in resp["200"] and "401" in resp and "403" in resp

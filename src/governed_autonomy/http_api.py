@@ -1254,3 +1254,35 @@ API_SCHEMA = {
         },
     },
 }
+
+
+def _complete_schema(schema: dict[str, Any]) -> None:
+    """Add JSON body schemas and auth error responses to every documented operation."""
+    json_ref = lambda name: {  # noqa: E731
+        "application/json": {"schema": {"$ref": f"#/components/schemas/{name}"}}
+    }
+    schemas = schema["components"]["schemas"]
+    schemas.setdefault("Object", {"type": "object", "additionalProperties": True})
+    for path, operations in list(schema["paths"].items()):
+        for operation in operations.values():
+            responses = operation["responses"]
+            for status, response in responses.items():
+                if (
+                    status.startswith("2")
+                    and "content" not in response
+                    and not path.startswith("/admin/app.")
+                    and path != "/admin"
+                ):
+                    response["content"] = json_ref("Object")
+                elif status.startswith(("4", "5")) and "content" not in response:
+                    response["content"] = json_ref("Error")
+            if operation.get("security"):
+                for status, text in (("401", "Unauthorized"), ("403", "Forbidden")):
+                    responses.setdefault(
+                        status, {"description": text, "content": json_ref("Error")}
+                    )
+    for path in ("/health", "/livez", "/readyz", "/startupz", "/audit", "/openapi.json"):
+        schema["paths"].setdefault(f"/api/v1{path}", schema["paths"][path])
+
+
+_complete_schema(API_SCHEMA)
