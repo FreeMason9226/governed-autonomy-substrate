@@ -978,3 +978,11 @@ def test_openapi_documents_responses():
     post = API_SCHEMA["paths"]["/api/v1/authorize"]["post"]["responses"]
     assert "400" in post and "content" in post["200"]
     assert "ExecuteResponse" in API_SCHEMA["components"]["schemas"]
+
+
+def test_versioned_read_routes_map_to_canonical():
+    from governed_autonomy.http_api import _unversioned
+
+    assert _unversioned("/api/v1/readyz") == "/readyz"
+    assert _unversioned("/api/v1/admin/jobs") == "/api/v1/admin/jobs"
+    assert _unversioned("/readyz") == "/readyz"

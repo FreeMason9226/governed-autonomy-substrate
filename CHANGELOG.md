@@ -6,6 +6,8 @@ maintains a separate **GAS Protocol Version** for wire-format changes.
 
 ## [Unreleased]
 
+- API versioning: `/api/v1/{health,livez,readyz,startupz,audit,openapi.json}` aliases and an `X-API-Version` response header.
+
 - Structured JSON logging (`GOVERNED_AUTONOMY_LOG_LEVEL`, `GOVERNED_AUTONOMY_LOG_FORMAT`) with per-request access log; OpenAPI now documents response and error schemas.
 
 - Added `docs/install-and-upgrade.md` (installation and upgrade procedures).

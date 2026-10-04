@@ -34,6 +34,21 @@ from .policy import policy_from_dict
 from .rbac import ClaimsMapper, Role, require_roles
 from .service import GovernedService
 
+API_VERSION = "1"
+_VERSIONED_GET = frozenset(
+    {"/health", "/livez", "/readyz", "/startupz", "/audit", "/openapi.json"}
+)
+
+
+def _unversioned(route: str) -> str:
+    """Map /api/v1/<read-only endpoint> onto its canonical route."""
+    if route.startswith("/api/v1/"):
+        stripped = route[len("/api/v1") :]
+        if stripped in _VERSIONED_GET:
+            return stripped
+    return route
+
+
 access_log = logging.getLogger("governed_autonomy.access")
 
 
@@ -139,7 +154,7 @@ class AuthenticatedAPI:
                 self.end_headers()
 
             def do_GET(self) -> None:
-                route = urlsplit(self.path).path
+                route = _unversioned(urlsplit(self.path).path)
                 if not api._allowed(self):
                     self._send(HTTPStatus.TOO_MANY_REQUESTS, {"error": "rate limit exceeded"})
                     return
@@ -464,6 +479,7 @@ class AuthenticatedAPI:
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(encoded)))
                 self.send_header("X-Request-ID", self._rid)
+                self.send_header("X-API-Version", API_VERSION)
                 self._send_cors()
                 for k, v in security_headers().items():
                     self.send_header(k, v)
