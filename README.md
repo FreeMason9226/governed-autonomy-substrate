@@ -11,6 +11,7 @@ A cryptographic authorization barrier for AI agents: **no signed artifact, no ac
 - **Full pipeline walkthrough:** [request, policies, risk score, decision, execution, signed proof, audit trail](https://freemason9226.github.io/governed-autonomy-substrate/pipeline.html) (risk score is a demo heuristic).
 - **In your browser (no install):** [protocol simulation](https://freemason9226.github.io/governed-autonomy-substrate/) - authorize, execute, then try replaying and tampering.
 - **The real server:** click *Open in Codespaces* above; `gas-server` starts on port 8000 (admin UI at `/admin`, token `codespaces-operator-token`). Demo credentials only.
+- **Live sandbox (real server):** <https://gas-demo.onrender.com> - send `Authorization: Bearer public-demo-token`; try `POST /authorize` then `POST /execute` ([curl walkthrough](docs/deployment-walkthrough.md#2-authorize-and-execute)). Free tier: the first request after idle takes ~1 minute; state resets on restart.
 - **Public sandbox (real server, memory mode):** [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/FreeMason9226/governed-autonomy-substrate) deploys `render.yaml` (free plan, demo bearer token `public-demo-token`, random operator token, no persistence). Do not put real data in it. Every route, including `/livez` and `/admin`, requires an `Authorization: Bearer` header.
 - **Locally:** `pip install -e . && gas-demo && gas-server` - see the [deployment walkthrough](docs/deployment-walkthrough.md).
 
