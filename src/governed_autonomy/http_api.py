@@ -88,6 +88,8 @@ class AuthenticatedAPI:
 
             def _cors_headers(self) -> dict[str, str]:
                 requested = (self.headers.get("Origin") or "").rstrip("/")
+                if not re.fullmatch(r"[A-Za-z0-9.:/_-]{1,255}", requested):
+                    return {}
                 origin = next((o for o in api.cors_origins if o == requested), None)
                 if not origin:
                     return {}
