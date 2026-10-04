@@ -21,7 +21,7 @@ classifiers = [
     "Topic :: Security",
     "Topic :: Software Development :: Libraries",
 ]
-dependencies = ["cryptography>=42.0"]
+dependencies = ["cryptography>=42.0", "jsonschema>=4.18"]
 
 [project.optional-dependencies]
 aws = [
@@ -36,6 +36,7 @@ dev = [
     "mypy>=1.10",
     "ruff>=0.4",
     "cryptography>=42.0",
+    "jsonschema>=4.18",
 ]
 
 [project.scripts]
@@ -60,6 +61,10 @@ python_version = "3.11"
 strict = true
 files = ["src/governed_autonomy"]
 
+[[tool.mypy.overrides]]
+module = ["jsonschema", "jsonschema.*"]
+ignore_missing_imports = true
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
@@ -70,3 +75,6 @@ ignore = ["E501"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+governed_autonomy = ["schemas/*.json"]

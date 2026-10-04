@@ -70,6 +70,7 @@ flowchart LR
 
 | Topic | Doc |
 |---|---|
+| Policy schema, versioning and registry | [docs/policy-schema.md](docs/policy-schema.md) |
 | Deploy end to end (local, Compose, Postgres, Helm) | [docs/deployment-walkthrough.md](docs/deployment-walkthrough.md) |
 | Security model and hardening checklist | [docs/security-model.md](docs/security-model.md) |
 | Performance benchmarks | [docs/benchmarks.md](docs/benchmarks.md) |

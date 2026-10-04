@@ -1,0 +1,10 @@
+{
+  "id": "rate-limit-basic",
+  "name": "Basic rate limit",
+  "version": "1.0.0",
+  "description": "Limits how often an agent may invoke actions.",
+  "rate_limits": [
+    {"action": "payments.transfer", "max_requests": 10, "window_seconds": 60, "scope": "agent"},
+    {"action": "*", "max_requests": 1000, "window_seconds": 3600, "scope": "tenant"}
+  ]
+}
