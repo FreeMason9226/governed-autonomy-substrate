@@ -148,7 +148,8 @@ jobs:
         env:
           GAS_URL: ${{ vars.GAS_URL }}
           GAS_TOKEN: ${{ secrets.GAS_TOKEN }}
-        run: curl --fail --silent -H "Authorization: Bearer $GAS_TOKEN" "$GAS_URL/readyz"
+        run: |
+          curl --fail --silent -H "Authorization: Bearer $GAS_TOKEN" "$GAS_URL/readyz"
 
   restore:
     name: Isolated backup restore drill
