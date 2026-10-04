@@ -33,6 +33,22 @@ class JobStore(Protocol):
     def get(self, job_id: str) -> Job: ...
 
 
+class JobSubmissionStore(Protocol):
+    def enqueue(
+        self,
+        payload: dict[str, Any],
+        *,
+        idempotency_key: str,
+        max_attempts: int = 3,
+    ) -> Job: ...
+
+    def get(self, job_id: str) -> Job: ...
+
+
+class JobStoreError(RuntimeError):
+    """A configured job store could not complete a persistence operation."""
+
+
 class SQLiteJobStore:
     def __init__(self, path: str = ":memory:") -> None:
         self.db = sqlite3.connect(path, check_same_thread=False)
@@ -81,6 +97,9 @@ class SQLiteJobStore:
         if row is None:
             raise KeyError("unknown job")
         return self._row(row)
+
+    def close(self) -> None:
+        self.db.close()
 
     def claim(self) -> Job | None:
         row = self.db.execute(

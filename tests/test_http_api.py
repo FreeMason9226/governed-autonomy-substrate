@@ -852,9 +852,25 @@ def test_admin_jobs_endpoint_enqueues_and_is_idempotent():
         assert status == 202 and first["status"] == "queued"
         status, again = request(instance, "POST", "/admin/jobs", body)
         assert again["job_id"] == first["job_id"]
+        serialized_body = {
+            **body,
+            "artifact": json.dumps(body["artifact"], separators=(",", ":")),
+        }
+        status, serialized_again = request(instance, "POST", "/admin/jobs", serialized_body)
+        assert status == 202 and serialized_again["job_id"] == first["job_id"]
+        status, state = request(instance, "GET", f"/admin/jobs/{first['job_id']}")
+        assert status == 200 and state["status"] == "queued"
+        assert state["attempts"] == 0 and "payload" not in state
         status, _ = request(instance, "POST", "/admin/jobs", {"artifact": "no", "idempotency_key": "k"})
         assert status == 400
-        assert store.claim().payload == {"artifact": {"x": 1}}
+        claimed = store.claim()
+        assert claimed is not None
+        assert json.loads(claimed.payload["artifact"]) == {"x": 1}
+        store.complete(claimed.job_id)
+        status, state = request(instance, "GET", f"/admin/jobs/{first['job_id']}")
+        assert status == 200 and state["status"] == "succeeded"
+        status, _ = request(instance, "GET", "/admin/jobs/unknown")
+        assert status == 404
     finally:
         instance.shutdown()
         instance.server_close()
@@ -868,6 +884,8 @@ def test_admin_jobs_endpoint_unconfigured_returns_503():
     thread.start()
     try:
         status, _ = request(instance, "POST", "/admin/jobs", {})
+        assert status == 503
+        status, _ = request(instance, "GET", "/admin/jobs/unknown")
         assert status == 503
     finally:
         instance.shutdown()

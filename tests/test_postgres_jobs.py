@@ -1,10 +1,12 @@
+import json
 import os
 import threading
 import uuid
+from http.client import HTTPConnection
 
 import pytest
 
-from governed_autonomy import PostgresJobStore
+from governed_autonomy import PostgresJobStore, build_demo_service, create_server
 from governed_autonomy.jobs import run_once
 
 
@@ -84,3 +86,69 @@ def test_expired_lease_is_reclaimed(connection):
     assert store.claim(now=5.0) is None
     again = store.claim(now=20.0)
     assert again is not None and again.job_id == job.job_id and again.attempts == 2
+
+
+def test_admin_api_submits_to_and_reads_from_postgres_queue(connection):
+    store = PostgresJobStore(connection)
+    service, _, _ = build_demo_service()
+    server = create_server(
+        service,
+        bearer_token="test-token",
+        operator_token="test-token",
+        job_store=store,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        client = HTTPConnection(*server.server_address)
+        body = json.dumps(
+            {"artifact": {"signed": True}, "idempotency_key": _key()}
+        ).encode()
+        client.request(
+            "POST",
+            "/admin/jobs",
+            body=body,
+            headers={
+                "Authorization": "Bearer test-token",
+                "Content-Type": "application/json",
+                "Content-Length": str(len(body)),
+            },
+        )
+        response = client.getresponse()
+        submitted = json.loads(response.read())
+        assert response.status == 202
+
+        client.request(
+            "GET",
+            f"/admin/jobs/{submitted['job_id']}",
+            headers={"Authorization": "Bearer test-token"},
+        )
+        response = client.getresponse()
+        status = json.loads(response.read())
+        assert response.status == 200
+        assert status["job_id"] == submitted["job_id"]
+        assert status["status"] == "queued"
+
+        cursor = connection.cursor()
+        cursor.execute(
+            "UPDATE jobs SET status='running', attempts=1 WHERE job_id=%s",
+            (submitted["job_id"],),
+        )
+        connection.commit()
+        cursor.close()
+        store.complete(submitted["job_id"])
+
+        client.request(
+            "GET",
+            f"/admin/jobs/{submitted['job_id']}",
+            headers={"Authorization": "Bearer test-token"},
+        )
+        response = client.getresponse()
+        status = json.loads(response.read())
+        assert response.status == 200 and status["status"] == "succeeded"
+        assert status["attempts"] == 1
+        client.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)

@@ -22,7 +22,7 @@ from .identity import (
     oidc_validator_from_discovery,
 )
 from .issuer import PolicyDeniedError
-from .jobs import SQLiteJobStore
+from .jobs import JobStoreError, JobSubmissionStore, SQLiteJobStore
 from .mesh import GovernanceInput
 from .operator_auth import OperatorKeyStore
 from .platform_admin import PolicyChangeManager, TrustChangeManager
@@ -40,7 +40,7 @@ class AuthenticatedAPI:
         operator_token: str | None = None,
         operator_role: str = "gas-admin",
         operator_key_store: OperatorKeyStore | None = None,
-        job_store: Any | None = None,
+        job_store: JobSubmissionStore | None = None,
         max_body_bytes: int = 64 * 1024,
         rate_limit: int = 120,
     ) -> None:
@@ -155,6 +155,9 @@ class AuthenticatedAPI:
                             HTTPStatus.SERVICE_UNAVAILABLE,
                             {"error": "operator key store unavailable"},
                         )
+                    return
+                if route.startswith("/admin/jobs/"):
+                    self._handle_admin_job_get(route)
                     return
                 if route == "/admin/governance-log":
                     self._send(HTTPStatus.OK, {"events": list(api.service.governance_log())})
@@ -334,10 +337,42 @@ class AuthenticatedAPI:
                     self._send(HTTPStatus.ACCEPTED, job)
                 except (KeyError, TypeError, ValueError) as exc:
                     self._send(HTTPStatus.BAD_REQUEST, {"error": str(exc) or "invalid request"})
-                except sqlite3.Error:
+                except (JobStoreError, sqlite3.Error):
                     self._send(
                         HTTPStatus.SERVICE_UNAVAILABLE, {"error": "job store unavailable"}
                     )
+
+            def _handle_admin_job_get(self, route: str) -> None:
+                if api.job_store is None:
+                    self._send(
+                        HTTPStatus.SERVICE_UNAVAILABLE,
+                        {"error": "job queue is not configured"},
+                    )
+                    return
+                job_id = route.removeprefix("/admin/jobs/").strip("/")
+                if not job_id or "/" in job_id:
+                    self._send(HTTPStatus.NOT_FOUND, {"error": "not found"})
+                    return
+                try:
+                    job = api.job_store.get(job_id)
+                except KeyError:
+                    self._send(HTTPStatus.NOT_FOUND, {"error": "unknown job"})
+                    return
+                except (JobStoreError, sqlite3.Error):
+                    self._send(
+                        HTTPStatus.SERVICE_UNAVAILABLE, {"error": "job store unavailable"}
+                    )
+                    return
+                self._send(
+                    HTTPStatus.OK,
+                    {
+                        "job_id": job.job_id,
+                        "status": job.status,
+                        "attempts": job.attempts,
+                        "max_attempts": job.max_attempts,
+                        "last_error": job.last_error,
+                    },
+                )
 
             def _handle_admin_operator_keys_post(self, route: str) -> None:
                 remainder = route[len("/admin/operator-keys") :].strip("/")
@@ -615,14 +650,26 @@ class AuthenticatedAPI:
         artifact = payload.get("artifact")
         key = payload.get("idempotency_key")
         attempts = payload.get("max_attempts", 3)
-        if not isinstance(artifact, dict):
-            raise ValueError("artifact must be an object")
+        if isinstance(artifact, dict):
+            artifact_json = json.dumps(artifact, sort_keys=True, separators=(",", ":"))
+        elif isinstance(artifact, str):
+            try:
+                parsed_artifact = json.loads(artifact)
+            except json.JSONDecodeError as exc:
+                raise ValueError("artifact must be a JSON object or serialized GAA") from exc
+            if not isinstance(parsed_artifact, dict):
+                raise ValueError("artifact must be a JSON object or serialized GAA")
+            artifact_json = artifact
+        else:
+            raise ValueError("artifact must be a JSON object or serialized GAA")
         if not isinstance(key, str) or not key:
             raise ValueError("idempotency_key must be a non-empty string")
         if not isinstance(attempts, int) or isinstance(attempts, bool) or not 0 < attempts <= 20:
             raise ValueError("max_attempts must be an integer between 1 and 20")
+        if self.job_store is None:
+            raise RuntimeError("job queue is not configured")
         job = self.job_store.enqueue(
-            {"artifact": artifact}, idempotency_key=key, max_attempts=attempts
+            {"artifact": artifact_json}, idempotency_key=key, max_attempts=attempts
         )
         self.service.record_governance_event("job.submitted", job.job_id, actor_id=actor_id)
         return {"job_id": job.job_id, "status": job.status}
@@ -661,7 +708,10 @@ def parse_server_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--job-store",
         default=os.environ.get("GOVERNED_AUTONOMY_JOB_STORE"),
-        help="Path to the SQLite database used for POST /admin/jobs submissions.",
+        help=(
+            "SQLite database path for the API job queue; when omitted, DATABASE_URL "
+            "configures the shared PostgreSQL queue."
+        ),
     )
     parser.add_argument(
         "--operator-key-store",
@@ -689,7 +739,7 @@ def create_server(
     operator_token: str | None = None,
     operator_role: str = "gas-admin",
     operator_key_store: OperatorKeyStore | None = None,
-    job_store: Any | None = None,
+    job_store: JobSubmissionStore | None = None,
 ) -> ThreadingHTTPServer:
     server = ThreadingHTTPServer(
         (host, port),
@@ -757,7 +807,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     operator_key_store = (
         OperatorKeyStore(args.operator_key_store) if args.operator_key_store else None
     )
-    job_store = SQLiteJobStore(args.job_store) if args.job_store else None
+    job_connection = None
+    if args.job_store:
+        job_store: JobSubmissionStore | None = SQLiteJobStore(args.job_store)
+    elif os.environ.get("DATABASE_URL"):
+        try:
+            import psycopg
+        except ImportError as exc:
+            raise SystemExit("install the postgres extra: pip install .[postgres]") from exc
+        from .jobs_postgres import PostgresJobStore
+
+        job_connection = psycopg.connect(os.environ["DATABASE_URL"])
+        job_store = PostgresJobStore(job_connection)
+    else:
+        job_store = None
     server = create_server(
         service,
         job_store=job_store,
@@ -780,6 +843,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         server.server_close()
         if operator_key_store is not None:
             operator_key_store.close()
+        if job_store is not None:
+            if isinstance(job_store, SQLiteJobStore):
+                job_store.close()
+            elif job_connection is not None:
+                job_connection.close()
     return 0
 
 
@@ -816,6 +884,20 @@ API_SCHEMA = {
                 "required": ["artifact"],
                 "properties": {"artifact": {"type": "object", "additionalProperties": True}},
             },
+            "JobSubmission": {
+                "type": "object",
+                "required": ["artifact", "idempotency_key"],
+                "properties": {
+                    "artifact": {
+                        "oneOf": [
+                            {"type": "object", "additionalProperties": True},
+                            {"type": "string", "description": "Serialized GAA JSON"},
+                        ]
+                    },
+                    "idempotency_key": {"type": "string", "minLength": 1},
+                    "max_attempts": {"type": "integer", "minimum": 1, "maximum": 20},
+                },
+            },
         },
     },
     "paths": {
@@ -844,6 +926,41 @@ API_SCHEMA = {
         "/livez": {"get": {"responses": {"200": {"description": "Liveness report"}}}},
         "/startupz": {"get": {"responses": {"200": {"description": "Startup report"}}}},
         "/audit": {"get": {"responses": {"200": {"description": "Audit summary"}}}},
+        "/admin/jobs": {
+            "post": {
+                "security": [{"bearerAuth": []}],
+                "requestBody": {
+                    "required": True,
+                    "content": {
+                        "application/json": {
+                            "schema": {"$ref": "#/components/schemas/JobSubmission"}
+                        }
+                    },
+                },
+                "responses": {
+                    "202": {"description": "Job accepted into the configured queue"},
+                    "503": {"description": "Job queue is not configured or unavailable"},
+                },
+            }
+        },
+        "/admin/jobs/{job_id}": {
+            "get": {
+                "security": [{"bearerAuth": []}],
+                "parameters": [
+                    {
+                        "name": "job_id",
+                        "in": "path",
+                        "required": True,
+                        "schema": {"type": "string"},
+                    }
+                ],
+                "responses": {
+                    "200": {"description": "Job status"},
+                    "404": {"description": "Job not found"},
+                    "503": {"description": "Job queue is not configured or unavailable"},
+                },
+            }
+        },
         "/openapi.json": {"get": {"responses": {"200": {"description": "OpenAPI document"}}}},
         "/admin": {
             "get": {

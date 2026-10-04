@@ -10,6 +10,8 @@ maintains a separate **GAS Protocol Version** for wire-format changes.
 
 - Roadmap platform slice: `AwsKmsBackend` (Ed25519 KMS signing for `KMSSigner`), `KeyLifecycleManager`, `WorkerRuntime`/`ContainerSandbox`/`VaultSecretProvider` (authorizer-gated, hardened sandbox, fail-closed secrets), `gas` operator CLI, worker Helm manifests, KMS IAM / Vault policy templates
 
+- Wired the admin job API to the shared PostgreSQL queue when `DATABASE_URL` is configured, added operator-only job status lookup, and covered API-to-Postgres queue lifecycle in integration tests.
+
 - `SPEC.md` — language-agnostic GAS Protocol Specification v1.0
 - `tests/conformance/` — language-agnostic conformance test vector suite
 - `CONTRIBUTING.md` — RFC process and contributor guide

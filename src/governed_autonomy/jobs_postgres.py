@@ -12,7 +12,7 @@ import threading
 import uuid
 from typing import Any
 
-from .jobs import Job
+from .jobs import Job, JobStoreError
 
 POSTGRES_JOBS_SCHEMA = """CREATE TABLE IF NOT EXISTS jobs (
     job_id TEXT PRIMARY KEY,
@@ -57,9 +57,9 @@ class PostgresJobStore:
                 )
                 self.connection.commit()
                 return result
-            except Exception:
+            except Exception as exc:
                 self.connection.rollback()
-                raise
+                raise JobStoreError("PostgreSQL job store operation failed") from exc
             finally:
                 cursor.close()
 
