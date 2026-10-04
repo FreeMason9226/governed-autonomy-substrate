@@ -1,0 +1,78 @@
+﻿<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GAS protocol demo</title>
+<style>
+body{font:15px/1.5 system-ui,sans-serif;max-width:960px;margin:2rem auto;padding:0 1rem;color:#1b1f23}
+.note{background:#fff8c5;border:1px solid #d4a72c;padding:.6rem .9rem;border-radius:6px}
+button{font:inherit;padding:.45rem .9rem;margin:.2rem .2rem .2rem 0;border:1px solid #1f6feb;background:#1f6feb;color:#fff;border-radius:6px;cursor:pointer}
+button.bad{background:#cf222e;border-color:#cf222e}button:disabled{opacity:.4;cursor:not-allowed}
+pre{background:#f6f8fa;padding:.7rem;border-radius:6px;overflow:auto;font-size:12.5px;max-height:260px}
+.log div{padding:.25rem .5rem;border-left:4px solid #8c959f;margin:.2rem 0;background:#f6f8fa}
+.ok{border-color:#1a7f37!important}.no{border-color:#cf222e!important}
+code{background:#eaeef2;padding:0 .25rem;border-radius:3px}
+</style></head><body>
+<h1>Governed Autonomy Substrate &mdash; protocol demo</h1>
+<p class="note"><b>Simulation.</b> This page re-implements the GAA protocol in your browser (WebCrypto Ed25519, canonical JSON, SHA-256 hash-chained log). It is not the real server. To run the real thing, open the repo in Codespaces or use Docker &mdash; see the <a href="https://github.com/FreeMason9226/governed-autonomy-substrate/blob/main/docs/deployment-walkthrough.md">walkthrough</a>.</p>
+<div id="unsupported" class="note" hidden>Your browser lacks WebCrypto Ed25519. Use a current Chrome, Edge, Firefox or Safari.</div>
+<h3>1. Request</h3>
+<p>Policy <code>demo-files-v1</code>: action <code>write_file</code>, path must be <code>out.txt</code>.</p>
+<label>path <input id="path" value="out.txt"></label>
+<label>content <input id="content" value="hello"></label>
+<div>
+<button id="auth">Authorize (issue GAA)</button>
+<button id="exec" disabled>Execute artifact</button>
+<button id="replay" class="bad" disabled>Replay same artifact</button>
+<button id="tamper" class="bad" disabled>Tamper &amp; execute</button>
+<button id="tlog" class="bad" disabled>Tamper with log</button>
+<button id="reset">Reset</button>
+</div>
+<h3>2. Current artifact (GAA)</h3><pre id="gaa">(none)</pre>
+<h3>3. Barrier outcomes</h3><div id="out" class="log"></div>
+<h3>4. Replay log (hash-chained)</h3><pre id="chain">(empty)</pre>
+<script>
+const enc=new TextEncoder();
+const b64u=b=>btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+const unb64u=s=>Uint8Array.from(atob(s.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0));
+const canon=v=>Array.isArray(v)?'['+v.map(canon).join(',')+']':v&&typeof v==='object'?'{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+canon(v[k])).join(',')+'}':JSON.stringify(v);
+const sha=async s=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',enc.encode(s)))].map(x=>x.toString(16).padStart(2,'0')).join('');
+const $=id=>document.getElementById(id);
+let keys,frames,nonces,gaa;
+const say=(ok,m)=>{const d=document.createElement('div');d.className=ok?'ok':'no';d.textContent=(ok?'✔ ':'✖ ')+m;$('out').prepend(d)};
+async function append(event){const prev=frames.length?frames[frames.length-1].hash:'';
+ const f={frame_id:frames.length,previous_hash:prev,event};f.hash=await sha(canon({frame_id:f.frame_id,previous_hash:prev,event}));frames.push(f);renderChain()}
+async function verifyChain(){let prev='';for(const f of frames){if(f.previous_hash!==prev||f.hash!==await sha(canon({frame_id:f.frame_id,previous_hash:f.previous_hash,event:f.event})))return false;prev=f.hash}return true}
+function renderChain(){$('chain').textContent=frames.length?frames.map(f=>`#${f.frame_id} ${f.hash.slice(0,16)}…  prev=${(f.previous_hash||'(genesis)').slice(0,12)}  ${f.event.type}`).join('\n'):'(empty)'}
+function setButtons(){const has=!!gaa;$('exec').disabled=$('tamper').disabled=!has;$('replay').disabled=!has||!nonces.size;$('tlog').disabled=!frames.length}
+async function reset(){keys=await crypto.subtle.generateKey('Ed25519',true,['sign','verify']);frames=[];nonces=new Set();gaa=null;$('gaa').textContent='(none)';$('out').innerHTML='';renderChain();setButtons()}
+async function authorize(){
+ const req={action:'write_file',path:$('path').value,content:$('content').value};
+ const ok=req.path==='out.txt'&&req.content.length>0&&req.content.length<=1000;
+ if(!ok){await append({type:'authorization_denied',request:req});say(false,'Denied by policy (path must be out.txt, content non-empty). Denial is audited, never signed.');setButtons();return}
+ const nonce=b64u(crypto.getRandomValues(new Uint8Array(16)));
+ await append({type:'authorization',request:req,nonce});
+ const body={action_request:req,decision:{allowed:true,policy_id:'demo-files-v1'},expires_at:Date.now()+300000,nonce,replay_frame_ref:frames.length-1,issuer_key_id:'demo-issuer'};
+ const sig=await crypto.subtle.sign('Ed25519',keys.privateKey,enc.encode(canon(body)));
+ gaa={...body,signature:b64u(sig)};$('gaa').textContent=JSON.stringify(gaa,null,2);say(true,'Authorized: GAA signed with Ed25519 and logged as frame #'+(frames.length-1));setButtons()}
+async function barrier(a){
+ const {signature,...body}=a;
+ if(!await crypto.subtle.verify('Ed25519',keys.publicKey,unb64u(signature),enc.encode(canon(body))))return 'invalid signature';
+ if(a.expires_at<Date.now())return 'expired';
+ if(nonces.has(a.nonce))return 'nonce already consumed (replay)';
+ const f=frames[a.replay_frame_ref];
+ if(!f||canon(f.event.request)!==canon(a.action_request))return 'artifact does not match authorization frame';
+ nonces.add(a.nonce);return null}
+async function execute(a,label){
+ if(!await verifyChain()){say(false,label+': log integrity failure, failing closed');return}
+ const err=await barrier(a);
+ if(err){say(false,label+': rejected — '+err)}
+ else{await append({type:'execution',nonce:a.nonce,result:'wrote '+a.action_request.path});say(true,label+': executed once; nonce consumed')}
+ setButtons()}
+$('auth').onclick=authorize;
+$('exec').onclick=()=>execute(gaa,'Execute');
+$('replay').onclick=()=>execute(gaa,'Replay');
+$('tamper').onclick=()=>{const t=structuredClone(gaa);t.action_request.content='rm -rf /';t.nonce=b64u(crypto.getRandomValues(new Uint8Array(16)));execute(t,'Tampered artifact')};
+$('tlog').onclick=async()=>{frames[0].event.request.content='altered after the fact';renderChain();say(false,'Log entry #0 modified (simulated attacker)…');await execute(gaa||{signature:'',nonce:''},'Execute after log tamper')};
+$('reset').onclick=reset;
+if(!crypto.subtle){$('unsupported').hidden=false}
+else crypto.subtle.generateKey('Ed25519',true,['sign','verify']).then(reset,()=>{$('unsupported').hidden=false;document.querySelectorAll('button').forEach(b=>b.disabled=true)});
+</script></body></html>

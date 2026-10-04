@@ -1,5 +1,84 @@
 # Governed Autonomy Substrate (MVP)
 
+[![CI](https://github.com/FreeMason9226/governed-autonomy-substrate/actions/workflows/ci.yml/badge.svg)](https://github.com/FreeMason9226/governed-autonomy-substrate/actions/workflows/ci.yml)
+[![Live demo](https://img.shields.io/badge/demo-try%20in%20browser-1f6feb)](https://freemason9226.github.io/governed-autonomy-substrate/)
+[![Open in Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/FreeMason9226/governed-autonomy-substrate)
+
+A cryptographic authorization barrier for AI agents: **no signed artifact, no action.** Every action must carry a short-lived, single-use, Ed25519-signed Governance Authorization Artifact (GAA) that matches an audited, hash-chained log entry and the current policy.
+
+## Try it
+
+- **In your browser (no install):** [protocol simulation](https://freemason9226.github.io/governed-autonomy-substrate/) - authorize, execute, then try replaying and tampering.
+- **The real server:** click *Open in Codespaces* above; `gas-server` starts on port 8000 (admin UI at `/admin`, token `codespaces-operator-token`). Demo credentials only.
+- **Locally:** `pip install -e . && gas-demo && gas-server` - see the [deployment walkthrough](docs/deployment-walkthrough.md).
+
+## Architecture at a glance
+
+```mermaid
+flowchart LR
+  Agent[AI agent] -->|1. request| API[HTTP API<br/>auth + limits]
+  API --> Arb[Deterministic arbiter<br/>signed policies]
+  Arb -->|allow| Iss[Issuer]
+  Iss -->|sign| KMS[(KMS / Ed25519 key)]
+  Iss -->|append| Log[(Replay log<br/>hash chain + nonces)]
+  Iss -->|2. GAA| Agent
+  Agent -->|3. GAA| Bar[Execution barrier]
+  Bar -->|verify + claim nonce| Log
+  Bar -->|4. run once| Act[Handler / sandboxed worker]
+  Ops[Operators<br/>CLI + admin UI] -->|signed governance changes| Arb
+```
+
+### Authorize, then execute
+
+```mermaid
+sequenceDiagram
+  participant A as Agent
+  participant I as Issuer
+  participant L as Replay log
+  participant B as Barrier
+  participant H as Handler
+  A->>I: authorize(policy, request)
+  I->>I: arbiter evaluates (deterministic)
+  I->>L: append authorization frame
+  I-->>A: signed GAA (nonce, expiry, frame ref)
+  A->>B: execute(GAA)
+  B->>B: signature, expiry, issuer not revoked
+  B->>L: claim nonce atomically
+  B->>B: frame match, policy digest, re-run arbiter
+  B->>H: invoke once
+  B->>L: append execution frame
+  A->>B: execute(same GAA)
+  B-->>A: rejected (nonce consumed)
+```
+
+### Durable execution: job queue and worker
+
+```mermaid
+flowchart LR
+  C[gas CLI / API] -->|POST /admin/jobs<br/>signed GAA| Q[(Postgres job queue<br/>SKIP LOCKED, leases)]
+  Q --> W[gas-worker]
+  V[(Vault)] -->|per-job secrets| W
+  W -->|re-verify GAA| Bar[Barrier]
+  Bar --> S[Sandboxed container]
+  W -->|status, metrics| Q
+```
+
+## Documentation
+
+| Topic | Doc |
+|---|---|
+| Deploy end to end (local, Compose, Postgres, Helm) | [docs/deployment-walkthrough.md](docs/deployment-walkthrough.md) |
+| Security model and hardening checklist | [docs/security-model.md](docs/security-model.md) |
+| Performance benchmarks | [docs/benchmarks.md](docs/benchmarks.md) |
+| Operations runbook | [docs/operations.md](docs/operations.md) |
+| Specification and conformance | [SPEC.md](SPEC.md), [docs/conformance.md](docs/conformance.md) |
+| Integrations | [A2A](docs/integrations/a2a.md), [LangChain](docs/integrations/langchain.md), [MCP](docs/integrations/mcp.md) |
+| Patent mapping | [PATENT_TO_CODE_MAPPING.md](PATENT_TO_CODE_MAPPING.md) |
+
+**Performance headline** (laptop, single process): full authorize + execute in ~0.37 ms in memory (about 2,700 cycles/s), ~5 ms over HTTP; durable SQLite ~24 ms. Details and caveats in [docs/benchmarks.md](docs/benchmarks.md).
+
+---
+
 This repository contains the first working slice of a governance authorization and execution barrier. It issues a signed **Governance Authorization Artifact (GAA)**, records the authorization as an append-only replay frame, and permits an action callable to run only after every barrier check succeeds.
 
 ## Architecture

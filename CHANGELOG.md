@@ -7,6 +7,9 @@ maintains a separate **GAS Protocol Version** for wire-format changes.
 ## [Unreleased]
 
 ### Added
+- Documentation: end-to-end deployment walkthrough, security model, benchmark report, and README architecture diagrams (Mermaid).
+- `benchmarks/bench.py` reproducible benchmark harness with JSON output.
+- Browser protocol demo (`docs/demo`, published via GitHub Pages workflow) and a Dev Container for Codespaces running the real server.
 - gas job submit <gaa.json> and gas job status <job_id> enqueue and inspect worker jobs through the admin API.
 
 - Roadmap platform slice: `AwsKmsBackend` (Ed25519 KMS signing for `KMSSigner`), `KeyLifecycleManager`, `WorkerRuntime`/`ContainerSandbox`/`VaultSecretProvider` (authorizer-gated, hardened sandbox, fail-closed secrets), `gas` operator CLI, worker Helm manifests, KMS IAM / Vault policy templates

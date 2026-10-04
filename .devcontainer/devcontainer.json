@@ -1,0 +1,17 @@
+﻿{
+  "name": "Governed Autonomy Substrate",
+  "image": "mcr.microsoft.com/devcontainers/python:3.12",
+  "postCreateCommand": "pip install -e '.[postgres]'",
+  "postStartCommand": "nohup gas-server --port 8000 > /tmp/gas-server.log 2>&1 &",
+  "containerEnv": {
+    "GAS_RUNTIME_MODE": "memory",
+    "GOVERNED_AUTONOMY_HOST": "0.0.0.0",
+    "GOVERNED_AUTONOMY_BEARER_TOKEN": "codespaces-demo-token",
+    "GOVERNED_AUTONOMY_OPERATOR_TOKEN": "codespaces-operator-token"
+  },
+  "forwardPorts": [8000],
+  "portsAttributes": {
+    "8000": { "label": "GAS API + admin UI (/admin)", "onAutoForward": "openBrowser" }
+  }
+}
+
