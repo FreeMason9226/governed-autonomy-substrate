@@ -14,4 +14,5 @@
         value: public-demo-token
       - key: GOVERNED_AUTONOMY_OPERATOR_TOKEN
         generateValue: true
-
+      - key: GOVERNED_AUTONOMY_CORS_ORIGINS
+        value: https://freemason9226.github.io

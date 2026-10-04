@@ -7,6 +7,7 @@ maintains a separate **GAS Protocol Version** for wire-format changes.
 ## [Unreleased]
 
 ### Added
+- Opt-in CORS (`--cors-origins` / `GOVERNED_AUTONOMY_CORS_ORIGINS`, exact-origin allow-list, `OPTIONS` preflight); pipeline demo gained a *real server* mode.
 - `render.yaml` blueprint and README button for a one-click public sandbox of the real server.
 - Helm: worker metrics port, headless Service, optional ServiceMonitor and scrape-only NetworkPolicy ingress (`worker.metrics.*`).
 - `docs/demo/pipeline.html`: interactive 8-stage governed request pipeline demo (policy evaluation, illustrative risk score, decision, execution, signed proof, hash-chained audit trail).

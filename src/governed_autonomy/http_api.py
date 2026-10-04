@@ -43,6 +43,7 @@ class AuthenticatedAPI:
         job_store: JobSubmissionStore | None = None,
         max_body_bytes: int = 64 * 1024,
         rate_limit: int = 120,
+        cors_origins: Sequence[str] = (),
     ) -> None:
         if not bearer_token and oidc_validator is None:
             raise ValueError("bearer_token or oidc_validator is required")
@@ -56,6 +57,7 @@ class AuthenticatedAPI:
         self.operator_key_store = operator_key_store
         self.job_store = job_store
         self.max_body_bytes = max_body_bytes
+        self.cors_origins = frozenset(o.rstrip("/") for o in cors_origins if o)
         self.rate_limiter = BoundedRateLimiter(rate_limit)
         if (
             self.service.policy_change_manager is not None
@@ -81,6 +83,30 @@ class AuthenticatedAPI:
 
         class Handler(BaseHTTPRequestHandler):
             server_version = "GovernedAutonomy/0.2"
+
+            def _cors_headers(self) -> dict[str, str]:
+                origin = (self.headers.get("Origin") or "").rstrip("/")
+                if not origin or origin not in api.cors_origins:
+                    return {}
+                return {
+                    "Access-Control-Allow-Origin": origin,
+                    "Access-Control-Expose-Headers": "X-Request-ID",
+                    "Vary": "Origin",
+                }
+
+            def do_OPTIONS(self) -> None:
+                cors = self._cors_headers()
+                self.send_response(HTTPStatus.NO_CONTENT if cors else HTTPStatus.FORBIDDEN)
+                for k, v in cors.items():
+                    self.send_header(k, v)
+                if cors:
+                    self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+                    self.send_header(
+                        "Access-Control-Allow-Headers", "Authorization, Content-Type"
+                    )
+                    self.send_header("Access-Control-Max-Age", "600")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
 
             def do_GET(self) -> None:
                 route = urlsplit(self.path).path
@@ -407,6 +433,8 @@ class AuthenticatedAPI:
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(encoded)))
                 self.send_header("X-Request-ID", api._request_id(self))
+                for k, v in self._cors_headers().items():
+                    self.send_header(k, v)
                 for k, v in security_headers().items():
                     self.send_header(k, v)
                 self.end_headers()
@@ -723,6 +751,11 @@ def parse_server_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--max-body-bytes", type=int, default=64 * 1024)
     parser.add_argument("--rate-limit", type=int, default=120)
+    parser.add_argument(
+        "--cors-origins",
+        default=os.environ.get("GOVERNED_AUTONOMY_CORS_ORIGINS", ""),
+        help="comma-separated browser origins allowed to call the API (default: none)",
+    )
     return parser.parse_args(argv)
 
 
@@ -740,6 +773,7 @@ def create_server(
     operator_role: str = "gas-admin",
     operator_key_store: OperatorKeyStore | None = None,
     job_store: JobSubmissionStore | None = None,
+    cors_origins: Sequence[str] = (),
 ) -> ThreadingHTTPServer:
     server = ThreadingHTTPServer(
         (host, port),
@@ -753,6 +787,7 @@ def create_server(
             job_store=job_store,
             max_body_bytes=max_body_bytes,
             rate_limit=rate_limit,
+            cors_origins=cors_origins,
         ).handler(),
     )
     if tls is not None:
@@ -824,6 +859,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     server = create_server(
         service,
         job_store=job_store,
+        cors_origins=[o.strip() for o in args.cors_origins.split(",")],
         bearer_token=args.bearer_token,
         oidc_validator=oidc_validator,
         operator_token=args.operator_token,

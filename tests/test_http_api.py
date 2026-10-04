@@ -891,3 +891,40 @@ def test_admin_jobs_endpoint_unconfigured_returns_503():
         instance.shutdown()
         instance.server_close()
         thread.join(timeout=2)
+
+
+def test_http_api_cors_is_opt_in_and_origin_scoped():
+    service, _, _ = build_demo_service()
+    allowed = "https://demo.example.com"
+    plain = create_server(service, bearer_token="test-token")
+    cors = create_server(service, bearer_token="test-token", cors_origins=[allowed + "/"])
+    servers = [plain, cors]
+    for s in servers:
+        threading.Thread(target=s.serve_forever, daemon=True).start()
+
+    def call(s, method, origin, headers=None):
+        connection = HTTPConnection(*s.server_address)
+        connection.request(method, "/livez", headers={"Origin": origin, **(headers or {})})
+        response = connection.getresponse()
+        response.read()
+        result = (response.status, response.getheader("Access-Control-Allow-Origin"), response)
+        connection.close()
+        return result
+
+    try:
+        assert call(plain, "OPTIONS", allowed)[:2] == (403, None)
+        status, origin, response = call(cors, "OPTIONS", allowed)
+        assert (status, origin) == (204, allowed)
+        assert "Authorization" in response.getheader("Access-Control-Allow-Headers")
+        assert call(cors, "OPTIONS", "https://evil.example.com")[:2] == (403, None)
+        status, origin, response = call(
+            cors, "GET", allowed, {"Authorization": "Bearer test-token"}
+        )
+        assert (status, origin) == (200, allowed)
+        assert response.getheader("Vary") == "Origin"
+        assert call(cors, "GET", "https://evil.example.com", {"Authorization": "Bearer test-token"})[1] is None
+        assert call(plain, "GET", allowed, {"Authorization": "Bearer test-token"})[1] is None
+    finally:
+        for s in servers:
+            s.shutdown()
+            s.server_close()

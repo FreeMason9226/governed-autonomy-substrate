@@ -25,6 +25,10 @@ code{background:#eaeef2;padding:0 .25rem;border-radius:3px}
 <label>Environment <select id="env"><option>dev</option><option>staging</option><option>prod</option></select></label>
 <label>Amount / size <input id="amount" type="number" value="10" min="0" style="width:6rem"></label>
 <label>Signed approvals <input id="appr" type="number" value="0" min="0" max="3" style="width:3rem"></label>
+<label><input type="checkbox" id="live"> Use the <b>real server</b> for write_file</label>
+<label>URL <input id="url" value="https://gas-demo.onrender.com" size="34"></label>
+<label>Token <input id="tok" value="public-demo-token" size="18"></label>
+<div style="font-size:12px;color:#57606a">Live mode sends approved <code>write_file</code> requests to a real <code>gas-server</code> (path is forced to <code>out.txt</code>); the server signs, executes once, and rejects the replay. The free instance may take ~1 minute to wake. Other actions stay simulated.</div>
 <div><button id="run">Submit request</button><button id="verify" class="alt">Verify audit trail</button><button id="tamper" class="bad">Tamper with audit trail</button><button id="clear" class="alt">Clear</button></div>
 </fieldset>
 <div class="steps" id="steps"></div>
@@ -57,6 +61,9 @@ function risk(r){let s={write_file:10,send_email:20,transfer_funds:40,delete_dat
  const m=Math.min(20,r.appr*10);s-=m;f.push('approvals -'+m);
  return {score:Math.max(0,Math.min(100,s)),factors:f}}
 let keys,frames=[],nonces=new Set();
+async function live(path,body,method){const base=$('url').value.replace(/\/+$/,'');
+ const res=await fetch(base+path,{method:method||'POST',headers:{'Authorization':'Bearer '+$('tok').value,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
+ const text=await res.text();let data;try{data=JSON.parse(text)}catch(e){data={raw:text}}return {status:res.status,data}}
 async function append(event){const prev=frames.length?frames[frames.length-1].hash:'';
  const f={frame_id:frames.length,previous_hash:prev,event};f.hash=await sha(canon({frame_id:f.frame_id,previous_hash:prev,event}));frames.push(f);renderAudit();return f}
 async function chainOk(){let prev='';for(const f of frames){if(f.previous_hash!==prev||f.hash!==await sha(canon({frame_id:f.frame_id,previous_hash:f.previous_hash,event:f.event})))return false;prev=f.hash}return true}
@@ -80,21 +87,34 @@ async function run(){
  await show(S[4],approved?'ok':'no',`<b>${approved?'APPROVED':'REJECTED'}</b> &mdash; ${why}.`);
  const nonce=b64u(crypto.getRandomValues(new Uint8Array(16)));
  await append({type:'authorization',summary:(approved?'ALLOW ':'DENY ')+r.action+'@'+r.env+' risk='+k.score,request:r,risk:k.score,allowed:approved,nonce:approved?nonce:null});
- let gaa=null,result=null,proof=null;
+ let gaa=null,result=null,proof=null,real=null;
  if(approved){
+  if($('live').checked&&r.action==='write_file'){
+   try{
+    const a=await live('/authorize',{policy_id:'demo-files-v1',request:{action:'write_file',path:'out.txt',content:'pipeline demo '+rid}});
+    if(a.status!==200)throw new Error('authorize '+a.status+' '+JSON.stringify(a.data));
+    const e1=await live('/execute',{artifact:a.data});
+    const e2=await live('/execute',{artifact:a.data});
+    const au=await live('/audit',null,'GET');
+    real={gaa:a.data,exec:e1,replay:e2,audit:au.data.audit_summary};
+   }catch(err){real={error:String(err)}}
+  }
   const body={action_request:r,decision:{allowed:true,risk_score:k.score},expires_at:Date.now()+300000,nonce,replay_frame_ref:frames.length-1,issuer_key_id:'demo-issuer'};
   gaa={...body,signature:b64u(await crypto.subtle.sign('Ed25519',keys.privateKey,enc.encode(canon(body))))};
   const {signature,...unsigned}=gaa;
   const sigOk=await crypto.subtle.verify('Ed25519',keys.publicKey,Uint8Array.from(atob(signature.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0)),enc.encode(canon(unsigned)));
   const fresh=!nonces.has(nonce);
-  if(sigOk&&fresh&&await chainOk()){nonces.add(nonce);result={status:'ok',effect:`simulated ${r.action} on ${r.env}`}}
-  await show(S[5],result?'ok':'no',result?`Barrier verified signature, expiry, log integrity; nonce consumed; handler ran once.<pre>${JSON.stringify(result)}</pre>`:'Barrier refused execution (failing closed).');
+  if(real&&real.gaa&&real.exec.status===200){result={status:'ok',source:'REAL gas-server',server_result:real.exec.data.result};gaa=real.gaa;nonces.add(nonce)}
+  else if(sigOk&&fresh&&await chainOk()){nonces.add(nonce);result={status:'ok',effect:`simulated ${r.action} on ${r.env}`}}
+  const note=real&&real.error?`<br><b>Live call failed (${real.error.replace(/</g,'&lt;')}); fell back to simulation.</b>`:'';
+  const replayNote=real&&real.replay?`<br>Real server on replaying the same artifact: <b>HTTP ${real.replay.status}</b> ${JSON.stringify(real.replay.data)}`:'';
+  await show(S[5],result?'ok':'no',result?`${real&&real.gaa?'<b>Real server</b> verified the signature, expiry and nonce, and ran the handler once.':'Barrier verified signature, expiry, log integrity; nonce consumed; handler ran once.'}<pre>${JSON.stringify(result)}</pre>${replayNote}${note}`:'Barrier refused execution (failing closed).');
  }else await show(S[5],'skip','Not executed &mdash; a rejected request never receives a signed artifact, so the barrier would refuse it.');
  const exF=await append({type:approved?'execution':'denial',summary:approved?'executed '+r.action:'not executed',nonce:approved?nonce:null,result});
- const receipt={request_digest:reqDigest,allowed:approved,risk_score:k.score,result_hash:await sha(canon(result)),audit_frame:exF.frame_id,audit_hash:exF.hash};
+ const receipt={source:real&&real.gaa?'real gas-server GAA':'browser simulation',request_digest:reqDigest,allowed:approved,risk_score:k.score,result_hash:await sha(canon(result)),audit_frame:exF.frame_id,audit_hash:exF.hash};
  proof={receipt,signature:b64u(await crypto.subtle.sign('Ed25519',keys.privateKey,enc.encode(canon(receipt))))};
- await show(S[6],'ok',`Signed receipt (Ed25519, key <code>demo-issuer</code>)${gaa?' plus the GAA':''}:<pre>${JSON.stringify(gaa?{gaa_signature:gaa.signature,...proof}:proof,null,2)}</pre>`);
- await show(S[7],'ok',`Saved as hash-chained frames #${frames.length-(approved?2:1)}${approved?'&ndash;#'+(frames.length-1):''}. Chain integrity: ${await chainOk()?'<b>valid</b>':'<b>BROKEN</b>'}. (Stored in memory for this tab.)`);
+ await show(S[6],'ok',`Receipt signed in-browser with an ephemeral Ed25519 demo key${gaa?(real&&real.gaa?', plus the GAA signed by the real server (key <code>demo-issuer</code>)':', plus the simulated GAA'):''}:<pre>${JSON.stringify(gaa?{gaa_signature:gaa.signature,...proof}:proof,null,2)}</pre>`);
+ await show(S[7],'ok',`Saved as hash-chained frames #${frames.length-(approved?2:1)}${approved?'&ndash;#'+(frames.length-1):''}. Chain integrity: ${await chainOk()?'<b>valid</b>':'<b>BROKEN</b>'}. (Browser copy, in memory for this tab.)`+(real&&real.audit?`<br>Server audit summary (<code>GET /audit</code>): <b>${real.audit.authorization_count}</b> authorization(s) recorded server-side.<pre>${JSON.stringify(real.audit,null,1).slice(0,900)}?</pre>`:''));
  $('run').disabled=false}
 $('run').onclick=run;
 $('verify').onclick=async()=>alert(frames.length?(await chainOk()?'Audit trail verified: every frame hash and link is intact.':'Audit trail INVALID: tampering detected.'):'Nothing to verify yet.');

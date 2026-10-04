@@ -101,6 +101,10 @@ kubectl -n gas rollout status deploy/gas-governed-autonomy
 
 Use `externalSecrets.enabled=true` to sync secrets from your store, `oidc.*` for operator SSO, and `postgres.enabled=true` for the bundled database (use a managed one in production). The worker is off by default; enable it in `values.yaml` once images and Vault are ready. Resource names depend on the release name; check with `kubectl -n gas get all`.
 
+## Browser access (CORS)
+
+CORS is off by default. To let a web page call the API, set `GOVERNED_AUTONOMY_CORS_ORIGINS` (or `--cors-origins`) to a comma-separated list of exact origins, e.g. `https://example.github.io`. Only those origins get `Access-Control-Allow-Origin`; preflights from others are refused, and bearer auth is still required on every call. Never put a real token in a public page.
+
 ## Verify and observe
 
 - `/livez`, `/readyz`, `/startupz` for probes; `/health` for replay and trust integrity.
