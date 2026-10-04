@@ -72,6 +72,12 @@ worker:
   vaultAddr: https://vault.security.svc.cluster.local:8200
   vaultNamespace: security
   vaultTokenSecret: ""
+  metrics:
+    enabled: true
+    port: 9100
+    serviceMonitor: false
+    # Namespaces allowed to scrape the worker
+    ingressNamespaces: [monitoring]
   sandbox:
     dropCapabilities: ["ALL"]
     readOnlyRootFilesystem: true

@@ -55,6 +55,16 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.databaseUrlSecret }}
                   key: url
+            {{- if .Values.worker.metrics.enabled }}
+            - name: GAS_WORKER_METRICS_PORT
+              value: {{ .Values.worker.metrics.port | quote }}
+            - name: GAS_WORKER_METRICS_HOST
+              value: "0.0.0.0"
+            {{- end }}
+          {{- if .Values.worker.metrics.enabled }}
+          ports:
+            - {name: metrics, containerPort: {{ .Values.worker.metrics.port }}}
+          {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: {{ .Values.worker.sandbox.readOnlyRootFilesystem }}
@@ -80,7 +90,18 @@ spec:
       app.kubernetes.io/instance: {{ .Release.Name }}
       app.kubernetes.io/component: worker
   policyTypes: [Ingress, Egress]
+  {{- if .Values.worker.metrics.enabled }}
+  ingress:
+    - from:
+        {{- range .Values.worker.metrics.ingressNamespaces }}
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: {{ . | quote }}}
+        {{- end }}
+      ports:
+        - {protocol: TCP, port: {{ .Values.worker.metrics.port }}}
+  {{- else }}
   ingress: []
+  {{- end }}
   egress:
     - to: [{namespaceSelector: {}}]
       ports:
@@ -98,4 +119,38 @@ spec:
               app.kubernetes.io/name: postgres
       ports:
         - {protocol: TCP, port: 5432}
+{{- if .Values.worker.metrics.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "governed-autonomy.fullname" . }}-worker-metrics
+  labels:
+    {{- include "governed-autonomy.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker-metrics
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: {{ include "governed-autonomy.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: worker
+  ports:
+    - {name: metrics, port: {{ .Values.worker.metrics.port }}, targetPort: metrics}
+{{- if .Values.worker.metrics.serviceMonitor }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "governed-autonomy.fullname" . }}-worker
+  labels:
+    {{- include "governed-autonomy.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: worker-metrics
+  endpoints:
+    - {port: metrics, path: /metrics}
+{{- end }}
+{{- end }}
 {{- end }}
