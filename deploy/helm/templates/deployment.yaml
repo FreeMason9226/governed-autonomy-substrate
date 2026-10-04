@@ -54,12 +54,23 @@ spec:
             - name: OIDC_JWKS_URL
               value: {{ required "values.oidc.jwksUrl is required when oidc.enabled is true" .Values.oidc.jwksUrl | quote }}
             {{- end }}
+          startupProbe:
+            exec:
+              command: ["python", "-c", "import os,urllib.request; r=urllib.request.Request('http://127.0.0.1:8000/livez',headers={'Authorization':'Bearer '+os.environ['GOVERNED_AUTONOMY_BEARER_TOKEN']}); urllib.request.urlopen(r)"]
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: {{ .Values.probes.startupFailureThreshold }}
           readinessProbe:
             exec:
               command: ["python", "-c", "import os,urllib.request; r=urllib.request.Request('http://127.0.0.1:8000/readyz',headers={'Authorization':'Bearer '+os.environ['GOVERNED_AUTONOMY_BEARER_TOKEN']}); urllib.request.urlopen(r)"]
+            periodSeconds: 10
+            timeoutSeconds: 5
           livenessProbe:
             exec:
               command: ["python", "-c", "import os,urllib.request; r=urllib.request.Request('http://127.0.0.1:8000/livez',headers={'Authorization':'Bearer '+os.environ['GOVERNED_AUTONOMY_BEARER_TOKEN']}); urllib.request.urlopen(r)"]
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           securityContext:
