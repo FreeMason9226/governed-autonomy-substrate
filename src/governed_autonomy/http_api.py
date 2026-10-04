@@ -85,8 +85,9 @@ class AuthenticatedAPI:
             server_version = "GovernedAutonomy/0.2"
 
             def _cors_headers(self) -> dict[str, str]:
-                origin = (self.headers.get("Origin") or "").rstrip("/")
-                if not origin or origin not in api.cors_origins:
+                requested = (self.headers.get("Origin") or "").rstrip("/")
+                origin = next((o for o in api.cors_origins if o == requested), None)
+                if not origin:
                     return {}
                 return {
                     "Access-Control-Allow-Origin": origin,
