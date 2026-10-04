@@ -63,7 +63,7 @@ jobs:
           curl -fsS -H "$H" -H 'Content-Type: application/json' localhost:8000/execute -d @exec.json
           code=$(curl -s -o /dev/null -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' localhost:8000/execute -d @exec.json)
           echo "replay -> $code"; test "$code" -ge 400
-          curl -fsS -H "$H" localhost:8000/audit | python3 -c "import json,sys;assert json.load(sys.stdin)['authorization_count']>=1"
+          curl -fsS -H "$H" localhost:8000/health | python3 -c "import json,sys;c=json.load(sys.stdin)['checks']['replay_chain'];assert c['ok'] and c['frames']>=2, c"
           # state must survive a pod restart (Postgres-backed)
           kubectl -n gas rollout restart deploy/governed-autonomy
           kubectl -n gas rollout status deploy/governed-autonomy --timeout=3m
