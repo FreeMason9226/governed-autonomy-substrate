@@ -1,0 +1,15 @@
+﻿services:
+  - type: web
+    name: gas-demo
+    runtime: docker
+    repo: https://github.com/FreeMason9226/governed-autonomy-substrate
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /livez
+    envVars:
+      - key: GAS_RUNTIME_MODE
+        value: memory
+      - key: GOVERNED_AUTONOMY_BEARER_TOKEN
+        value: public-demo-token
+      - key: GOVERNED_AUTONOMY_OPERATOR_TOKEN
+        generateValue: true
