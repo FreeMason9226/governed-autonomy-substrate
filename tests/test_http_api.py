@@ -958,3 +958,23 @@ def test_http_api_auditor_role_is_read_only():
         instance.shutdown()
         instance.server_close()
         thread.join(timeout=2)
+
+
+def test_json_log_formatter_emits_extras():
+    import json as _json
+    import logging as _logging
+
+    from governed_autonomy.logging_config import JsonFormatter
+
+    record = _logging.LogRecord("governed_autonomy.access", _logging.INFO, "", 0, "request", None, None)
+    record.status = "200"
+    out = _json.loads(JsonFormatter().format(record))
+    assert out["message"] == "request" and out["status"] == "200" and out["level"] == "INFO"
+
+
+def test_openapi_documents_responses():
+    from governed_autonomy.http_api import API_SCHEMA
+
+    post = API_SCHEMA["paths"]["/api/v1/authorize"]["post"]["responses"]
+    assert "400" in post and "content" in post["200"]
+    assert "ExecuteResponse" in API_SCHEMA["components"]["schemas"]

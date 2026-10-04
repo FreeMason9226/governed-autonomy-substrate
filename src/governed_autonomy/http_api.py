@@ -1,6 +1,7 @@
 import argparse
 import hmac
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -25,12 +26,15 @@ from .identity import (
 )
 from .issuer import PolicyDeniedError
 from .jobs import JobStoreError, JobSubmissionStore, SQLiteJobStore
+from .logging_config import configure_logging
 from .mesh import GovernanceInput
 from .operator_auth import OperatorKeyStore
 from .platform_admin import PolicyChangeManager, TrustChangeManager
 from .policy import policy_from_dict
 from .rbac import ClaimsMapper, Role, require_roles
 from .service import GovernedService
+
+access_log = logging.getLogger("governed_autonomy.access")
 
 
 class AuthenticatedAPI:
@@ -86,6 +90,21 @@ class AuthenticatedAPI:
 
         class Handler(BaseHTTPRequestHandler):
             server_version = "GovernedAutonomy/0.2"
+
+            def log_message(self, format: str, *args: Any) -> None:
+                # Structured access log; never logs headers or bodies.
+                if not args or not isinstance(args[1] if len(args) > 1 else None, (str, int)):
+                    return
+                access_log.info(
+                    "request",
+                    extra={
+                        "method": self.command,
+                        "path": urlsplit(self.path).path,
+                        "status": str(args[1]),
+                        "request_id": getattr(self, "_rid", None),
+                        "client": self.client_address[0],
+                    },
+                )
 
             def _cors_headers(self) -> dict[str, str]:
                 requested = (self.headers.get("Origin") or "").rstrip("/")
@@ -440,10 +459,11 @@ class AuthenticatedAPI:
 
             def _send(self, status: HTTPStatus, payload: dict[str, Any]) -> None:
                 encoded = json.dumps(payload, sort_keys=True).encode("utf-8")
+                self._rid = api._request_id(self)
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(encoded)))
-                self.send_header("X-Request-ID", api._request_id(self))
+                self.send_header("X-Request-ID", self._rid)
                 self._send_cors()
                 for k, v in security_headers().items():
                     self.send_header(k, v)
@@ -821,6 +841,7 @@ def create_server(
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_server_args(argv)
+    configure_logging()
     oidc_validator = None
     if args.oidc_discovery:
         if not args.oidc_issuer or not args.oidc_audience:
@@ -932,6 +953,27 @@ API_SCHEMA = {
                 "required": ["artifact"],
                 "properties": {"artifact": {"type": "object", "additionalProperties": True}},
             },
+            "Error": {
+                "type": "object",
+                "required": ["error"],
+                "properties": {"error": {"type": "string"}, "decision": {"type": "object"}},
+            },
+            "AuthorizationArtifact": {
+                "type": "object",
+                "description": "Signed governance authorization artifact (GAA)",
+                "additionalProperties": True,
+            },
+            "ExecuteResponse": {
+                "type": "object",
+                "required": ["result"],
+                "properties": {"result": {"type": "object", "additionalProperties": True}},
+            },
+            "HealthReport": {
+                "type": "object",
+                "required": ["ok"],
+                "properties": {"ok": {"type": "boolean"}, "status": {"type": "string"}},
+                "additionalProperties": True,
+            },
             "JobSubmission": {
                 "type": "object",
                 "required": ["artifact", "idempotency_key"],
@@ -956,7 +998,12 @@ API_SCHEMA = {
                     "required": True,
                     "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AuthorizeRequest"}}},
                 },
-                "responses": {"200": {"description": "Signed governance authorization artifact"}},
+                "responses": {
+                    "200": {"description": "Signed governance authorization artifact", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AuthorizationArtifact"}}}},
+                    "400": {"description": "Invalid request", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+                    "401": {"description": "Unauthorized", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+                    "403": {"description": "Policy denied", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+                },
             }
         },
         "/api/v1/execute": {
@@ -966,13 +1013,42 @@ API_SCHEMA = {
                     "required": True,
                     "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ExecuteRequest"}}},
                 },
-                "responses": {"200": {"description": "Action result"}},
+                "responses": {
+                    "200": {"description": "Action result", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ExecuteResponse"}}}},
+                    "400": {"description": "Invalid request", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+                    "401": {"description": "Unauthorized", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+                },
             }
         },
-        "/health": {"get": {"responses": {"200": {"description": "Health report"}}}},
-        "/readyz": {"get": {"responses": {"200": {"description": "Readiness report"}}}},
-        "/livez": {"get": {"responses": {"200": {"description": "Liveness report"}}}},
-        "/startupz": {"get": {"responses": {"200": {"description": "Startup report"}}}},
+        "/health": {
+            "get": {
+                "responses": {
+                    "200": {"description": "Health report", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HealthReport"}}}}
+                }
+            }
+        },
+        "/readyz": {
+            "get": {
+                "responses": {
+                    "200": {"description": "Readiness report", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HealthReport"}}}},
+                    "503": {"description": "Not ready", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HealthReport"}}}}
+                }
+            }
+        },
+        "/livez": {
+            "get": {
+                "responses": {
+                    "200": {"description": "Liveness report", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HealthReport"}}}}
+                }
+            }
+        },
+        "/startupz": {
+            "get": {
+                "responses": {
+                    "200": {"description": "Startup report", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HealthReport"}}}}
+                }
+            }
+        },
         "/audit": {"get": {"responses": {"200": {"description": "Audit summary"}}}},
         "/admin/jobs": {
             "post": {

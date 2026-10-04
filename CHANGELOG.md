@@ -6,6 +6,8 @@ maintains a separate **GAS Protocol Version** for wire-format changes.
 
 ## [Unreleased]
 
+- Structured JSON logging (`GOVERNED_AUTONOMY_LOG_LEVEL`, `GOVERNED_AUTONOMY_LOG_FORMAT`) with per-request access log; OpenAPI now documents response and error schemas.
+
 - Added `docs/install-and-upgrade.md` (installation and upgrade procedures).
 
 - Cluster test now covers the worker: it claims a queued job and re-verifies the artifact through the barrier. Fixed two chart bugs it found: the Service also selected worker pods, and the worker's Postgres egress selector never matched. Added optional `operator-token` key to the bearer secret for `/admin`.
