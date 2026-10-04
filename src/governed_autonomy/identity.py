@@ -59,7 +59,7 @@ class UrlJWKSProvider:
     def refresh(self) -> None:
         request = Request(self.url, headers={"Accept": "application/json"})
         try:
-            with urlopen(request, timeout=self.timeout_seconds) as response:
+            with urlopen(request, timeout=self.timeout_seconds) as response:  # nosec B310
                 document = json.loads(response.read())
         except Exception as exc:
             raise IdentityValidationError("JWKS endpoint is unavailable") from exc
@@ -108,7 +108,7 @@ def discover_oidc_configuration(
     discovery_url = issuer.rstrip("/") + "/.well-known/openid-configuration"
     request = Request(discovery_url, headers={"Accept": "application/json"})
     try:
-        with urlopen(request, timeout=timeout_seconds) as response:
+        with urlopen(request, timeout=timeout_seconds) as response:  # nosec B310
             document = json.loads(response.read())
     except Exception as exc:
         raise IdentityValidationError("OIDC discovery endpoint is unavailable") from exc

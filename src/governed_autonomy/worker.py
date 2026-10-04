@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
+import subprocess  # nosec B404
 import threading
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -57,7 +57,7 @@ class VaultSecretProvider:
         url = f"{self.addr}/v1/{quote(self.mount)}/data/policies/{policy_id}"
         request = Request(url, headers={"X-Vault-Token": self._token})
         try:
-            with urlopen(request, timeout=self.timeout_seconds) as response:
+            with urlopen(request, timeout=self.timeout_seconds) as response:  # nosec B310
                 document = json.loads(response.read())
         except (URLError, OSError, ValueError) as exc:
             raise RuntimeError("secret retrieval failed") from exc

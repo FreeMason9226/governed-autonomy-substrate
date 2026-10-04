@@ -687,7 +687,7 @@ def _env_flag(name: str) -> bool:
 
 def parse_server_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the Governed Autonomy HTTP API server.")
-    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--host", default=os.environ.get("GOVERNED_AUTONOMY_HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--bearer-token", default=os.environ.get("GOVERNED_AUTONOMY_BEARER_TOKEN"))
     parser.add_argument("--oidc-issuer", default=os.environ.get("OIDC_ISSUER"))

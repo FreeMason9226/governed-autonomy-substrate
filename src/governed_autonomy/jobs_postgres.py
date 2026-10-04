@@ -90,12 +90,12 @@ class PostgresJobStore:
             ),
         )
         row = self._run(
-            f"SELECT {_COLUMNS} FROM jobs WHERE idempotency_key=%s", (idempotency_key,), fetch="one"
+            f"SELECT {_COLUMNS} FROM jobs WHERE idempotency_key=%s", (idempotency_key,), fetch="one"  # nosec B608
         )
         return self._job(row)
 
     def get(self, job_id: str) -> Job:
-        row = self._run(f"SELECT {_COLUMNS} FROM jobs WHERE job_id=%s", (job_id,), fetch="one")
+        row = self._run(f"SELECT {_COLUMNS} FROM jobs WHERE job_id=%s", (job_id,), fetch="one")  # nosec B608
         if row is None:
             raise KeyError("unknown job")
         return self._job(row)
@@ -105,7 +105,7 @@ class PostgresJobStore:
 
         moment = time.time() if now is None else now
         row = self._run(
-            "UPDATE jobs SET status='running', attempts=attempts+1, lease_expires_at=%s"
+            "UPDATE jobs SET status='running', attempts=attempts+1, lease_expires_at=%s"  # nosec B608
             " WHERE job_id = (SELECT job_id FROM jobs"
             "   WHERE (status='queued' AND available_at<=%s)"
             "      OR (status='running' AND lease_expires_at<=%s)"

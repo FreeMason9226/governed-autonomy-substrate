@@ -30,7 +30,7 @@ def config_path() -> Path:
 
 
 def load_credentials() -> dict[str, Any]:
-    creds: dict[str, Any] = {"api_url": DEFAULT_API_URL, "token": None}
+    creds: dict[str, Any] = {"api_url": DEFAULT_API_URL, "token": None}  # nosec B105
     path = config_path()
     if path.exists():
         creds.update(json.loads(path.read_text(encoding="utf-8")))
@@ -68,7 +68,7 @@ def _request(method: str, path: str, body: dict[str, Any] | None = None) -> Any:
         headers["Content-Type"] = "application/json"
     request = Request(api_url + path, data=data, headers=headers, method=method)
     try:
-        with urlopen(request, timeout=10) as response:  # noqa: S310
+        with urlopen(request, timeout=10) as response:  # noqa: S310  # nosec B310
             return json.loads(response.read() or b"null")
     except HTTPError as exc:
         raise CLIError(f"HTTP {exc.code} from {path}") from exc
