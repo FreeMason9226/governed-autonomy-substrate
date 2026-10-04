@@ -141,7 +141,7 @@ def oidc_validator_from_discovery(
     cache_seconds: int = 300,
     timeout_seconds: int = 5,
     clock: Any = time.time,
-) -> "OIDCValidator":
+) -> OIDCValidator:
     """Build an ``OIDCValidator`` by resolving the JWKS endpoint via OIDC discovery.
 
     This lets operators configure only the issuer (and audience) instead of a

@@ -143,12 +143,18 @@ class PlatformDeploymentPolicy:
             if missing_roles:
                 raise ValueError(f"identity is missing required roles: {missing_roles}")
 
-        if self.mesh_required_actions and action in self.mesh_required_actions:
-            if not mesh_inputs or len(mesh_inputs) < max(1, self.min_mesh_inputs):
-                raise ValueError(f"mesh_inputs are required for action {action!r}")
-        if self.mesh_required_environments and environment in self.mesh_required_environments:
-            if not mesh_inputs or len(mesh_inputs) < max(1, self.min_mesh_inputs):
-                raise ValueError(f"mesh_inputs are required in environment {environment!r}")
+        if (
+            self.mesh_required_actions
+            and action in self.mesh_required_actions
+            and (not mesh_inputs or len(mesh_inputs) < max(1, self.min_mesh_inputs))
+        ):
+            raise ValueError(f"mesh_inputs are required for action {action!r}")
+        if (
+            self.mesh_required_environments
+            and environment in self.mesh_required_environments
+            and (not mesh_inputs or len(mesh_inputs) < max(1, self.min_mesh_inputs))
+        ):
+            raise ValueError(f"mesh_inputs are required in environment {environment!r}")
         if self.mesh_required_sources:
             provided = {item.source_id for item in mesh_inputs or ()}
             missing_sources = tuple(source_id for source_id in self.mesh_required_sources if source_id not in provided)
