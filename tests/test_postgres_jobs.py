@@ -3,11 +3,13 @@ import os
 import threading
 import uuid
 from http.client import HTTPConnection
+from types import SimpleNamespace
 
 import pytest
 
 from governed_autonomy import PostgresJobStore, build_demo_service, create_server
 from governed_autonomy.jobs import run_once
+from governed_autonomy.worker import ContainerSandbox, WorkerRuntime
 
 
 @pytest.fixture
@@ -89,8 +91,31 @@ def test_expired_lease_is_reclaimed(connection):
 
 
 def test_admin_api_submits_to_and_reads_from_postgres_queue(connection):
-    store = PostgresJobStore(connection)
+    psycopg = pytest.importorskip("psycopg")
+    schema = "gas_test_" + uuid.uuid4().hex
+    cursor = connection.cursor()
+    cursor.execute(f'CREATE SCHEMA "{schema}"')
+    connection.commit()
+    cursor.close()
+    worker_connection = psycopg.connect(
+        os.environ["GAS_POSTGRES_TEST_URL"], options=f"-c search_path={schema}"
+    )
+    store = PostgresJobStore(worker_connection)
     service, _, _ = build_demo_service()
+    service.actions["write_file"] = lambda _: {
+        "image": "alpine:3.20",
+        "command": ["echo", "api-to-worker"],
+    }
+    artifact = service.authorize(
+        {"action": "write_file", "path": "out.txt", "content": "signed request"},
+        "demo-files-v1",
+    )
+    sandbox_calls = []
+
+    def runner(argv, **kwargs):
+        sandbox_calls.append((argv, kwargs))
+        return SimpleNamespace(returncode=0, stdout=b"ok", stderr=b"")
+
     server = create_server(
         service,
         bearer_token="test-token",
@@ -102,7 +127,12 @@ def test_admin_api_submits_to_and_reads_from_postgres_queue(connection):
     try:
         client = HTTPConnection(*server.server_address)
         body = json.dumps(
-            {"artifact": {"signed": True}, "idempotency_key": _key()}
+            {
+                "artifact": artifact.to_dict(),
+                "idempotency_key": _key(),
+                "image": "untrusted:latest",
+                "command": ["rm", "-rf", "/"],
+            }
         ).encode()
         client.request(
             "POST",
@@ -129,14 +159,22 @@ def test_admin_api_submits_to_and_reads_from_postgres_queue(connection):
         assert status["job_id"] == submitted["job_id"]
         assert status["status"] == "queued"
 
-        cursor = connection.cursor()
-        cursor.execute(
-            "UPDATE jobs SET status='running', attempts=1 WHERE job_id=%s",
-            (submitted["job_id"],),
+        class NoSecrets:
+            def fetch(self, policy_id, required_keys):
+                return {}
+
+        worker = WorkerRuntime(
+            store,
+            authorizer=lambda payload: service.execute_json(payload["artifact"]),
+            secrets=NoSecrets(),
+            sandbox=ContainerSandbox(["alpine:3.20"], runner=runner),
+            retry_delay=0,
         )
-        connection.commit()
-        cursor.close()
-        store.complete(submitted["job_id"])
+        completed = worker.process_once()
+        assert completed is not None and completed.status == "succeeded"
+        assert sandbox_calls[0][0][-2:] == ["echo", "api-to-worker"]
+        assert "untrusted:latest" not in sandbox_calls[0][0]
+        assert worker.metrics.counts["succeeded"] == 1
 
         client.request(
             "GET",
@@ -152,3 +190,8 @@ def test_admin_api_submits_to_and_reads_from_postgres_queue(connection):
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+        worker_connection.close()
+        cursor = connection.cursor()
+        cursor.execute(f'DROP SCHEMA "{schema}" CASCADE')
+        connection.commit()
+        cursor.close()
