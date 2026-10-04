@@ -1,0 +1,64 @@
+﻿name: Cluster test
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: ['deploy/helm/**', 'Dockerfile', 'src/**']
+  push:
+    branches: [main]
+    paths: ['deploy/helm/**', 'Dockerfile', '.github/workflows/cluster.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  kind:
+    name: Helm install on a kind cluster
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TOKEN: cluster-test-token
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: helm/kind-action@a1b0e391336a6ee6713a0583f8c6240d70863de3 # v1.12.0
+        with:
+          cluster_name: gas
+      - name: Build and load image
+        run: |
+          docker build -t gas-ci:test .
+          kind load docker-image gas-ci:test --name gas
+      - name: Create namespace and secrets
+        run: |
+          kubectl create namespace gas
+          SEED=$(python3 -c "import os,base64;print(base64.urlsafe_b64encode(os.urandom(32)).decode().rstrip('='))")
+          kubectl -n gas create secret generic governed-autonomy --from-literal=bearer-token="$TOKEN"
+          kubectl -n gas create secret generic governed-autonomy-runtime \
+            --from-literal=url="postgresql://gas:ci-password@governed-autonomy-postgres:5432/gas" \
+            --from-literal=issuer-key-id=ci-issuer \
+            --from-literal=issuer-private-key="$SEED"
+      - name: Install chart
+        run: |
+          helm upgrade --install gas deploy/helm -n gas \
+            --set image.repository=gas-ci --set image.tag=test --set image.pullPolicy=Never \
+            --set replicaCount=2 \
+            --set postgres.enabled=true --set postgres.password=ci-password --set postgres.storage=1Gi \
+            --wait --timeout 8m
+      - name: Verify rollout
+        run: |
+          kubectl -n gas rollout status deploy/governed-autonomy --timeout=3m
+          kubectl -n gas get pods,svc,pvc
+      - name: Exercise the API through the Service
+        run: |
+          kubectl -n gas port-forward svc/governed-autonomy 8000:8000 >/tmp/pf.log 2>&1 &
+          sleep 5
+          H="Authorization: Bearer $TOKEN"
+          curl -fsS -H "$H" localhost:8000/livez
+          curl -fsS -H "$H" localhost:8000/readyz
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/livez)" = 401
+          curl -fsS -H "$H" localhost:8000/health
+      - name: Dump diagnostics on failure
+        if: failure()
+        run: |
+          kubectl -n gas get all,events
+          kubectl -n gas describe pods | tail -80
+          kubectl -n gas logs -l app.kubernetes.io/name=governed-autonomy --tail=80 --all-containers
