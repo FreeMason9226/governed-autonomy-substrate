@@ -116,7 +116,7 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/instance: {{ .Release.Name }}
-              app.kubernetes.io/name: postgres
+              app.kubernetes.io/name: {{ include "governed-autonomy.name" . }}-postgres
       ports:
         - {protocol: TCP, port: 5432}
 {{- if .Values.worker.metrics.enabled }}

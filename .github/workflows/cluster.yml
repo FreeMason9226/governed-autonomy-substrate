@@ -31,7 +31,7 @@ jobs:
         run: |
           kubectl create namespace gas
           SEED=$(python3 -c "import os,base64;print(base64.urlsafe_b64encode(os.urandom(32)).decode().rstrip('='))")
-          kubectl -n gas create secret generic governed-autonomy --from-literal=bearer-token="$TOKEN"
+          kubectl -n gas create secret generic governed-autonomy --from-literal=bearer-token="$TOKEN" --from-literal=operator-token="$TOKEN-op"
           kubectl -n gas create secret generic governed-autonomy-runtime \
             --from-literal=url="postgresql://gas:ci-password@governed-autonomy-postgres:5432/gas" \
             --from-literal=issuer-key-id=ci-issuer \
@@ -42,6 +42,8 @@ jobs:
             --set image.repository=gas-ci --set image.tag=test --set image.pullPolicy=Never \
             --set replicaCount=2 \
             --set postgres.enabled=true --set postgres.password=ci-password --set postgres.storage=1Gi \
+            --set worker.enabled=true --set worker.image.repository=gas-ci --set worker.image.tag=test \
+            --set worker.allowedImages=alpine:3 --set worker.replicaCount=1 \
             --timeout 3m --wait
       - name: Verify rollout
         run: |
@@ -72,6 +74,30 @@ jobs:
           sleep 5
           code=$(curl -s -o /dev/null -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' localhost:8000/execute -d @exec.json)
           echo "replay after restart -> $code"; test "$code" -ge 400
+      - name: Worker claims and re-verifies a queued job
+        run: |
+          kubectl -n gas rollout status deploy/governed-autonomy-worker --timeout=3m
+          kubectl -n gas port-forward svc/governed-autonomy 8000:8000 >/tmp/pf3.log 2>&1 &
+          sleep 5
+          H="Authorization: Bearer $TOKEN"; OP="Authorization: Bearer $TOKEN-op"
+          curl -s -H "$H" -H 'Content-Type: application/json' localhost:8000/authorize \
+            -d '{"policy_id":"demo-files-v1","request":{"action":"write_file","path":"job.txt","content":"job"}}' > gaa2.json
+          python3 -c "import json;print(json.dumps({'artifact':json.load(open('gaa2.json')),'idempotency_key':'ci-1','max_attempts':1}))" > job.json
+          curl -fsS -H "$OP" -H "X-Operator: ci" -H 'Content-Type: application/json' localhost:8000/admin/jobs -d @job.json | tee submitted.json
+          id=$(python3 -c "import json;print(json.load(open('submitted.json'))['job_id'])")
+          for i in $(seq 1 30); do
+            st=$(curl -fsS -H "$OP" localhost:8000/admin/jobs/$id | python3 -c "import json,sys;print(json.load(sys.stdin)['status'])")
+            echo "job $id -> $st"
+            test "$st" != queued && test "$st" != running && break
+            sleep 2
+          done
+          # no container runtime in the pod, so the job ends in dead_letter; the worker still claimed it
+          test "$st" = dead_letter
+          # the worker consumed the artifact, so a direct execute is now a replay
+          echo "{\"artifact\": $(cat gaa2.json)}" > exec2.json
+          code=$(curl -s -o /dev/null -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' localhost:8000/execute -d @exec2.json)
+          echo "execute after worker -> $code"; test "$code" -ge 400
+          kubectl -n gas exec deploy/governed-autonomy-worker -- python -c "import urllib.request as u;print(u.urlopen('http://127.0.0.1:9100/metrics').read().decode())"
       - name: Dump diagnostics on failure
         if: failure()
         run: |

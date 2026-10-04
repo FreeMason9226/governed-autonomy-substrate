@@ -46,6 +46,12 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.bearerTokenSecret }}
                   key: bearer-token
+            - name: GOVERNED_AUTONOMY_OPERATOR_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.bearerTokenSecret }}
+                  key: operator-token
+                  optional: true
             {{- if .Values.oidc.enabled }}
             - name: OIDC_ISSUER
               value: {{ required "values.oidc.issuer is required when oidc.enabled is true" .Values.oidc.issuer | quote }}
