@@ -99,6 +99,11 @@ class AuthenticatedAPI:
                     "Vary": "Origin",
                 }
 
+            def _send_cors(self) -> None:
+                for k, v in self._cors_headers().items():
+                    if "\r" not in v and "\n" not in v:
+                        self.send_header(k, v)
+
             def do_OPTIONS(self) -> None:
                 cors = self._cors_headers()
                 self.send_response(HTTPStatus.NO_CONTENT if cors else HTTPStatus.FORBIDDEN)
@@ -438,8 +443,7 @@ class AuthenticatedAPI:
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(encoded)))
                 self.send_header("X-Request-ID", api._request_id(self))
-                for k, v in self._cors_headers().items():
-                    self.send_header(k, v)
+                self._send_cors()
                 for k, v in security_headers().items():
                     self.send_header(k, v)
                 self.end_headers()
