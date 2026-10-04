@@ -66,7 +66,7 @@ def test_http_api_authorizes_executes_reports_health_and_audit(server):
 
     status, audit = request(server, "GET", "/audit")
     assert status == 200
-    assert audit["actions"] == ["write_file"]
+    assert audit["actions"] == ["run_job", "write_file"]
     assert audit["audit_summary"]["execution_count"] == 1
 
 

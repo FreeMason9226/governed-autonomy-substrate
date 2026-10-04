@@ -82,6 +82,8 @@ The server's `POST /admin/jobs` (or `gas job submit`) enqueues a GAA; the worker
 
 For KMS signing apply `deploy/security/aws-kms-iam-policy.json` to the service role; for Vault apply `deploy/security/vault-worker-policy.hcl`.
 
+The Helm worker pod does not have a container runtime or access to a node container socket. The kind CI integration runs `gas-worker` on the runner's Docker host while it connects to the cluster's PostgreSQL queue; this verifies real sandbox execution without granting the pod host-level access. For production Kubernetes deployments, use a dedicated sandbox backend rather than mounting the node's container socket.
+
 ## 6. Kubernetes (Helm)
 
 ```bash

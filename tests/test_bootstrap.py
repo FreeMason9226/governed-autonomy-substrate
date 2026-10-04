@@ -10,3 +10,20 @@ def test_bootstrap_wires_complete_governed_service():
 
     assert service.execute_json(artifact.to_json()) == "bootstrapped"
     assert health_report(replay_log=replay_log)["ok"] is True
+
+
+def test_bootstrap_authorizes_job_specs_for_the_worker():
+    service, _, _ = build_demo_service()
+    artifact = service.authorize(
+        {
+            "action": "run_job",
+            "image": "gas-ci:test",
+            "command": ["python", "-c", "print(4242)"],
+        },
+        "demo-jobs-v1",
+    )
+
+    assert service.execute_json(artifact.to_json()) == {
+        "image": "gas-ci:test",
+        "command": ["python", "-c", "print(4242)"],
+    }
