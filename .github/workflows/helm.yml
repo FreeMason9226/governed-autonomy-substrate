@@ -1,6 +1,7 @@
 ﻿name: Helm
 
 on:
+  workflow_dispatch:
   pull_request:
     paths: ['deploy/helm/**']
   push:
@@ -20,3 +21,4 @@ jobs:
       - run: helm template gas deploy/helm > /dev/null
       - name: Template with worker metrics and ServiceMonitor
         run: helm template gas deploy/helm --set worker.enabled=true --set worker.metrics.serviceMonitor.enabled=true > /dev/null
+
