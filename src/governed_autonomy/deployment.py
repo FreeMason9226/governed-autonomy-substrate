@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 import uuid
@@ -42,11 +43,9 @@ class BoundedRateLimiter:
 
 
 def correlation_id(value: str | None = None) -> str:
-    return (
-        value
-        if value and len(value) <= 128 and all(ch.isalnum() or ch in "-._" for ch in value)
-        else uuid.uuid4().hex
-    )
+    if value and re.fullmatch(r"[A-Za-z0-9._-]{1,128}", value):
+        return value
+    return uuid.uuid4().hex
 
 
 def security_headers() -> dict[str, str]:
