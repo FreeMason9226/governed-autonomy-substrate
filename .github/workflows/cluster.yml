@@ -42,7 +42,7 @@ jobs:
             --set image.repository=gas-ci --set image.tag=test --set image.pullPolicy=Never \
             --set replicaCount=2 \
             --set postgres.enabled=true --set postgres.password=ci-password --set postgres.storage=1Gi \
-            --wait --timeout 8m
+            --timeout 3m --wait
       - name: Verify rollout
         run: |
           kubectl -n gas rollout status deploy/governed-autonomy --timeout=3m
@@ -61,4 +61,5 @@ jobs:
         run: |
           kubectl -n gas get all,events
           kubectl -n gas describe pods | tail -80
-          kubectl -n gas logs -l app.kubernetes.io/name=governed-autonomy --tail=80 --all-containers
+          for p in $(kubectl -n gas get pods -o name | grep -v postgres); do echo "== $p"; kubectl -n gas logs $p --tail=60; kubectl -n gas logs $p --previous --tail=60 || true; done
+
