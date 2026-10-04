@@ -52,7 +52,7 @@ jobs:
       - name: Exercise the API through the Service
         run: |
           kubectl -n gas port-forward svc/governed-autonomy 8000:8000 >/tmp/pf.log 2>&1 &
-          sleep 5
+          for i in $(seq 1 30); do curl -s -o /dev/null localhost:8000/livez && break; sleep 1; done
           H="Authorization: Bearer $TOKEN"
           curl -fsS -H "$H" localhost:8000/livez
           curl -fsS -H "$H" localhost:8000/readyz
@@ -71,14 +71,14 @@ jobs:
           kubectl -n gas rollout status deploy/governed-autonomy --timeout=3m
           pkill -f "port-forward" || true
           kubectl -n gas port-forward svc/governed-autonomy 8000:8000 >/tmp/pf2.log 2>&1 &
-          sleep 5
+          for i in $(seq 1 30); do curl -s -o /dev/null localhost:8000/livez && break; sleep 1; done
           code=$(curl -s -o /dev/null -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' localhost:8000/execute -d @exec.json)
           echo "replay after restart -> $code"; test "$code" -ge 400
       - name: Worker claims and re-verifies a queued job
         run: |
           kubectl -n gas rollout status deploy/governed-autonomy-worker --timeout=3m
           kubectl -n gas port-forward svc/governed-autonomy 8000:8000 >/tmp/pf3.log 2>&1 &
-          sleep 5
+          for i in $(seq 1 30); do curl -s -o /dev/null localhost:8000/livez && break; sleep 1; done
           H="Authorization: Bearer $TOKEN"; OP="Authorization: Bearer $TOKEN-op"
           curl -s -H "$H" -H 'Content-Type: application/json' localhost:8000/authorize \
             -d '{"policy_id":"demo-files-v1","request":{"action":"write_file","path":"job.txt","content":"job"}}' > gaa2.json
