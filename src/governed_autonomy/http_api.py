@@ -2,8 +2,10 @@ import argparse
 import hmac
 import json
 import os
+import re
 import sqlite3
 import ssl
+import uuid
 from collections.abc import Sequence
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -12,7 +14,7 @@ from urllib.parse import urlsplit
 
 from .admin_ui import render_admin_css, render_admin_js, render_admin_ui
 from .bootstrap import build_runtime_service
-from .deployment import BoundedRateLimiter, TLSConfig, correlation_id, security_headers
+from .deployment import BoundedRateLimiter, TLSConfig, security_headers
 from .errors import AuthorizationError
 from .health import health_report
 from .identity import (
@@ -528,7 +530,8 @@ class AuthenticatedAPI:
 
     @staticmethod
     def _request_id(request: BaseHTTPRequestHandler) -> str:
-        return correlation_id(request.headers.get("X-Request-ID"))
+        match = re.fullmatch(r"[A-Za-z0-9._-]{1,128}", request.headers.get("X-Request-ID") or "")
+        return match.group(0) if match else uuid.uuid4().hex
 
     def _read_json(self, request: BaseHTTPRequestHandler) -> dict[str, Any]:
         header = request.headers.get("Content-Length")
