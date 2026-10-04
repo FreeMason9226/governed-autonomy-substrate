@@ -20,5 +20,6 @@ jobs:
       - run: helm lint deploy/helm
       - run: helm template gas deploy/helm > /dev/null
       - name: Template with worker metrics and ServiceMonitor
-        run: helm template gas deploy/helm --set worker.enabled=true --set worker.metrics.serviceMonitor.enabled=true > /dev/null
+        run: helm template gas deploy/helm --set worker.enabled=true --set worker.allowedImages=python:3.12-slim --set worker.metrics.serviceMonitor=true > /dev/null
+
 
