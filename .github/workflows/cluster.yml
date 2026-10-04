@@ -1,4 +1,4 @@
-﻿name: Cluster test
+name: Cluster test
 
 on:
   workflow_dispatch:
@@ -56,6 +56,22 @@ jobs:
           curl -fsS -H "$H" localhost:8000/readyz
           test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/livez)" = 401
           curl -fsS -H "$H" localhost:8000/health
+          curl -s -H "$H" -H 'Content-Type: application/json' localhost:8000/authorize \
+            -d '{"policy_id":"demo-files-v1","request":{"action":"write_file","path":"out.txt","content":"hello"}}' > gaa.json
+          python3 -c "import json;d=json.load(open('gaa.json'));assert d.get('signature') or d.get('artifact_payload'), d"
+          echo "{\"artifact\": $(cat gaa.json)}" > exec.json
+          curl -fsS -H "$H" -H 'Content-Type: application/json' localhost:8000/execute -d @exec.json
+          code=$(curl -s -o /dev/null -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' localhost:8000/execute -d @exec.json)
+          echo "replay -> $code"; test "$code" -ge 400
+          curl -fsS -H "$H" localhost:8000/audit | python3 -c "import json,sys;assert json.load(sys.stdin)['authorization_count']>=1"
+          # state must survive a pod restart (Postgres-backed)
+          kubectl -n gas rollout restart deploy/governed-autonomy
+          kubectl -n gas rollout status deploy/governed-autonomy --timeout=3m
+          pkill -f "port-forward" || true
+          kubectl -n gas port-forward svc/governed-autonomy 8000:8000 >/tmp/pf2.log 2>&1 &
+          sleep 5
+          code=$(curl -s -o /dev/null -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' localhost:8000/execute -d @exec.json)
+          echo "replay after restart -> $code"; test "$code" -ge 400
       - name: Dump diagnostics on failure
         if: failure()
         run: |
