@@ -1,6 +1,7 @@
 import argparse
 import hmac
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -25,12 +26,30 @@ from .identity import (
 )
 from .issuer import PolicyDeniedError
 from .jobs import JobStoreError, JobSubmissionStore, SQLiteJobStore
+from .logging_config import configure_logging
 from .mesh import GovernanceInput
 from .operator_auth import OperatorKeyStore
 from .platform_admin import PolicyChangeManager, TrustChangeManager
 from .policy import policy_from_dict
 from .rbac import ClaimsMapper, Role, require_roles
 from .service import GovernedService
+
+API_VERSION = "1"
+_VERSIONED_GET = frozenset(
+    {"/health", "/livez", "/readyz", "/startupz", "/audit", "/openapi.json"}
+)
+
+
+def _unversioned(route: str) -> str:
+    """Map /api/v1/<read-only endpoint> onto its canonical route."""
+    if route.startswith("/api/v1/"):
+        stripped = route[len("/api/v1") :]
+        if stripped in _VERSIONED_GET:
+            return stripped
+    return route
+
+
+access_log = logging.getLogger("governed_autonomy.access")
 
 
 class AuthenticatedAPI:
@@ -87,6 +106,21 @@ class AuthenticatedAPI:
         class Handler(BaseHTTPRequestHandler):
             server_version = "GovernedAutonomy/0.2"
 
+            def log_message(self, format: str, *args: Any) -> None:
+                # Structured access log; never logs headers or bodies.
+                if not args or not isinstance(args[1] if len(args) > 1 else None, (str, int)):
+                    return
+                access_log.info(
+                    "request",
+                    extra={
+                        "method": self.command,
+                        "path": urlsplit(self.path).path,
+                        "status": str(args[1]),
+                        "request_id": getattr(self, "_rid", None),
+                        "client": self.client_address[0],
+                    },
+                )
+
             def _cors_headers(self) -> dict[str, str]:
                 requested = (self.headers.get("Origin") or "").rstrip("/")
                 if not re.fullmatch(r"[A-Za-z0-9.:/_-]{1,255}", requested):
@@ -120,7 +154,7 @@ class AuthenticatedAPI:
                 self.end_headers()
 
             def do_GET(self) -> None:
-                route = urlsplit(self.path).path
+                route = _unversioned(urlsplit(self.path).path)
                 if not api._allowed(self):
                     self._send(HTTPStatus.TOO_MANY_REQUESTS, {"error": "rate limit exceeded"})
                     return
@@ -440,10 +474,12 @@ class AuthenticatedAPI:
 
             def _send(self, status: HTTPStatus, payload: dict[str, Any]) -> None:
                 encoded = json.dumps(payload, sort_keys=True).encode("utf-8")
+                self._rid = api._request_id(self)
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(encoded)))
-                self.send_header("X-Request-ID", api._request_id(self))
+                self.send_header("X-Request-ID", self._rid)
+                self.send_header("X-API-Version", API_VERSION)
                 self._send_cors()
                 for k, v in security_headers().items():
                     self.send_header(k, v)
@@ -821,6 +857,7 @@ def create_server(
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_server_args(argv)
+    configure_logging()
     oidc_validator = None
     if args.oidc_discovery:
         if not args.oidc_issuer or not args.oidc_audience:
@@ -932,6 +969,27 @@ API_SCHEMA = {
                 "required": ["artifact"],
                 "properties": {"artifact": {"type": "object", "additionalProperties": True}},
             },
+            "Error": {
+                "type": "object",
+                "required": ["error"],
+                "properties": {"error": {"type": "string"}, "decision": {"type": "object"}},
+            },
+            "AuthorizationArtifact": {
+                "type": "object",
+                "description": "Signed governance authorization artifact (GAA)",
+                "additionalProperties": True,
+            },
+            "ExecuteResponse": {
+                "type": "object",
+                "required": ["result"],
+                "properties": {"result": {"type": "object", "additionalProperties": True}},
+            },
+            "HealthReport": {
+                "type": "object",
+                "required": ["ok"],
+                "properties": {"ok": {"type": "boolean"}, "status": {"type": "string"}},
+                "additionalProperties": True,
+            },
             "JobSubmission": {
                 "type": "object",
                 "required": ["artifact", "idempotency_key"],
@@ -956,7 +1014,12 @@ API_SCHEMA = {
                     "required": True,
                     "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AuthorizeRequest"}}},
                 },
-                "responses": {"200": {"description": "Signed governance authorization artifact"}},
+                "responses": {
+                    "200": {"description": "Signed governance authorization artifact", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AuthorizationArtifact"}}}},
+                    "400": {"description": "Invalid request", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+                    "401": {"description": "Unauthorized", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+                    "403": {"description": "Policy denied", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+                },
             }
         },
         "/api/v1/execute": {
@@ -966,13 +1029,42 @@ API_SCHEMA = {
                     "required": True,
                     "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ExecuteRequest"}}},
                 },
-                "responses": {"200": {"description": "Action result"}},
+                "responses": {
+                    "200": {"description": "Action result", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ExecuteResponse"}}}},
+                    "400": {"description": "Invalid request", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+                    "401": {"description": "Unauthorized", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+                },
             }
         },
-        "/health": {"get": {"responses": {"200": {"description": "Health report"}}}},
-        "/readyz": {"get": {"responses": {"200": {"description": "Readiness report"}}}},
-        "/livez": {"get": {"responses": {"200": {"description": "Liveness report"}}}},
-        "/startupz": {"get": {"responses": {"200": {"description": "Startup report"}}}},
+        "/health": {
+            "get": {
+                "responses": {
+                    "200": {"description": "Health report", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HealthReport"}}}}
+                }
+            }
+        },
+        "/readyz": {
+            "get": {
+                "responses": {
+                    "200": {"description": "Readiness report", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HealthReport"}}}},
+                    "503": {"description": "Not ready", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HealthReport"}}}}
+                }
+            }
+        },
+        "/livez": {
+            "get": {
+                "responses": {
+                    "200": {"description": "Liveness report", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HealthReport"}}}}
+                }
+            }
+        },
+        "/startupz": {
+            "get": {
+                "responses": {
+                    "200": {"description": "Startup report", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HealthReport"}}}}
+                }
+            }
+        },
         "/audit": {"get": {"responses": {"200": {"description": "Audit summary"}}}},
         "/admin/jobs": {
             "post": {
@@ -1162,3 +1254,35 @@ API_SCHEMA = {
         },
     },
 }
+
+
+def _complete_schema(schema: dict[str, Any]) -> None:
+    """Add JSON body schemas and auth error responses to every documented operation."""
+    json_ref = lambda name: {  # noqa: E731
+        "application/json": {"schema": {"$ref": f"#/components/schemas/{name}"}}
+    }
+    schemas = schema["components"]["schemas"]
+    schemas.setdefault("Object", {"type": "object", "additionalProperties": True})
+    for path, operations in list(schema["paths"].items()):
+        for operation in operations.values():
+            responses = operation["responses"]
+            for status, response in responses.items():
+                if (
+                    status.startswith("2")
+                    and "content" not in response
+                    and not path.startswith("/admin/app.")
+                    and path != "/admin"
+                ):
+                    response["content"] = json_ref("Object")
+                elif status.startswith(("4", "5")) and "content" not in response:
+                    response["content"] = json_ref("Error")
+            if operation.get("security"):
+                for status, text in (("401", "Unauthorized"), ("403", "Forbidden")):
+                    responses.setdefault(
+                        status, {"description": text, "content": json_ref("Error")}
+                    )
+    for path in ("/health", "/livez", "/readyz", "/startupz", "/audit", "/openapi.json"):
+        schema["paths"].setdefault(f"/api/v1{path}", schema["paths"][path])
+
+
+_complete_schema(API_SCHEMA)
