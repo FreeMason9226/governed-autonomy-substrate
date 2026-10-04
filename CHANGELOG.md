@@ -7,6 +7,7 @@ maintains a separate **GAS Protocol Version** for wire-format changes.
 ## [Unreleased]
 
 ### Added
+- gas job submit <gaa.json> and gas job status <job_id> enqueue and inspect worker jobs through the admin API.
 
 - Roadmap platform slice: `AwsKmsBackend` (Ed25519 KMS signing for `KMSSigner`), `KeyLifecycleManager`, `WorkerRuntime`/`ContainerSandbox`/`VaultSecretProvider` (authorizer-gated, hardened sandbox, fail-closed secrets), `gas` operator CLI, worker Helm manifests, KMS IAM / Vault policy templates
 

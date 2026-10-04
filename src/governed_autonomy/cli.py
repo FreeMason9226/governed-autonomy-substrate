@@ -9,6 +9,7 @@ signing is performed client-side; this CLI never handles signing keys.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -99,6 +100,14 @@ def build_parser() -> argparse.ArgumentParser:
     for name in ("policies", "trust", "metrics", "audit", "governance-log"):
         sub.add_parser(name)
 
+    job = sub.add_parser("job").add_subparsers(dest="cmd", required=True)
+    submit = job.add_parser("submit", help="enqueue a signed GAA for the worker")
+    submit.add_argument("artifact", help="path to a GAA JSON file, or - for stdin")
+    submit.add_argument("--idempotency-key", default=None, help="defaults to the artifact digest")
+    submit.add_argument("--max-attempts", type=int, default=3)
+    job_status = job.add_parser("status", help="show a queued job's status")
+    job_status.add_argument("job_id")
+
     replay = sub.add_parser("replay").add_subparsers(dest="cmd", required=True)
     verify = replay.add_parser("verify", help="verify a local replay JSONL hash chain")
     verify.add_argument("path")
@@ -132,6 +141,19 @@ def run(args: argparse.Namespace) -> int:
         else:
             path = f"/admin/operator-keys/{quote(args.key_id, safe='')}/revoke"
             _print(_request("POST", path, {}))
+    elif args.group == "job":
+        if args.cmd == "submit":
+            raw = sys.stdin.read() if args.artifact == "-" else Path(args.artifact).read_text("utf-8")
+            artifact = json.loads(raw)
+            if not isinstance(artifact, dict):
+                raise CLIError("artifact must be a JSON object")
+            key = args.idempotency_key or hashlib.sha256(
+                json.dumps(artifact, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()
+            body = {"artifact": artifact, "idempotency_key": key, "max_attempts": args.max_attempts}
+            _print(_request("POST", "/admin/jobs", body))
+        else:
+            _print(_request("GET", f"/admin/jobs/{quote(args.job_id, safe='')}"))
     elif args.group == "replay":
         report = ReplayLog.load_jsonl(args.path).verify_integrity()
         _print(report)

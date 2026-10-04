@@ -230,3 +230,28 @@ def test_cli_http_commands_use_bearer_token(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(cli, "urlopen", fake_urlopen)
     assert cli.main(["operator-key", "list"]) == 0
     assert captured == {"url": "http://api:1/admin/operator-keys", "auth": "Bearer tok"}
+
+
+def test_cli_job_submit_and_status(tmp_path, monkeypatch, capsys):
+    import json
+
+    from governed_autonomy import cli
+
+    calls = []
+    monkeypatch.setattr(
+        cli, "_request", lambda method, path, body=None: calls.append((method, path, body)) or {"ok": 1}
+    )
+    artifact = tmp_path / "gaa.json"
+    artifact.write_text('{"b": 2, "a": 1}')
+    assert cli.main(["job", "submit", str(artifact), "--max-attempts", "5"]) == 0
+    method, path, body = calls[0]
+    assert (method, path) == ("POST", "/admin/jobs")
+    assert body["artifact"] == {"a": 1, "b": 2} and body["max_attempts"] == 5
+    assert len(body["idempotency_key"]) == 64
+    assert cli.main(["job", "submit", str(artifact), "--idempotency-key", "k1"]) == 0
+    assert calls[1][2]["idempotency_key"] == "k1"
+    assert cli.main(["job", "status", "a/b"]) == 0
+    assert calls[2][:2] == ("GET", "/admin/jobs/a%2Fb")
+    artifact.write_text("[1]")
+    assert cli.main(["job", "submit", str(artifact)]) == 1
+    assert json.loads(capsys.readouterr().out.split("}")[0] + "}") == {"ok": 1}
