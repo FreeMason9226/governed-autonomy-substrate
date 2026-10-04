@@ -7,6 +7,7 @@ maintains a separate **GAS Protocol Version** for wire-format changes.
 ## [Unreleased]
 
 ### Added
+- `docs/demo/pipeline.html`: interactive 8-stage governed request pipeline demo (policy evaluation, illustrative risk score, decision, execution, signed proof, hash-chained audit trail).
 - Documentation: end-to-end deployment walkthrough, security model, benchmark report, and README architecture diagrams (Mermaid).
 - `benchmarks/bench.py` reproducible benchmark harness with JSON output.
 - Browser protocol demo (`docs/demo`, published via GitHub Pages workflow) and a Dev Container for Codespaces running the real server.

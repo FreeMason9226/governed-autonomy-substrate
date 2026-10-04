@@ -12,6 +12,7 @@ pre{background:#f6f8fa;padding:.7rem;border-radius:6px;overflow:auto;font-size:1
 code{background:#eaeef2;padding:0 .25rem;border-radius:3px}
 </style></head><body>
 <h1>Governed Autonomy Substrate &mdash; protocol demo</h1>
+<p><a href="pipeline.html"><b>&rarr; See the full 8-stage request pipeline (policies, risk score, proof, audit trail)</b></a></p>
 <p class="note"><b>Simulation.</b> This page re-implements the GAA protocol in your browser (WebCrypto Ed25519, canonical JSON, SHA-256 hash-chained log). It is not the real server. To run the real thing, open the repo in Codespaces or use Docker &mdash; see the <a href="https://github.com/FreeMason9226/governed-autonomy-substrate/blob/main/docs/deployment-walkthrough.md">walkthrough</a>.</p>
 <div id="unsupported" class="note" hidden>Your browser lacks WebCrypto Ed25519. Use a current Chrome, Edge, Firefox or Safari.</div>
 <h3>1. Request</h3>
@@ -76,3 +77,4 @@ $('reset').onclick=reset;
 if(!crypto.subtle){$('unsupported').hidden=false}
 else crypto.subtle.generateKey('Ed25519',true,['sign','verify']).then(reset,()=>{$('unsupported').hidden=false;document.querySelectorAll('button').forEach(b=>b.disabled=true)});
 </script></body></html>
+

@@ -1,0 +1,106 @@
+﻿<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GAS &mdash; governed request pipeline</title>
+<style>
+body{font:15px/1.5 system-ui,sans-serif;max-width:1000px;margin:2rem auto;padding:0 1rem;color:#1b1f23}
+.note{background:#fff8c5;border:1px solid #d4a72c;padding:.6rem .9rem;border-radius:6px}
+fieldset{border:1px solid #d0d7de;border-radius:6px;margin:1rem 0}label{display:inline-block;margin:.25rem .8rem .25rem 0}
+button{font:inherit;padding:.45rem .9rem;margin:.2rem .2rem .2rem 0;border:1px solid #1f6feb;background:#1f6feb;color:#fff;border-radius:6px;cursor:pointer}
+button.alt{background:#fff;color:#1f6feb}button.bad{background:#cf222e;border-color:#cf222e}
+.steps{display:grid;gap:.5rem;margin:1rem 0}
+.step{border:1px solid #d0d7de;border-left:6px solid #d0d7de;border-radius:6px;padding:.5rem .8rem;opacity:.45;transition:.25s}
+.step.on{opacity:1}.step.ok{border-left-color:#1a7f37}.step.no{border-left-color:#cf222e}.step.skip{border-left-color:#8c959f}
+.step h3{margin:0;font-size:15px}.step .d{font-size:13px;margin-top:.2rem}
+pre{background:#f6f8fa;padding:.6rem;border-radius:6px;overflow:auto;font-size:12px;max-height:220px;margin:.3rem 0 0}
+.meter{height:10px;background:#eaeef2;border-radius:5px;overflow:hidden;margin:.3rem 0}.meter i{display:block;height:100%}
+code{background:#eaeef2;padding:0 .25rem;border-radius:3px}
+.pill{display:inline-block;padding:0 .5rem;border-radius:10px;font-size:12px;color:#fff;margin-right:.3rem}
+.p{background:#1a7f37}.f{background:#cf222e}
+</style></head><body>
+<h1>Governed request pipeline</h1>
+<p class="note"><b>Simulation in your browser.</b> The signing, hash-chained audit trail, nonce handling and barrier checks follow the real GAA protocol (WebCrypto Ed25519, canonical JSON, SHA-256). The <b>risk score is a demo heuristic</b> for illustration; the GAS core makes allow/deny decisions from deterministic policy rules and does not compute risk scores. <a href="index.html">Simpler attack demo</a> &middot; <a href="https://github.com/FreeMason9226/governed-autonomy-substrate/blob/main/docs/deployment-walkthrough.md">Run the real server</a></p>
+<fieldset><legend>Request</legend>
+<label>Preset <select id="preset"></select></label><br>
+<label>Action <select id="action"><option>write_file</option><option>send_email</option><option>transfer_funds</option><option>delete_data</option></select></label>
+<label>Environment <select id="env"><option>dev</option><option>staging</option><option>prod</option></select></label>
+<label>Amount / size <input id="amount" type="number" value="10" min="0" style="width:6rem"></label>
+<label>Signed approvals <input id="appr" type="number" value="0" min="0" max="3" style="width:3rem"></label>
+<div><button id="run">Submit request</button><button id="verify" class="alt">Verify audit trail</button><button id="tamper" class="bad">Tamper with audit trail</button><button id="clear" class="alt">Clear</button></div>
+</fieldset>
+<div class="steps" id="steps"></div>
+<h2>Audit trail</h2><pre id="audit">(empty)</pre>
+<script>
+const enc=new TextEncoder(),$=id=>document.getElementById(id);
+const b64u=b=>btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+const canon=v=>Array.isArray(v)?'['+v.map(canon).join(',')+']':v&&typeof v==='object'?'{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+canon(v[k])).join(',')+'}':JSON.stringify(v);
+const sha=async s=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',enc.encode(s)))].map(x=>x.toString(16).padStart(2,'0')).join('');
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const PRESETS={
+ 'Low risk: write a file in dev':{action:'write_file',env:'dev',amount:10,appr:0},
+ 'Policy violation: delete data in prod, no approvals':{action:'delete_data',env:'prod',amount:500,appr:0},
+ 'Needs approvals: prod file write with 2 approvals':{action:'write_file',env:'prod',amount:50,appr:2},
+ 'High risk: transfer 90,000 in prod, 2 approvals':{action:'transfer_funds',env:'prod',amount:90000,appr:2},
+ 'Moderate: email in staging':{action:'send_email',env:'staging',amount:200,appr:0}};
+for(const k of Object.keys(PRESETS)){const o=document.createElement('option');o.textContent=k;$('preset').appendChild(o)}
+$('preset').onchange=()=>{const p=PRESETS[$('preset').value];for(const k in p)$(k).value=p[k]};
+$('preset').onchange();
+const POLICIES=[
+ ['P1 action allow-list',r=>['write_file','send_email','transfer_funds','delete_data'].includes(r.action)],
+ ['P2 prod changes need >= 2 signed approvals',r=>r.env!=='prod'||r.appr>=2],
+ ['P3 delete_data is forbidden in prod',r=>!(r.action==='delete_data'&&r.env==='prod')],
+ ['P4 transfers capped at 100,000',r=>r.action!=='transfer_funds'||r.amount<=100000]];
+const THRESHOLD=70;
+function risk(r){let s={write_file:10,send_email:20,transfer_funds:40,delete_data:50}[r.action]||50;
+ const f=[];f.push('action base '+s);
+ const e={dev:0,staging:10,prod:25}[r.env];s+=e;f.push('environment +'+e);
+ const a=r.action==='transfer_funds'?Math.min(25,Math.round(Math.log10(r.amount+1)*5)):Math.min(10,Math.round(Math.log10(r.amount+1)*2));s+=a;f.push('amount +'+a);
+ const m=Math.min(20,r.appr*10);s-=m;f.push('approvals -'+m);
+ return {score:Math.max(0,Math.min(100,s)),factors:f}}
+let keys,frames=[],nonces=new Set();
+async function append(event){const prev=frames.length?frames[frames.length-1].hash:'';
+ const f={frame_id:frames.length,previous_hash:prev,event};f.hash=await sha(canon({frame_id:f.frame_id,previous_hash:prev,event}));frames.push(f);renderAudit();return f}
+async function chainOk(){let prev='';for(const f of frames){if(f.previous_hash!==prev||f.hash!==await sha(canon({frame_id:f.frame_id,previous_hash:f.previous_hash,event:f.event})))return false;prev=f.hash}return true}
+function renderAudit(){$('audit').textContent=frames.length?frames.map(f=>`#${f.frame_id} ${f.hash.slice(0,20)}… prev=${(f.previous_hash||'genesis').slice(0,10)} ${f.event.type} ${f.event.summary||''}`).join('\n'):'(empty)'}
+const NAMES=['Request enters the system','Governance engine evaluates it','Policies are applied','Risk score is generated','Decision: approved or rejected','Action is executed','Cryptographic proof is generated','Audit trail is saved'];
+function mk(){const box=$('steps');box.innerHTML='';return NAMES.map((n,i)=>{const d=document.createElement('div');d.className='step';d.innerHTML=`<h3>${i+1}. ${n}</h3><div class="d"></div>`;box.appendChild(d);return d})}
+async function show(d,cls,html){d.className='step on '+cls;d.querySelector('.d').innerHTML=html;await sleep(450)}
+async function run(){
+ $('run').disabled=true;const S=mk();
+ const r={action:$('action').value,env:$('env').value,amount:+$('amount').value,appr:+$('appr').value};
+ const rid=b64u(crypto.getRandomValues(new Uint8Array(6)));
+ const reqDigest=await sha(canon(r));
+ await show(S[0],'ok',`Request <code>${rid}</code> received<pre>${JSON.stringify(r,null,2)}</pre>digest <code>${reqDigest.slice(0,24)}…</code>`);
+ await show(S[1],'ok','Deterministic arbiter loaded the signed policy set and bound the request to it.');
+ const res=POLICIES.map(([n,f])=>[n,f(r)]);const pok=res.every(x=>x[1]);
+ await show(S[2],pok?'ok':'no',res.map(([n,v])=>`<span class="pill ${v?'p':'f'}">${v?'PASS':'FAIL'}</span>${n}`).join('<br>'));
+ const k=risk(r);const col=k.score<40?'#1a7f37':k.score<THRESHOLD?'#d4a72c':'#cf222e';
+ await show(S[3],k.score<THRESHOLD?'ok':'no',`Risk score <b>${k.score}/100</b> (reject at ${THRESHOLD}+) <div class="meter"><i style="width:${k.score}%;background:${col}"></i></div>${k.factors.join(' &middot; ')}`);
+ const approved=pok&&k.score<THRESHOLD;
+ const why=!pok?'policy failure':k.score>=THRESHOLD?'risk above threshold':'all policies passed and risk is acceptable';
+ await show(S[4],approved?'ok':'no',`<b>${approved?'APPROVED':'REJECTED'}</b> &mdash; ${why}.`);
+ const nonce=b64u(crypto.getRandomValues(new Uint8Array(16)));
+ await append({type:'authorization',summary:(approved?'ALLOW ':'DENY ')+r.action+'@'+r.env+' risk='+k.score,request:r,risk:k.score,allowed:approved,nonce:approved?nonce:null});
+ let gaa=null,result=null,proof=null;
+ if(approved){
+  const body={action_request:r,decision:{allowed:true,risk_score:k.score},expires_at:Date.now()+300000,nonce,replay_frame_ref:frames.length-1,issuer_key_id:'demo-issuer'};
+  gaa={...body,signature:b64u(await crypto.subtle.sign('Ed25519',keys.privateKey,enc.encode(canon(body))))};
+  const {signature,...unsigned}=gaa;
+  const sigOk=await crypto.subtle.verify('Ed25519',keys.publicKey,Uint8Array.from(atob(signature.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0)),enc.encode(canon(unsigned)));
+  const fresh=!nonces.has(nonce);
+  if(sigOk&&fresh&&await chainOk()){nonces.add(nonce);result={status:'ok',effect:`simulated ${r.action} on ${r.env}`}}
+  await show(S[5],result?'ok':'no',result?`Barrier verified signature, expiry, log integrity; nonce consumed; handler ran once.<pre>${JSON.stringify(result)}</pre>`:'Barrier refused execution (failing closed).');
+ }else await show(S[5],'skip','Not executed &mdash; a rejected request never receives a signed artifact, so the barrier would refuse it.');
+ const exF=await append({type:approved?'execution':'denial',summary:approved?'executed '+r.action:'not executed',nonce:approved?nonce:null,result});
+ const receipt={request_digest:reqDigest,allowed:approved,risk_score:k.score,result_hash:await sha(canon(result)),audit_frame:exF.frame_id,audit_hash:exF.hash};
+ proof={receipt,signature:b64u(await crypto.subtle.sign('Ed25519',keys.privateKey,enc.encode(canon(receipt))))};
+ await show(S[6],'ok',`Signed receipt (Ed25519, key <code>demo-issuer</code>)${gaa?' plus the GAA':''}:<pre>${JSON.stringify(gaa?{gaa_signature:gaa.signature,...proof}:proof,null,2)}</pre>`);
+ await show(S[7],'ok',`Saved as hash-chained frames #${frames.length-(approved?2:1)}${approved?'&ndash;#'+(frames.length-1):''}. Chain integrity: ${await chainOk()?'<b>valid</b>':'<b>BROKEN</b>'}. (Stored in memory for this tab.)`);
+ $('run').disabled=false}
+$('run').onclick=run;
+$('verify').onclick=async()=>alert(frames.length?(await chainOk()?'Audit trail verified: every frame hash and link is intact.':'Audit trail INVALID: tampering detected.'):'Nothing to verify yet.');
+$('tamper').onclick=async()=>{if(!frames.length)return alert('Submit a request first.');const e=frames[0].event;e.allowed=!e.allowed;e.summary='(edited after the fact) '+e.summary;renderAudit();alert('Edited frame #0. Click "Verify audit trail" to see it detected.')};
+$('clear').onclick=()=>{frames=[];nonces=new Set();renderAudit();mk()};
+mk();
+crypto.subtle.generateKey('Ed25519',true,['sign','verify']).then(k=>keys=k,()=>{$('run').disabled=true;document.querySelector('.note').insertAdjacentHTML('afterend','<p class="note">This browser lacks WebCrypto Ed25519; use a current Chrome, Edge, Firefox or Safari.</p>')});
+</script></body></html>
+

@@ -8,6 +8,7 @@ A cryptographic authorization barrier for AI agents: **no signed artifact, no ac
 
 ## Try it
 
+- **Full pipeline walkthrough:** [request, policies, risk score, decision, execution, signed proof, audit trail](https://freemason9226.github.io/governed-autonomy-substrate/pipeline.html) (risk score is a demo heuristic).
 - **In your browser (no install):** [protocol simulation](https://freemason9226.github.io/governed-autonomy-substrate/) - authorize, execute, then try replaying and tampering.
 - **The real server:** click *Open in Codespaces* above; `gas-server` starts on port 8000 (admin UI at `/admin`, token `codespaces-operator-token`). Demo credentials only.
 - **Locally:** `pip install -e . && gas-demo && gas-server` - see the [deployment walkthrough](docs/deployment-walkthrough.md).
