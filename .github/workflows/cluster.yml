@@ -20,17 +20,24 @@ jobs:
       TOKEN: cluster-test-token
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6
+        with:
+          python-version: "3.12"
+      - name: Install worker dependencies
+        run: python3 -m pip install ".[postgres]"
       - uses: helm/kind-action@a1b0e391336a6ee6713a0583f8c6240d70863de3 # v1.12.0
         with:
           cluster_name: gas
       - name: Build and load image
         run: |
           docker build -t gas-ci:test .
+          docker pull alpine:3.20
           kind load docker-image gas-ci:test --name gas
       - name: Create namespace and secrets
         run: |
           kubectl create namespace gas
           SEED=$(python3 -c "import os,base64;print(base64.urlsafe_b64encode(os.urandom(32)).decode().rstrip('='))")
+          echo "ISSUER_PRIVATE_KEY=$SEED" >> "$GITHUB_ENV"
           kubectl -n gas create secret generic governed-autonomy --from-literal=bearer-token="$TOKEN" --from-literal=operator-token="$TOKEN-op"
           kubectl -n gas create secret generic governed-autonomy-runtime \
             --from-literal=url="postgresql://gas:ci-password@governed-autonomy-postgres:5432/gas" \
@@ -43,7 +50,7 @@ jobs:
             --set replicaCount=2 \
             --set postgres.enabled=true --set postgres.password=ci-password --set postgres.storage=1Gi \
             --set worker.enabled=true --set worker.image.repository=gas-ci --set worker.image.tag=test \
-            --set worker.allowedImages=alpine:3 --set worker.replicaCount=1 \
+            --set worker.allowedImages=alpine:3.20 --set worker.replicaCount=1 \
             --timeout 3m --wait
       - name: Verify rollout
         run: |
@@ -76,16 +83,36 @@ jobs:
           for i in $(seq 1 30); do curl -s -o /dev/null localhost:8000/livez && break; sleep 1; done
           code=$(curl -s -o /dev/null -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' localhost:8000/execute -d @exec.json)
           echo "replay after restart -> $code"; test "$code" -ge 400
-      - name: Worker claims and re-verifies a queued job
+      - name: Run a queued job in the hardened container sandbox
         run: |
           kubectl -n gas rollout status deploy/governed-autonomy-worker --timeout=3m
+          # Keep the worker pod isolated from the host runtime; use the runner Docker host for sandbox execution.
+          kubectl -n gas scale deploy/governed-autonomy-worker --replicas=0
+          kubectl -n gas rollout status deploy/governed-autonomy-worker --timeout=2m
           kubectl -n gas port-forward svc/governed-autonomy 8000:8000 >/tmp/pf3.log 2>&1 &
+          kubectl -n gas port-forward svc/governed-autonomy-postgres 5433:5432 >/tmp/db-forward.log 2>&1 &
           for i in $(seq 1 30); do curl -s -o /dev/null localhost:8000/livez && break; sleep 1; done
+          db_ready=false
+          for i in $(seq 1 30); do
+            if python3 -c 'import psycopg; psycopg.connect("postgresql://gas:ci-password@127.0.0.1:5433/gas").close()'; then db_ready=true; break; fi
+            sleep 1
+          done
+          test "$db_ready" = true
+          export GAS_RUNTIME_MODE=postgres
+          export DATABASE_URL=postgresql://gas:ci-password@127.0.0.1:5433/gas
+          export GAS_ISSUER_KEY_ID=ci-issuer
+          export GAS_ISSUER_PRIVATE_KEY="$ISSUER_PRIVATE_KEY"
+          export GAS_WORKER_IMAGES=alpine:3.20
+          export GAS_WORKER_METRICS_PORT=9101
+          export GAS_WORKER_METRICS_HOST=127.0.0.1
+          gas-worker >/tmp/host-worker.log 2>&1 &
+          WORKER_PID=$!
+          trap 'kill "$WORKER_PID" 2>/dev/null || true' EXIT
           H="Authorization: Bearer $TOKEN"; OP="Authorization: Bearer $TOKEN-op"
-          curl -s -H "$H" -H 'Content-Type: application/json' localhost:8000/authorize \
-            -d '{"policy_id":"demo-files-v1","request":{"action":"write_file","path":"job.txt","content":"job"}}' > gaa2.json
+          curl -fsS -H "$H" -H 'Content-Type: application/json' localhost:8000/authorize \
+            -d '{"policy_id":"demo-jobs-v1","request":{"action":"run_job","image":"alpine:3.20","command":["/bin/echo","sandbox-executed"]}}' > gaa2.json
           python3 -c "import json;print(json.dumps({'artifact':json.load(open('gaa2.json')),'idempotency_key':'ci-1','max_attempts':1}))" > job.json
-          curl -fsS -H "$OP" -H "X-Operator: ci" -H 'Content-Type: application/json' localhost:8000/admin/jobs -d @job.json | tee submitted.json
+          curl -fsS -H "$OP" -H 'Content-Type: application/json' localhost:8000/admin/jobs -d @job.json | tee submitted.json
           id=$(python3 -c "import json;print(json.load(open('submitted.json'))['job_id'])")
           for i in $(seq 1 30); do
             st=$(curl -fsS -H "$OP" localhost:8000/admin/jobs/$id | python3 -c "import json,sys;print(json.load(sys.stdin)['status'])")
@@ -93,18 +120,15 @@ jobs:
             test "$st" != queued && test "$st" != running && break
             sleep 2
           done
-          # no container runtime in the pod, so the job ends in dead_letter; the worker still claimed it
-          test "$st" = dead_letter
-          # the worker consumed the artifact, so a direct execute is now a replay
+          test "$st" = succeeded
+          curl -fsS http://127.0.0.1:9101/metrics | grep -q 'governed_autonomy_worker_jobs_succeeded_total 1'
           echo "{\"artifact\": $(cat gaa2.json)}" > exec2.json
           code=$(curl -s -o /dev/null -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' localhost:8000/execute -d @exec2.json)
           echo "execute after worker -> $code"; test "$code" -ge 400
-          kubectl -n gas exec deploy/governed-autonomy-worker -- python -c "import urllib.request as u;print(u.urlopen('http://127.0.0.1:9100/metrics').read().decode())"
       - name: Dump diagnostics on failure
         if: failure()
         run: |
           kubectl -n gas get all,events
-          cat /tmp/pf*.log || true
+          cat /tmp/pf*.log /tmp/db-forward.log /tmp/host-worker.log || true
           kubectl -n gas describe pods | tail -80
           for p in $(kubectl -n gas get pods -o name | grep -v postgres); do echo "== $p"; kubectl -n gas logs $p --tail=60; kubectl -n gas logs $p --previous --tail=60 || true; done
-

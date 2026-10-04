@@ -31,6 +31,12 @@ def build_demo_service(
                 {"write_file": ("path", "content")},
                 {"write_file": {"path": "out.txt"}},
             ),
+            Policy(
+                "demo-jobs-v1",
+                ("run_job",),
+                {"run_job": ("image", "command")},
+                {},
+            ),
         )
     )
     service = GovernedService(
@@ -45,7 +51,13 @@ def build_demo_service(
             policy_registry=policy_registry,
         ),
         policies=policy_registry,
-        actions={"write_file": lambda request: request["content"]},
+        actions={
+            "write_file": lambda request: request["content"],
+            "run_job": lambda request: {
+                "image": request["image"],
+                "command": request["command"],
+            },
+        },
         mesh_source_registry=mesh_source_registry,
     )
     return service, issuer, replay_log
@@ -96,6 +108,12 @@ def build_runtime_service(
                 {"write_file": ("path", "content")},
                 {"write_file": {"path": "out.txt"}},
             ),
+            Policy(
+                "demo-jobs-v1",
+                ("run_job",),
+                {"run_job": ("image", "command")},
+                {},
+            ),
         )
     )
     service = GovernedService(
@@ -106,7 +124,13 @@ def build_runtime_service(
             policy_registry=policy_registry,
         ),
         policies=policy_registry,
-        actions={"write_file": lambda request: request["content"]},
+        actions={
+            "write_file": lambda request: request["content"],
+            "run_job": lambda request: {
+                "image": request["image"],
+                "command": request["command"],
+            },
+        },
     )
     return service, issuer, replay_log
 
