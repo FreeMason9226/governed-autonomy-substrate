@@ -51,6 +51,8 @@ jobs:
           kubectl -n gas get pods,svc,pvc
       - name: Exercise the API through the Service
         run: |
+          kubectl -n gas wait --for=condition=Ready pod --all --timeout=120s
+          sleep 10
           kubectl -n gas port-forward svc/governed-autonomy 8000:8000 >/tmp/pf.log 2>&1 &
           for i in $(seq 1 30); do curl -s -o /dev/null localhost:8000/livez && break; sleep 1; done
           H="Authorization: Bearer $TOKEN"
@@ -102,6 +104,7 @@ jobs:
         if: failure()
         run: |
           kubectl -n gas get all,events
+          cat /tmp/pf*.log || true
           kubectl -n gas describe pods | tail -80
           for p in $(kubectl -n gas get pods -o name | grep -v postgres); do echo "== $p"; kubectl -n gas logs $p --tail=60; kubectl -n gas logs $p --previous --tail=60 || true; done
 
