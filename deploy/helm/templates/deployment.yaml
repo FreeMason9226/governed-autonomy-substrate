@@ -15,6 +15,7 @@ spec:
       labels:
         app.kubernetes.io/name: {{ include "governed-autonomy.name" . }}
         app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: api
     spec:
       automountServiceAccountToken: false
       securityContext:
