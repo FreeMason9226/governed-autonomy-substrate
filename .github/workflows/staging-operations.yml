@@ -18,7 +18,7 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_NAME: freemason9226/governed-autonomy-substrate
   RELEASE: governed-autonomy
   NAMESPACE: governed-autonomy-staging
 
