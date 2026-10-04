@@ -6,6 +6,8 @@ maintains a separate **GAS Protocol Version** for wire-format changes.
 
 ## [Unreleased]
 
+- Add claims-to-role mapping (`governed_autonomy.rbac`): OIDC `roles`/`scope`/`groups` map to `platform_admin`, `operator` and a read-only `auditor`; the admin API lets auditors read but not write. `gas policy show` and `gas proposals` added.
+
 ### Added
 - Opt-in CORS (`--cors-origins` / `GOVERNED_AUTONOMY_CORS_ORIGINS`, exact-origin allow-list, `OPTIONS` preflight); pipeline demo gained a *real server* mode.
 - `render.yaml` blueprint and README button for a one-click public sandbox of the real server.

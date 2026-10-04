@@ -29,6 +29,7 @@ from .mesh import GovernanceInput
 from .operator_auth import OperatorKeyStore
 from .platform_admin import PolicyChangeManager, TrustChangeManager
 from .policy import policy_from_dict
+from .rbac import ClaimsMapper, Role, require_roles
 from .service import GovernedService
 
 
@@ -134,7 +135,7 @@ class AuthenticatedAPI:
                 if not authenticated:
                     self._send(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
                     return
-                if route.startswith("/admin") and not api._operator_authorized(self):
+                if route.startswith("/admin") and not api._operator_authorized(self, write=False):
                     self._send(
                         HTTPStatus.FORBIDDEN,
                         {"error": "operator authorization required"},
@@ -514,18 +515,19 @@ class AuthenticatedAPI:
             return f"oidc:{identity.issuer}:{identity.subject}"
         return "shared-token"
 
-    def _operator_authorized(self, request: BaseHTTPRequestHandler) -> bool:
+    def _operator_authorized(self, request: BaseHTTPRequestHandler, *, write: bool = True) -> bool:
         if getattr(request, "gas_operator_id", None) is not None:
             return True
         identity = getattr(request, "gas_identity", None)
         if identity is not None:
-            roles = identity.claims.get("roles", [])
-            if isinstance(roles, str):
-                roles = [roles]
-            scopes = identity.claims.get("scope", "")
-            if isinstance(scopes, str):
-                scopes = scopes.split()
-            return self.operator_role in roles or "gas.admin" in scopes
+            mapper = ClaimsMapper(legacy_admin_role=self.operator_role)
+            try:
+                mapped = mapper.map_to_identity({**identity.claims, "sub": identity.subject})
+                needed = [Role.OPERATOR] if write else [Role.OPERATOR, Role.AUDITOR]
+                require_roles(mapped, needed)
+            except (ValueError, PermissionError):
+                return False
+            return True
         supplied = request.headers.get("Authorization", "")
         return self.operator_token is not None and hmac.compare_digest(
             supplied, f"Bearer {self.operator_token}"

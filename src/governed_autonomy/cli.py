@@ -97,8 +97,12 @@ def build_parser() -> argparse.ArgumentParser:
     revoke = keys.add_parser("revoke")
     revoke.add_argument("key_id")
 
-    for name in ("policies", "trust", "metrics", "audit", "governance-log"):
+    for name in ("policies", "proposals", "trust", "metrics", "audit", "governance-log"):
         sub.add_parser(name)
+
+    policy = sub.add_parser("policy").add_subparsers(dest="cmd", required=True)
+    show = policy.add_parser("show", help="show one active policy")
+    show.add_argument("policy_id")
 
     job = sub.add_parser("job").add_subparsers(dest="cmd", required=True)
     submit = job.add_parser("submit", help="enqueue a signed GAA for the worker")
@@ -116,6 +120,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 _GET_ROUTES = {
     "policies": "/admin/policies",
+    "proposals": "/admin/proposals",
     "trust": "/admin/trust",
     "metrics": "/admin/metrics",
     "audit": "/audit",
@@ -141,6 +146,21 @@ def run(args: argparse.Namespace) -> int:
         else:
             path = f"/admin/operator-keys/{quote(args.key_id, safe='')}/revoke"
             _print(_request("POST", path, {}))
+    elif args.group == "policy":
+        payload = _request("GET", "/admin/policies").get("policies", {})
+        items = payload.get("policies", []) if isinstance(payload, dict) else []
+        found = next(
+            (
+                item
+                for item in items
+                if isinstance(item, dict)
+                and args.policy_id in (item.get("policy_id"), item.get("policy", {}).get("policy_id"))
+            ),
+            None,
+        )
+        if found is None:
+            raise CLIError(f"policy not found: {args.policy_id}")
+        _print(found)
     elif args.group == "job":
         if args.cmd == "submit":
             raw = sys.stdin.read() if args.artifact == "-" else Path(args.artifact).read_text("utf-8")

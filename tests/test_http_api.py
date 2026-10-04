@@ -928,3 +928,33 @@ def test_http_api_cors_is_opt_in_and_origin_scoped():
         for s in servers:
             s.shutdown()
             s.server_close()
+
+def test_http_api_auditor_role_is_read_only():
+    from governed_autonomy import ExternalIdentity
+
+    class StubOIDCValidator:
+        def validate(self, token):
+            return ExternalIdentity(
+                subject="aud-1", issuer="https://identity.example", claims={"roles": ["auditor"]}
+            )
+
+    service, _, _ = build_demo_service()
+    instance = create_server(service, bearer_token="unused", oidc_validator=StubOIDCValidator())
+    thread = threading.Thread(target=instance.serve_forever, daemon=True)
+    thread.start()
+
+    def call(method, path, payload=b""):
+        connection = HTTPConnection(*instance.server_address)
+        headers = {"Authorization": "Bearer t", "Content-Length": str(len(payload))}
+        connection.request(method, path, body=payload or None, headers=headers)
+        status = connection.getresponse().status
+        connection.close()
+        return status
+
+    try:
+        assert call("GET", "/admin/policies") == 200
+        assert call("POST", "/admin/proposals/prepare", b"{}") == 403
+    finally:
+        instance.shutdown()
+        instance.server_close()
+        thread.join(timeout=2)
