@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/FreeMason9226/governed-autonomy-substrate/schemas/policy.schema.json",
+  "title": "Governed Autonomy Policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "name", "version", "description"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"},
+    "name": {"type": "string", "minLength": 1, "maxLength": 256},
+    "version": {"$ref": "#/$defs/semver"},
+    "description": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "rate_limits": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/rateLimit"},
+      "uniqueItems": true
+    },
+    "allowed_actions": {"$ref": "#/$defs/allowedActions"},
+    "escalation_rules": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/escalationRule"}
+    }
+  },
+  "$defs": {
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+    },
+    "actionName": {"type": "string", "minLength": 1, "maxLength": 256},
+    "rateLimit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "max_requests", "window_seconds"],
+      "properties": {
+        "action": {"type": "string", "minLength": 1, "maxLength": 256},
+        "max_requests": {"type": "integer", "minimum": 1},
+        "window_seconds": {"type": "integer", "minimum": 1},
+        "scope": {"enum": ["agent", "tenant", "global"], "default": "agent"}
+      }
+    },
+    "allowedActions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allow": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/actionName"},
+          "uniqueItems": true
+        },
+        "deny": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/actionName"},
+          "uniqueItems": true
+        }
+      },
+      "anyOf": [{"required": ["allow"]}, {"required": ["deny"]}]
+    },
+    "escalationRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "condition", "escalate_to"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"},
+        "description": {"type": "string", "maxLength": 4096},
+        "condition": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "actions": {
+              "type": "array",
+              "minItems": 1,
+              "items": {"$ref": "#/$defs/actionName"},
+              "uniqueItems": true
+            },
+            "min_risk_score": {"type": "number", "minimum": 0, "maximum": 1},
+            "min_amount": {"type": "number", "minimum": 0}
+          }
+        },
+        "escalate_to": {"type": "string", "minLength": 1, "maxLength": 256},
+        "require_approvals": {"type": "integer", "minimum": 1, "default": 1},
+        "timeout_seconds": {"type": "integer", "minimum": 1}
+      }
+    }
+  }
+}

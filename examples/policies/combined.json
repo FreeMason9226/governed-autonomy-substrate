@@ -1,0 +1,20 @@
+{
+  "id": "combined-basic",
+  "name": "Combined policy",
+  "version": "1.2.0",
+  "description": "Rate limits, action allow/deny lists and escalation in one policy.",
+  "rate_limits": [
+    {"action": "payments.transfer", "max_requests": 5, "window_seconds": 60}
+  ],
+  "allowed_actions": {
+    "allow": ["payments.transfer", "files.read"],
+    "deny": ["shell.exec"]
+  },
+  "escalation_rules": [
+    {
+      "id": "large-transfer",
+      "condition": {"actions": ["payments.transfer"], "min_amount": 5000},
+      "escalate_to": "finance-approvers"
+    }
+  ]
+}

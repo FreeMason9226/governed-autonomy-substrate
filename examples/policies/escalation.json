@@ -1,0 +1,21 @@
+{
+  "id": "escalation-basic",
+  "name": "Escalation rules",
+  "version": "1.0.0",
+  "description": "Escalate risky or high-value actions to a human approver.",
+  "escalation_rules": [
+    {
+      "id": "high-value-transfer",
+      "description": "Transfers of 10000 or more need two approvals.",
+      "condition": {"actions": ["payments.transfer"], "min_amount": 10000},
+      "escalate_to": "finance-approvers",
+      "require_approvals": 2,
+      "timeout_seconds": 3600
+    },
+    {
+      "id": "high-risk",
+      "condition": {"min_risk_score": 0.8},
+      "escalate_to": "security-oncall"
+    }
+  ]
+}

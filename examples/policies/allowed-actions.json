@@ -1,0 +1,10 @@
+{
+  "id": "allowed-actions-basic",
+  "name": "Allowed actions",
+  "version": "1.0.0",
+  "description": "Allow read operations and explicitly deny destructive ones.",
+  "allowed_actions": {
+    "allow": ["files.read", "search.query"],
+    "deny": ["files.delete", "shell.exec"]
+  }
+}
