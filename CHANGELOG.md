@@ -6,6 +6,8 @@ maintains a separate **GAS Protocol Version** for wire-format changes.
 
 ## [Unreleased]
 
+- Cluster test now covers the worker: it claims a queued job and re-verifies the artifact through the barrier. Fixed two chart bugs it found: the Service also selected worker pods, and the worker's Postgres egress selector never matched. Added optional `operator-token` key to the bearer secret for `/admin`.
+
 - Helm chart now verified on a real kind cluster in CI (cluster.yml). The test found and fixed a NetworkPolicy that blocked Postgres egress; added startup probe and longer probe timeouts.
 
 - Add claims-to-role mapping (`governed_autonomy.rbac`): OIDC `roles`/`scope`/`groups` map to `platform_admin`, `operator` and a read-only `auditor`; the admin API lets auditors read but not write. `gas policy show` and `gas proposals` added.
