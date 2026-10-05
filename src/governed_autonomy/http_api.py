@@ -21,6 +21,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 from .admin_ui import render_admin_css, render_admin_js, render_admin_ui
+from .auth.store import IdentityStore, PostgresIdentityStore, SQLiteIdentityStore
 from .bootstrap import build_runtime_service
 from .deployment import BoundedRateLimiter, TLSConfig, security_headers
 from .errors import AuthorizationError
@@ -185,6 +186,7 @@ class AuthenticatedAPI:
         operator_token: str | None = None,
         operator_role: str = "gas-admin",
         operator_key_store: OperatorKeyStore | None = None,
+        identity_store: IdentityStore | None = None,
         job_store: JobSubmissionStore | None = None,
         max_body_bytes: int = 64 * 1024,
         rate_limit: int = 120,
@@ -211,6 +213,7 @@ class AuthenticatedAPI:
         self.operator_token = operator_token
         self.operator_role = operator_role
         self.operator_key_store = operator_key_store
+        self.identity_store = identity_store
         self.job_store = job_store
         self.max_body_bytes = max_body_bytes
         self.cors_origins = frozenset(o.rstrip("/") for o in cors_origins if o)
@@ -322,6 +325,16 @@ class AuthenticatedAPI:
                         return
                     self._send(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
                     return
+                if route == "/auth/me":
+                    identity = getattr(self, "gas_runtime_identity", None)
+                    if identity is None:
+                        self._send(
+                            HTTPStatus.UNAUTHORIZED,
+                            {"error": "authenticated identity required"},
+                        )
+                    else:
+                        self._send(HTTPStatus.OK, identity.to_identity_dict())
+                    return
                 if route.startswith("/admin") and not api._admin_authorized(
                     self, method="GET", route=route
                 ):
@@ -386,6 +399,42 @@ class AuthenticatedAPI:
                         self._send(
                             HTTPStatus.SERVICE_UNAVAILABLE,
                             {"error": "operator key store unavailable"},
+                        )
+                    return
+                if route == "/admin/identities/role-assignments":
+                    if api.identity_store is None:
+                        self._send(
+                            HTTPStatus.SERVICE_UNAVAILABLE,
+                            {"error": "identity store is not configured"},
+                        )
+                    else:
+                        self._send(
+                            HTTPStatus.OK,
+                            {"assignments": api.identity_store.role_assignments()},
+                        )
+                    return
+                if route == "/admin/identities/service-principals":
+                    if api.identity_store is None:
+                        self._send(
+                            HTTPStatus.SERVICE_UNAVAILABLE,
+                            {"error": "identity store is not configured"},
+                        )
+                    else:
+                        self._send(
+                            HTTPStatus.OK,
+                            {"service_principals": api.identity_store.service_principals()},
+                        )
+                    return
+                if route == "/admin/identities/events":
+                    if api.identity_store is None:
+                        self._send(
+                            HTTPStatus.SERVICE_UNAVAILABLE,
+                            {"error": "identity store is not configured"},
+                        )
+                    else:
+                        self._send(
+                            HTTPStatus.OK,
+                            {"events": api.identity_store.identity_events()},
                         )
                     return
                 if route.startswith("/admin/jobs/"):
@@ -458,6 +507,35 @@ class AuthenticatedAPI:
                     return
                 if route.startswith("/admin/proposals"):
                     self._handle_admin_proposals_post(route)
+                    return
+                if route == "/admin/identities/role-assignments":
+                    if api.identity_store is None:
+                        self._send(
+                            HTTPStatus.SERVICE_UNAVAILABLE,
+                            {"error": "identity store is not configured"},
+                        )
+                        return
+                    try:
+                        payload = api._read_json(self)
+                        principal_id = payload["principal_id"]
+                        role = payload["role"]
+                        if not isinstance(principal_id, str) or not isinstance(role, str):
+                            raise ValueError("principal_id and role must be strings")
+                        runtime_identity = getattr(self, "gas_runtime_identity", None)
+                        if runtime_identity is None or not runtime_identity.tenant_id:
+                            raise ValueError("authenticated tenant is required for role assignment")
+                        api.identity_store.assign_role(
+                            principal_id,
+                            role,
+                            assigned_by=api._actor_id(self),
+                            tenant=runtime_identity.tenant_id,
+                        )
+                        self._send(HTTPStatus.CREATED, {"assigned": True})
+                    except (KeyError, TypeError, ValueError) as exc:
+                        self._send(
+                            HTTPStatus.BAD_REQUEST,
+                            {"error": str(exc) or "invalid role assignment"},
+                        )
                     return
                 if route.startswith("/admin/trust/keys"):
                     self._handle_admin_trust_post(route)
@@ -909,7 +987,12 @@ class AuthenticatedAPI:
         supplied = request.headers.get("Authorization", "")
         scheme, separator, credential = supplied.partition(" ")
         bearer_credential = credential.strip() if separator and scheme.lower() == "bearer" else ""
-        if not self.oidc_only and self.operator_key_store is not None and bearer_credential:
+        if (
+            self.oidc_validator is None
+            and not self.oidc_only
+            and self.operator_key_store is not None
+            and bearer_credential
+        ):
             operator_key = self.operator_key_store.authenticate(bearer_credential)
             if operator_key is not None:
                 if not urlsplit(request.path).path.startswith("/admin"):
@@ -924,20 +1007,25 @@ class AuthenticatedAPI:
             except IdentityValidationError:
                 return self._health_probe_authorized(request, supplied)
             request.gas_identity = external_identity  # type: ignore[attr-defined]
-            request.gas_runtime_identity = RuntimeIdentity.from_external_identity(  # type: ignore[attr-defined]
+            runtime_identity = RuntimeIdentity.from_external_identity(
                 external_identity,
                 request_id=self._request_id(request),
                 legacy_admin_role=self.operator_role,
             )
+            runtime_identity = self._enrich_identity(runtime_identity)
+            if runtime_identity is None:
+                return False
+            request.gas_runtime_identity = runtime_identity  # type: ignore[attr-defined]
             return True
         session_token = self._session_token(request)
         if self.oidc_sessions is not None and session_token is not None:
             runtime_identity = self.oidc_sessions.get_session(session_token)
             if runtime_identity is not None:
-                request.gas_runtime_identity = replace(  # type: ignore[attr-defined]
-                    runtime_identity,
-                    request_id=self._request_id(request),
-                )
+                runtime_identity = replace(runtime_identity, request_id=self._request_id(request))
+                runtime_identity = self._enrich_identity(runtime_identity)
+                if runtime_identity is None:
+                    return False
+                request.gas_runtime_identity = runtime_identity  # type: ignore[attr-defined]
                 request.gas_session_authenticated = True  # type: ignore[attr-defined]
                 return True
         if self.oidc_only:
@@ -953,6 +1041,29 @@ class AuthenticatedAPI:
         return hmac.compare_digest(supplied, f"Bearer {self.bearer_token}") or hmac.compare_digest(
             supplied, self.bearer_token
         )
+
+    def _enrich_identity(self, identity: RuntimeIdentity) -> RuntimeIdentity | None:
+        if self.identity_store is None:
+            return identity
+        if not identity.subject or not identity.tenant_id or not identity.issuer:
+            return None
+        assigned_roles = self.identity_store.roles_for(identity.subject, identity.tenant_id)
+        enriched = replace(
+            identity,
+            roles=tuple(sorted(set(identity.roles) | set(assigned_roles))),
+        )
+        self.identity_store.record_authentication(
+            subject=enriched.subject or "",
+            tenant=enriched.tenant_id or "",
+            email=enriched.email,
+            display_name=enriched.name,
+            issuer=enriched.issuer or "",
+            roles=enriched.roles,
+            identity_source=enriched.identity_source or "oidc",
+            service_principal=enriched.service_principal,
+            client_id=enriched.principal_id,
+        )
+        return enriched
 
     def _health_probe_authorized(self, request: BaseHTTPRequestHandler, supplied: str) -> bool:
         return (
@@ -994,7 +1105,19 @@ class AuthenticatedAPI:
             return True
         runtime_identity = getattr(request, "gas_runtime_identity", None)
         if runtime_identity is None:
-            return not self.oidc_only
+            return self.oidc_validator is None and not self.oidc_only
+        if method == "POST" and route in {
+            "/authorize",
+            "/execute",
+            "/api/v1/authorize",
+            "/api/v1/execute",
+        } and not (
+            runtime_identity.subject
+            and runtime_identity.tenant_id
+            and runtime_identity.issuer
+            and runtime_identity.identity_source
+        ):
+            return False
         roles = set(runtime_identity.roles)
         return Role.PLATFORM_ADMIN.value in roles or bool(
             roles.intersection(role.value for role in required)
@@ -1030,6 +1153,12 @@ class AuthenticatedAPI:
                         Role.APPROVER,
                     }
                 )
+            if route in {
+                "/admin/identities/role-assignments",
+                "/admin/identities/service-principals",
+                "/admin/identities/events",
+            }:
+                return frozenset({Role.PLATFORM_ADMIN})
             return frozenset()
 
         if method != "POST":
@@ -1046,6 +1175,8 @@ class AuthenticatedAPI:
             r"/admin/operator-keys/[^/]+/revoke", route
         ):
             return frozenset({Role.PLATFORM_ADMIN})
+        if route == "/admin/identities/role-assignments":
+            return frozenset({Role.PLATFORM_ADMIN})
         if route == "/admin/jobs":
             return frozenset({Role.OPERATOR})
         return frozenset()
@@ -1060,7 +1191,8 @@ class AuthenticatedAPI:
         supplied = request.headers.get("Authorization", "")
         scheme, separator, credential = supplied.partition(" ")
         if (
-            not self.oidc_only
+            self.oidc_validator is None
+            and not self.oidc_only
             and self.operator_token is not None
             and separator
             and scheme.lower() == "bearer"
@@ -1404,6 +1536,11 @@ def parse_server_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Path to the SQLite database used for revocable operator API keys.",
     )
     parser.add_argument(
+        "--identity-store",
+        default=os.environ.get("GAS_IDENTITY_STORE"),
+        help="SQLite file for users, service principals, role assignments, and identity events",
+    )
+    parser.add_argument(
         "--operator-role", default=os.environ.get("OIDC_OPERATOR_ROLE", "gas-admin")
     )
     parser.add_argument("--max-body-bytes", type=int, default=64 * 1024)
@@ -1433,6 +1570,7 @@ def create_server(
     operator_token: str | None = None,
     operator_role: str = "gas-admin",
     operator_key_store: OperatorKeyStore | None = None,
+    identity_store: IdentityStore | None = None,
     job_store: JobSubmissionStore | None = None,
     cors_origins: Sequence[str] = (),
 ) -> ThreadingHTTPServer:
@@ -1449,6 +1587,7 @@ def create_server(
             operator_token=operator_token,
             operator_role=operator_role,
             operator_key_store=operator_key_store,
+            identity_store=identity_store,
             job_store=job_store,
             max_body_bytes=max_body_bytes,
             rate_limit=rate_limit,
@@ -1549,6 +1688,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     operator_key_store = (
         OperatorKeyStore(args.operator_key_store) if args.operator_key_store else None
     )
+    identity_connection = None
+    if args.identity_store:
+        identity_store: IdentityStore | None = SQLiteIdentityStore(args.identity_store)
+    elif os.environ.get("DATABASE_URL"):
+        try:
+            import psycopg
+        except ImportError as exc:
+            raise SystemExit("install the postgres extra: pip install .[postgres]") from exc
+        identity_connection = psycopg.connect(os.environ["DATABASE_URL"])
+        identity_store = PostgresIdentityStore(identity_connection)
+    else:
+        identity_store = None
     job_connection = None
     if args.job_store:
         job_store: JobSubmissionStore | None = SQLiteJobStore(args.job_store)
@@ -1575,6 +1726,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         operator_token=args.operator_token,
         operator_role=args.operator_role,
         operator_key_store=operator_key_store,
+        identity_store=identity_store,
         host=args.host,
         port=args.port,
         max_body_bytes=args.max_body_bytes,
@@ -1589,6 +1741,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         server.server_close()
         if operator_key_store is not None:
             operator_key_store.close()
+        if isinstance(identity_store, SQLiteIdentityStore):
+            identity_store.close()
+        if identity_connection is not None:
+            identity_connection.close()
         if job_store is not None:
             if isinstance(job_store, SQLiteJobStore):
                 job_store.close()
@@ -1792,6 +1948,19 @@ API_SCHEMA = {
                 "responses": {"204": {"description": "Local browser session revoked"}}
             }
         },
+        "/auth/me": {
+            "get": {
+                "security": [{"bearerAuth": []}],
+                "responses": {
+                    "200": {
+                        "description": (
+                            "Authenticated subject, tenant, issuer, assigned roles, and identity type"
+                        )
+                    },
+                    "401": {"description": "Authenticated OIDC identity required"},
+                },
+            }
+        },
         "/admin": {
             "get": {
                 "security": [{"bearerAuth": []}],
@@ -1859,6 +2028,46 @@ API_SCHEMA = {
                             }
                         }
                     },
+                },
+                "/admin/identities/role-assignments": {
+                    "get": {
+                        "security": [{"bearerAuth": []}],
+                        "responses": {"200": {"description": "Explicit role assignments"}},
+                    },
+                    "post": {
+                        "security": [{"bearerAuth": []}],
+                        "requestBody": {
+                            "required": True,
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "required": ["principal_id", "role"],
+                                        "properties": {
+                                            "principal_id": {"type": "string"},
+                                            "role": {
+                                                "type": "string",
+                                                "enum": sorted(role.value for role in Role),
+                                            },
+                                        },
+                                    }
+                                }
+                            },
+                        },
+                        "responses": {"201": {"description": "Role assignment recorded"}},
+                    },
+                },
+                "/admin/identities/service-principals": {
+                    "get": {
+                        "security": [{"bearerAuth": []}],
+                        "responses": {"200": {"description": "Authenticated service principals"}},
+                    }
+                },
+                "/admin/identities/events": {
+                    "get": {
+                        "security": [{"bearerAuth": []}],
+                        "responses": {"200": {"description": "Identity and role-assignment events"}},
+                    }
                 },
                 "responses": {
                     "201": {

@@ -40,6 +40,7 @@ Flags override nothing implicitly; environment variables supply defaults.
 | `ENTRA_TENANT_ID`, `ENTRA_CLIENT_ID` | Single-tenant Microsoft Entra ID API-token validation; discovery and JWKS are resolved automatically |
 | `ENTRA_REDIRECT_URI`, `ENTRA_CLIENT_SECRET` | Enable server-side Entra authorization-code sign-in (secret optional for a PKCE public client) |
 | `DATABASE_URL` | PostgreSQL for replay log and job queue |
+| `GAS_IDENTITY_STORE` | Optional SQLite identity database for local/single-node user, service-principal, role-assignment, and identity-event storage; `DATABASE_URL` selects PostgreSQL instead |
 
 Run `gas-server --help` for the full flag list. Invalid configuration fails
 at startup, before the listener binds.
@@ -76,6 +77,39 @@ ID token expiry or eight hours; a server restart logs users out. The Helm chart
 sets one API replica when `oidc.redirectUri` enables browser sessions so the
 in-memory state/session store is not split between pods. Multi-replica browser
 sessions require a shared session-store implementation.
+
+### Device-code CLI and identity administration
+
+Install the Entra client dependencies and sign in without embedding a shared
+operator token in the application:
+
+```powershell
+pip install ".[entra]"
+gas auth login --api-url https://gas.example.com `
+  --tenant-id <tenant-guid> --client-id <api-app-guid>
+```
+
+The CLI requests `api://<api-app-guid>/access_as_user` unless `--scopes` is
+provided. MSAL uses an OS-protected persistent token cache (DPAPI on Windows,
+Keychain on macOS, or the configured Linux secret-store backend); the CLI's
+credentials JSON contains only tenant, client, scope, and API URL metadata.
+Protect the user's account and OS profile as usual. A bootstrap `--token`
+override remains available for controlled local recovery only.
+
+For durable identity records and role assignments, PostgreSQL deployments
+should apply `deploy/postgres/migrations/002_identity_schema.sql` using the
+deployment's migration process and configure `DATABASE_URL`. Single-node
+development may use `GAS_IDENTITY_STORE` with a SQLite file. The API exposes
+`GET /auth/me`, read endpoints under `/admin/identities/`, and a
+`platform_admin`-only `POST /admin/identities/role-assignments` accepting
+`{"principal_id":"...","role":"operator"}`. Claims-based roles and explicit
+assignments are combined; unknown roles fail closed. OIDC identity data is
+bound into every authorization request before the signed GAA is issued.
+
+One-time JWT replay protection is exposed by `JWTValidator.validate_once()`
+and supports an injected SQLite or PostgreSQL replay store. It requires a
+signed `jti`. Normal OAuth bearer access tokens remain reusable across
+requests; do not configure their validation as one-time.
 
 In Entra mode static bearer tokens are not accepted for API requests. If
 `GOVERNED_AUTONOMY_BEARER_TOKEN` is configured, it is restricted to the

@@ -208,6 +208,10 @@ class RuntimeIdentity:
     name: str | None = None
     email: str | None = None
     groups: tuple[str, ...] = ()
+    issuer: str | None = None
+    identity_source: str | None = None
+    service_principal: bool = False
+    identity_type: str = "human"
 
     @property
     def tenant(self) -> str | None:
@@ -230,18 +234,45 @@ class RuntimeIdentity:
         mapped = ClaimsMapper(legacy_admin_role=legacy_admin_role).map_to_identity(claims)
         name = claims.get("name")
         email = claims.get("email") or claims.get("preferred_username") or claims.get("upn")
+        identity_type = claims.get("identity_type")
+        if identity_type not in {
+            "human",
+            "service_principal",
+            "managed_identity",
+            "workload_identity",
+            "machine",
+        }:
+            if claims.get("xms_mirid"):
+                identity_type = "managed_identity"
+            elif claims.get("workload_identity") or claims.get("workload"):
+                identity_type = "workload_identity"
+            elif mapped.service_principal:
+                identity_type = "service_principal"
+            elif claims.get("machine_identity"):
+                identity_type = "machine"
+            else:
+                identity_type = "human"
         return cls(
             service=service,
             environment=environment,
             tenant_id=mapped.tenant_id,
-            actor_id=f"oidc:{identity.issuer}:{identity.subject}",
+            actor_id=f"oidc:{identity.issuer}:{mapped.subject}",
             request_id=request_id,
             source=source,
+            principal_id=mapped.service_id if mapped.service_principal else None,
             roles=tuple(sorted(role.value for role in mapped.roles)),
             subject=mapped.subject,
             name=name if isinstance(name, str) else None,
             email=email if isinstance(email, str) else None,
             groups=mapped.groups,
+            issuer=identity.issuer,
+            identity_source=(
+                "entra"
+                if identity.issuer.startswith("https://login.microsoftonline.com/")
+                else "oidc"
+            ),
+            service_principal=mapped.service_principal,
+            identity_type=identity_type,
         )
 
     def context(self) -> dict[str, Any]:
@@ -268,7 +299,27 @@ class RuntimeIdentity:
             context["email"] = self.email
         if self.groups:
             context["groups"] = list(self.groups)
+        if self.issuer is not None:
+            context["issuer"] = self.issuer
+        if self.identity_source is not None:
+            context["identity_source"] = self.identity_source
+        if self.service_principal:
+            context["service_principal"] = True
+        if self.identity_type != "human":
+            context["identity_type"] = self.identity_type
         return context
+
+    def to_identity_dict(self) -> dict[str, Any]:
+        """Serialize the stable identity claim contract used by the API and evidence."""
+        return {
+            "subject": self.subject or "",
+            "tenant": self.tenant_id or "",
+            "groups": list(self.groups),
+            "roles": list(self.roles),
+            "issuer": self.issuer or "",
+            "service_principal": self.service_principal,
+            "identity_type": self.identity_type,
+        }
 
 
 class GovernancePlatform:

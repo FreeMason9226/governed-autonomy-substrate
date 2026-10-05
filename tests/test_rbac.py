@@ -1,6 +1,6 @@
 ﻿import pytest
 
-from governed_autonomy.rbac import ClaimsMapper, Role, require_roles
+from governed_autonomy.rbac import ClaimsMapper, Role, authorize, has_permission, require_roles
 
 
 def test_maps_roles_scopes_and_groups_and_ignores_unknown():
@@ -26,7 +26,13 @@ def test_maps_enterprise_app_role_names_case_insensitively():
         }
     )
 
-    assert identity.roles == set(Role)
+    assert identity.roles == {
+        Role.PLATFORM_ADMIN,
+        Role.POLICY_ADMIN,
+        Role.APPROVER,
+        Role.AUDITOR,
+        Role.OPERATOR,
+    }
 
 
 def test_missing_subject_rejected():
@@ -42,3 +48,18 @@ def test_require_roles():
     require_roles(admin, [Role.OPERATOR])
     with pytest.raises(PermissionError):
         require_roles(auditor, [Role.OPERATOR])
+
+
+def test_authorization_decorator_requires_identity_and_permission_evaluation():
+    @authorize(Role.OPERATOR)
+    def run_governed_action(*, identity, action):
+        return action
+
+    operator = ClaimsMapper().map_to_identity({"sub": "operator", "roles": ["operator"]})
+    auditor = ClaimsMapper().map_to_identity({"sub": "auditor", "roles": ["auditor"]})
+    assert has_permission(operator, [Role.OPERATOR])
+    assert run_governed_action(identity=operator, action="write") == "write"
+    with pytest.raises(PermissionError):
+        run_governed_action(identity=auditor, action="write")
+    with pytest.raises(PermissionError):
+        run_governed_action(action="write")

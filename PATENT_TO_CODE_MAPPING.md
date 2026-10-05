@@ -283,3 +283,22 @@ Implementation notes:
 - Issued mesh-enabled authorization frames retain canonical `GovernanceInput` evidence and the request digest; `ExecutionBoundary` reconstructs and compares that evidence before execution, failing closed on malformed, conflicting, tampered, mismatched, or digest-divergent evidence.
 - The integration is opt-in for compatibility; mandatory deployment policy can require callers to provide mesh inputs at a higher platform layer. This execution-side verification is local replay-bound evidence, not external source attestation or tamper-proof storage; legacy artifacts without mesh inputs remain compatible.
 - `GovernanceInput.attest()`, `GovernanceSourceRegistry`, and `GovernanceMesh(trusted_sources=...)` add opt-in source signature verification, explicit registration/revocation semantics, and source-ID-to-key binding. This remains a local trust-registry adapter boundary and does not provide network identity, key rotation, or protected external retention.
+
+### 10. Enterprise identity attribution and verifiable governance evidence
+
+Patent concepts:
+- authenticated human and service identities bound to each arbitration cycle
+- tenant-scoped governance authority and explicit role assignment
+- immutable, verifiable evidence that identifies the actor responsible for a decision
+
+Code:
+- `src/governed_autonomy/auth/` — OIDC/JWT facade, Entra device authorization, claim mapping, service identity types, and one-time JWT replay protection
+- `src/governed_autonomy/platform.py` — `RuntimeIdentity` and signed authorization context
+- `src/governed_autonomy/auth/store.py` — SQLite/PostgreSQL users, service principals, roles, assignments, identity events, and replay state
+- `deploy/postgres/migrations/002_identity_schema.sql` — production PostgreSQL schema
+
+Implementation notes:
+- API tokens are validated against the discovered tenant issuer and JWKS with fixed allowed algorithms, exact audience, expiry, and signature checks. IdP claims and database role assignments are mapped to a trusted RuntimeIdentity; caller-provided actor, tenant, and roles are overwritten before authorization.
+- The subject, tenant, roles, issuer/source, identity type, and groups are bound into the GAA's signed action request. The replay log's hash chain provides tamper-evident ordering and integrity; the GAA signature supplies issuer authenticity. Identity/role lifecycle events are also persisted with a timestamp.
+- MSAL device authorization is the CLI sign-in path. Its OS-protected token cache is separate from the identity schema. `validate_once()` is for tokens/assertions with single-use semantics; ordinary OAuth bearer access tokens are reusable by design.
+- External tenant administration, role provisioning from Entra groups, durable browser sessions, and external WORM retention remain deployment integrations. This is a technical implementation mapping, not a statement about patent validity or legal scope.

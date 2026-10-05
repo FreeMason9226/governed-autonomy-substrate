@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
+from functools import wraps
+from typing import Any, ParamSpec, TypeVar
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 
 class Role(StrEnum):
@@ -14,6 +18,7 @@ class Role(StrEnum):
     OPERATOR = "operator"
     AUDITOR = "auditor"
     APPROVER = "approver"
+    SERVICE_PRINCIPAL = "service_principal"
 
 
 @dataclass(frozen=True)
@@ -24,6 +29,8 @@ class ClaimsIdentity:
     email: str | None = None
     roles: frozenset[Role] = frozenset()
     groups: tuple[str, ...] = ()
+    issuer: str | None = None
+    service_principal: bool = False
 
 
 def _as_list(value: Any) -> list[str]:
@@ -56,9 +63,9 @@ class ClaimsMapper:
         return "".join(character.lower() for character in value if character.isalnum())
 
     def map_to_identity(self, claims: Mapping[str, Any]) -> ClaimsIdentity:
-        subject = claims.get("sub")
+        subject = claims.get("oid") or claims.get("sub")
         if not isinstance(subject, str) or not subject:
-            raise ValueError("claims are missing sub")
+            raise ValueError("claims are missing oid or sub")
         groups = _as_list(claims.get("groups"))
         candidates = [
             *_as_list(claims.get("roles")),
@@ -83,6 +90,9 @@ class ClaimsMapper:
         service = claims.get("appid") or claims.get("azp") or claims.get("client_id")
         email = claims.get("email") or claims.get("upn")
         tenant = claims.get("tid") or claims.get("tenant_id")
+        service_principal = claims.get("idtyp") == "app"
+        if service_principal:
+            roles.add(Role.SERVICE_PRINCIPAL)
         return ClaimsIdentity(
             subject=subject,
             tenant_id=tenant if isinstance(tenant, str) else None,
@@ -90,6 +100,8 @@ class ClaimsMapper:
             email=email if isinstance(email, str) else None,
             roles=frozenset(roles),
             groups=tuple(groups),
+            issuer=claims.get("iss") if isinstance(claims.get("iss"), str) else None,
+            service_principal=service_principal,
         )
 
 
@@ -99,3 +111,27 @@ def require_roles(identity: ClaimsIdentity, required: Iterable[Role]) -> None:
     if Role.PLATFORM_ADMIN in identity.roles or identity.roles & needed:
         return
     raise PermissionError(f"access denied; required roles: {sorted(r.value for r in needed)}")
+
+
+def has_permission(identity: ClaimsIdentity, required: Iterable[Role]) -> bool:
+    """Return whether an authenticated identity is allowed by the GAS role policy."""
+    needed = set(required)
+    return Role.PLATFORM_ADMIN in identity.roles or bool(identity.roles & needed)
+
+
+def authorize(
+    *required: Role,
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
+    """Guard a function receiving ``identity=ClaimsIdentity`` with explicit role checks."""
+    def decorator(function: Callable[_P, _R]) -> Callable[_P, _R]:
+        @wraps(function)
+        def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+            identity = kwargs.get("identity")
+            if not isinstance(identity, ClaimsIdentity):
+                raise PermissionError("an authenticated identity is required")
+            require_roles(identity, required)
+            return function(*args, **kwargs)
+
+        return wrapped
+
+    return decorator

@@ -38,6 +38,8 @@ def test_runtime_identity_normalizes_validated_oidc_claims():
         "name": "A. User",
         "email": "user@example.com",
         "groups": ["security-reviewers"],
+        "issuer": "https://identity.example",
+        "identity_source": "oidc",
     }
 
 

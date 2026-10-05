@@ -20,6 +20,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit
 from urllib.request import Request, urlopen
 
+from .auth.entra import EntraDeviceAuthorizationClient
+from .identity import EntraOIDCConfig
 from .replay import ReplayLog
 
 DEFAULT_API_URL = "http://localhost:8000"
@@ -30,7 +32,13 @@ def config_path() -> Path:
 
 
 def load_credentials() -> dict[str, Any]:
-    creds: dict[str, Any] = {"api_url": DEFAULT_API_URL, "token": None}  # nosec B105
+    creds: dict[str, Any] = {
+        "api_url": DEFAULT_API_URL,
+        "token": None,
+        "tenant_id": None,
+        "client_id": None,
+        "scopes": None,
+    }
     path = config_path()
     if path.exists():
         creds.update(json.loads(path.read_text(encoding="utf-8")))
@@ -50,6 +58,28 @@ def save_credentials(api_url: str, token: str) -> Path:
     return path
 
 
+def save_entra_credentials(
+    api_url: str,
+    tenant_id: str,
+    client_id: str,
+    scopes: Sequence[str],
+) -> Path:
+    path = config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump(
+            {
+                "api_url": api_url,
+                "tenant_id": tenant_id,
+                "client_id": client_id,
+                "scopes": list(scopes),
+            },
+            handle,
+        )
+    return path
+
+
 class CLIError(Exception):
     pass
 
@@ -60,8 +90,18 @@ def _request(method: str, path: str, body: dict[str, Any] | None = None) -> Any:
     if urlsplit(api_url).scheme not in {"http", "https"}:
         raise CLIError("api_url must be http(s)")
     headers = {"Accept": "application/json"}
-    if creds.get("token"):
-        headers["Authorization"] = f"Bearer {creds['token']}"
+    token = creds.get("token")
+    if creds.get("tenant_id") and creds.get("client_id"):
+        config = EntraOIDCConfig(str(creds["tenant_id"]), str(creds["client_id"]))
+        scopes = creds.get("scopes") or [f"api://{config.client_id}/access_as_user"]
+        result = EntraDeviceAuthorizationClient(
+            config,
+            scopes=scopes,
+            cache_path=config_path().with_name("entra.cache.bin"),
+        ).acquire_token(output=lambda message: print(message, file=sys.stderr))
+        token = result.get("access_token")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     data = None
     if body is not None:
         data = json.dumps(body).encode()
@@ -85,9 +125,21 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="group", required=True)
 
     auth = sub.add_parser("auth").add_subparsers(dest="cmd", required=True)
-    login = auth.add_parser("login", help="store API URL and operator token")
+    login = auth.add_parser("login", help="sign in with Entra device authorization")
     login.add_argument("--api-url", default=DEFAULT_API_URL)
-    login.add_argument("--token", default=None, help="defaults to $GOVERNED_AUTONOMY_OPERATOR_TOKEN")
+    login.add_argument("--tenant-id", default=os.environ.get("ENTRA_TENANT_ID"))
+    login.add_argument("--client-id", default=os.environ.get("ENTRA_CLIENT_ID"))
+    login.add_argument(
+        "--scopes",
+        nargs="+",
+        default=None,
+        help="API delegated scopes (default: api://<client-id>/access_as_user)",
+    )
+    login.add_argument(
+        "--token",
+        default=None,
+        help="explicit bootstrap token override; otherwise use Entra device authorization",
+    )
     auth.add_parser("status", help="check connectivity and credentials")
 
     keys = sub.add_parser("operator-key").add_subparsers(dest="cmd", required=True)
@@ -132,8 +184,28 @@ def run(args: argparse.Namespace) -> int:
     if args.group == "auth" and args.cmd == "login":
         token = args.token or os.environ.get("GOVERNED_AUTONOMY_OPERATOR_TOKEN")
         if not token:
-            raise CLIError("provide --token or set GOVERNED_AUTONOMY_OPERATOR_TOKEN")
-        print(f"Saved credentials to {save_credentials(args.api_url, token)}")
+            if not args.tenant_id or not args.client_id:
+                raise CLIError(
+                    "Entra device login requires --tenant-id and --client-id "
+                    "(or ENTRA_TENANT_ID and ENTRA_CLIENT_ID)"
+                )
+            try:
+                config = EntraOIDCConfig(args.tenant_id, args.client_id)
+                scopes = args.scopes or [f"api://{config.client_id}/access_as_user"]
+                scopes = tuple(scopes)
+                EntraDeviceAuthorizationClient(
+                    config,
+                    scopes=scopes,
+                    cache_path=config_path().with_name("entra.cache.bin"),
+                ).acquire_token()
+            except (RuntimeError, ValueError) as exc:
+                raise CLIError(str(exc)) from exc
+            path = save_entra_credentials(
+                args.api_url, config.tenant_id, config.client_id, scopes
+            )
+        else:
+            path = save_credentials(args.api_url, token)
+        print(f"Saved credentials to {path}")
     elif args.group == "auth":
         _request("GET", "/admin/policies")
         print("Authenticated: operator credentials accepted.")

@@ -1,6 +1,10 @@
 """Governed Autonomy Substrate MVP."""
 
 from .a2a import A2AGuard, A2ATaskDelegation
+from .auth.entra import EntraDeviceAuthorizationClient
+from .auth.jwt_validator import JWTReplayCache
+from .auth.service_identity import ServiceIdentity, service_identity_from_claims
+from .auth.store import IdentityStore, PostgresIdentityStore, SQLiteIdentityStore
 from .bootstrap import build_demo_service, build_platform_demo, build_runtime_service
 from .compliance import ComplianceAuditor, ComplianceEvaluation
 from .control_plane import ControlPlane, build_control_plane
@@ -138,6 +142,13 @@ __all__ = [
     "RemoteSigner",
     "Signer",
     "ExternalIdentity",
+    "EntraDeviceAuthorizationClient",
+    "JWTReplayCache",
+    "ServiceIdentity",
+    "service_identity_from_claims",
+    "IdentityStore",
+    "SQLiteIdentityStore",
+    "PostgresIdentityStore",
     "ClaimsIdentity",
     "ClaimsMapper",
     "Role",

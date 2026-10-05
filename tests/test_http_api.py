@@ -1011,7 +1011,10 @@ def test_http_api_enforces_role_specific_admin_routes():
             return ExternalIdentity(
                 subject=token,
                 issuer="https://identity.example",
-                claims={"roles": claims_by_token[token]},
+                claims={
+                    "roles": claims_by_token[token],
+                    "tid": "11111111-1111-4111-8111-111111111111",
+                },
             )
 
     service, _, _ = build_demo_service()

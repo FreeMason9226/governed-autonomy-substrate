@@ -16,7 +16,7 @@ The barrier is *fail closed*: any missing, malformed, expired, revoked or mismat
 | Trust store (issuer public keys, revocations) | Postgres / JSON file | Operators with signed governance changes |
 | Policy registry (signed manifests) | Postgres / file | Policy authority key |
 | Replay log + consumed nonces | Postgres / SQLite | Append-only, hash-chained |
-| Operator credentials | Token, operator keys, OIDC role | Operators |
+| Operator credentials | Entra/OIDC access token, OS-protected MSAL cache, operator keys | Operators and identity provider |
 | Worker credentials | Vault (short-lived) | Worker sandbox |
 
 ```mermaid
@@ -46,7 +46,9 @@ Agents are untrusted. The API, issuer and barrier form the trusted computing bas
 | Key theft at rest | KMS-backed signer: private key never leaves the KMS | `kms_backends.py` |
 | Privilege escalation via queue fields | Jobs carry the signed GAA only; the worker re-verifies through the barrier and ignores unsigned fields | `jobs_postgres.py`, `worker.py` |
 | Malicious action payload | Sandboxed container runner, secrets fetched per job from Vault | `worker.py`, `deploy/security/` |
-| Unauthorized operator | Operator token, per-operator keys, or OIDC role; governance changes are signed client-side | `http_api.py`, `admin` |
+| Unauthorized operator | Entra/OIDC signature validation, tenant/audience/expiry checks, claim + assigned-role RBAC; governance changes are signed client-side | `auth/`, `http_api.py`, `admin` |
+| Replayed one-time token | Signed `jti` consumed atomically by `JWTReplayCache`, SQLite, or PostgreSQL; ordinary OAuth access tokens remain reusable by protocol design | `auth/jwt_validator.py`, `auth/store.py` |
+| Unattributed governance decision | Verified RuntimeIdentity context is bound server-side into the signed GAA and replay frame; caller-supplied identity fields cannot override it | `platform.py`, `http_api.py`, `models.py` |
 | Request flooding / oversized bodies | Strict body limits, JSON-only transport, rate limiting | `http_api.py` |
 | Supply chain | SHA-pinned Actions, Trivy, Bandit, SBOM, Dependabot | `.github/workflows/` |
 
@@ -64,7 +66,9 @@ Agents are untrusted. The API, issuer and barrier form the trusted computing bas
 - [ ] Use `GAS_RUNTIME_MODE=postgres` with TLS to the database; never the in-memory mode.
 - [ ] Sign with KMS (`GAS_ISSUER_*` pointing at a KMS key); do not ship raw private keys in env.
 - [ ] Replace the default bearer/operator tokens; store them in a secret manager (External Secrets template provided).
-- [ ] Enable OIDC for operators and require signed governance changes.
+- [ ] Enable tenant-bound Entra/OIDC validation with `oidc_only`; do not use static bearer tokens for governance operations.
+- [ ] Apply `002_identity_schema.sql` and configure `DATABASE_URL` for shared identity assignments and identity-event records.
+- [ ] Install the `entra` extra and verify the CLI's MSAL token cache uses the host OS protection provider.
 - [ ] Enable the NetworkPolicy and run the worker with the sandbox runner and Vault policy from `deploy/security/`.
 - [ ] Scrape `/admin/metrics` and enable the PrometheusRule alerts.
 - [ ] Periodically run `gas replay verify` and archive the log.
