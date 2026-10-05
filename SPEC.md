@@ -250,11 +250,16 @@ A `Policy` is a data-only, deterministic policy input for authorization.
   "exact_context":      { "<field>": <value>, ... },
   "max_request_bytes":  <integer>,
   "max_ttl_seconds":    <integer>,
-  "required_approvals": { "<action>": <integer>, ... }
+  "required_approvals": { "<action>": <integer>, ... },
+  "max_numeric_fields": { "<action>": { "<field>": <number>, ... }, ... }
 }
 ```
 
 `required_approvals` MAY be omitted; it defaults to `{}`.
+`max_numeric_fields` MAY be omitted; it defaults to `{}`. For each configured
+action and field, the request value MUST be a finite number no greater than the
+configured maximum. When empty, `max_numeric_fields` MUST be omitted from the
+canonical policy object.
 
 ### 6.2 Invariants
 
@@ -263,6 +268,7 @@ A `Policy` is a data-only, deterministic policy input for authorization.
 - `required_context` MUST be sorted lexicographically.
 - `max_request_bytes` and `max_ttl_seconds` MUST be positive integers.
 - `required_approvals` values MUST be non-negative integers.
+- `max_numeric_fields` values MUST be finite numbers.
 
 ### 6.3 Policy Digest
 
