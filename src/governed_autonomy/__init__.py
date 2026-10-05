@@ -3,6 +3,7 @@
 from .a2a import A2AGuard, A2ATaskDelegation
 from .bootstrap import build_demo_service, build_platform_demo, build_runtime_service
 from .compliance import ComplianceAuditor, ComplianceEvaluation
+from .control_plane import ControlPlane, build_control_plane
 from .crypto import KeyPair, verify_signature
 from .deployment import (
     BoundedRateLimiter,
@@ -25,15 +26,18 @@ from .governance import GovernanceRule, GovernanceRuleTranslator
 from .health import health_report
 from .http_api import AuthenticatedAPI, create_server, parse_server_args
 from .identity import (
+    EntraOIDCConfig,
     ExternalIdentity,
     IdentityValidationError,
     JWKSProvider,
     JWTValidator,
+    OIDCAuthCodeClient,
     OIDCDiscoveryDocument,
     OIDCValidator,
     StaticJWKSProvider,
     UrlJWKSProvider,
     discover_oidc_configuration,
+    entra_oidc_validator_from_discovery,
     oidc_validator_from_discovery,
 )
 from .issuer import AuthorizationIssuer, PolicyDeniedError
@@ -77,6 +81,7 @@ from .policy import (
     SignedPolicyManifest,
     signed_policy_manifest_from_dict,
 )
+from .rbac import ClaimsIdentity, ClaimsMapper, Role, require_roles
 from .replay import ReplayLog, SQLiteReplayLog
 from .service import GovernedService
 from .signing import KMSSigner, LocalEd25519Signer, RemoteSigner, Signer
@@ -133,19 +138,28 @@ __all__ = [
     "RemoteSigner",
     "Signer",
     "ExternalIdentity",
+    "ClaimsIdentity",
+    "ClaimsMapper",
+    "Role",
+    "require_roles",
+    "EntraOIDCConfig",
     "IdentityValidationError",
     "JWKSProvider",
     "JWTValidator",
+    "OIDCAuthCodeClient",
     "OIDCDiscoveryDocument",
     "OIDCValidator",
     "StaticJWKSProvider",
     "UrlJWKSProvider",
     "discover_oidc_configuration",
+    "entra_oidc_validator_from_discovery",
     "oidc_validator_from_discovery",
 
     # Compliance & Audit
     "ComplianceAuditor",
     "ComplianceEvaluation",
+    "ControlPlane",
+    "build_control_plane",
     "ReplayLog",
     "SQLiteReplayLog",
     "GovernanceAuthorizationArtifact",

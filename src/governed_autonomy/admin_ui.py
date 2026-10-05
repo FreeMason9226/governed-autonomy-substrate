@@ -35,7 +35,8 @@ enter here is persisted: it is held only in this page's memory and is lost on re
 </section>
 
 <nav class="tabs">
-<button data-tab="health" class="tab-button active">Health</button>
+<button data-tab="mission-control" class="tab-button active">Mission Control</button>
+<button data-tab="health" class="tab-button">Health</button>
 <button data-tab="policies" class="tab-button">Policies</button>
 <button data-tab="proposals" class="tab-button">Policy Proposals</button>
 <button data-tab="trust" class="tab-button">Trusted Keys</button>
@@ -44,7 +45,25 @@ enter here is persisted: it is held only in this page's memory and is lost on re
 <button data-tab="metrics" class="tab-button">Metrics</button>
 </nav>
 
-<section id="tab-health" class="tab-panel active">
+<section id="tab-mission-control" class="tab-panel active">
+<h2>Governance Mission Control <button class="refresh" data-refresh="mission-control">Refresh</button></h2>
+<p id="mission-status" class="hint">Connect to load the current governance snapshot.</p>
+<div class="mission-stats">
+  <span>Assets <strong id="mc-assets">—</strong></span>
+  <span>Policies <strong id="mc-policies">—</strong></span>
+  <span>Approvals <strong id="mc-approvals">—</strong></span>
+  <span>Incidents <strong id="mc-incidents">—</strong></span>
+  <span>Exec success <strong id="mc-success-rate">—</strong></span>
+</div>
+<div class="mission-grid">
+  <section><h3>Assets &amp; policy graph</h3><table id="mission-assets"><thead><tr><th>Action</th><th>Governing policies</th></tr></thead><tbody></tbody></table></section>
+  <section><h3>Approval queue</h3><table id="mission-approvals"><thead><tr><th>Policy</th><th>Proposal</th><th>Approvals</th></tr></thead><tbody></tbody></table></section>
+  <section><h3>Incident center</h3><table id="mission-incidents"><thead><tr><th>Event</th><th>Detail</th></tr></thead><tbody></tbody></table></section>
+  <section><h3>Analytics &amp; audit timeline</h3><p id="mission-analytics" class="hint"></p><ol id="mission-timeline"></ol></section>
+</div>
+</section>
+
+<section id="tab-health" class="tab-panel">
 <h2>Health</h2>
 <button class="refresh" data-refresh="health">Refresh</button>
 <pre id="health-output" class="output">Not loaded.</pre>
@@ -252,6 +271,24 @@ button {
   align-self: flex-start;
 }
 button.refresh { background: none; color: var(--accent); margin-bottom: 0.75rem; }
+.mission-stats { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.8rem 0; }
+.mission-stats span { background: #111827; border: 1px solid #334155; border-radius: 0.4rem; padding: 0.55rem 0.75rem; }
+.mission-stats strong { margin-left: 0.3rem; color: #93c5fd; }
+.mission-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.8rem; }
+.mission-grid section { min-width: 0; border: 1px solid #334155; border-radius: 0.5rem; padding: 0.75rem; }
+.mission-grid h3 { margin: 0 0 0.5rem; font-size: 1rem; }
+#mission-timeline { max-height: 220px; overflow: auto; font-size: 0.82rem; }
+#mission-timeline li { margin: 0.35rem 0; }
+body { max-width: 1440px; background: #080e19; color: #e2e8f0; }
+input, textarea { background: #0f172a; color: #e2e8f0; }
+button { font-weight: 600; }
+button.refresh { color: #93c5fd; border-color: #334155; }
+th { color: #94a3b8; font-size: 0.73rem; text-transform: uppercase; letter-spacing: 0.05em; }
+td { color: #cbd5e1; font-size: 0.82rem; }
+@media (max-width: 760px) {
+  body { padding: 0.85rem; }
+  .mission-grid { grid-template-columns: 1fr; }
+}
 """
     return body.encode("utf-8")
 
@@ -341,6 +378,163 @@ def render_admin_js() -> bytes:
     document.querySelectorAll(".tab-button").forEach((el) => {
       el.classList.toggle("active", el.dataset.tab === name);
     });
+  }
+
+  function setMetric(id, value, tone) {
+    const element = document.getElementById(id);
+    element.textContent = value;
+    element.className = tone ? tone : "";
+  }
+
+  async function loadControlRoom() {
+    const error = document.getElementById("mission-error");
+    error.hidden = true;
+    try {
+      const data = await api("/admin/control-room");
+      const analytics = data.analytics || {};
+      const healthy = Boolean(data.health && data.health.ok);
+      setMetric("mc-health", healthy ? "OPERATIONAL" : "DEGRADED", healthy ? "good" : "bad");
+      document.getElementById("mc-health-detail").textContent = healthy
+        ? "Replay and governance checks passing"
+        : "One or more readiness checks need attention";
+      setMetric("mc-assets", analytics.asset_count ?? 0);
+      setMetric("mc-policies", analytics.policy_count ?? 0);
+      setMetric("mc-approvals", analytics.pending_approval_count ?? 0,
+        analytics.pending_approval_count ? "warn" : "good");
+      setMetric("mc-incidents", (data.incidents || []).length,
+        data.incidents && data.incidents.length ? "bad" : "good");
+      setMetric("mc-success-rate",
+        analytics.success_rate === null ? "—" : analytics.success_rate + "%",
+        analytics.success_rate === null ? "" : analytics.success_rate >= 95 ? "good" : "warn");
+      document.getElementById("mc-execution-count").textContent =
+        `${analytics.execution_count || 0} executions · ${analytics.failure_count || 0} failed`;
+
+      renderPolicyGraph(data.graph || {});
+      renderIncidents(data.incidents || []);
+      renderApprovals(data.proposals || {});
+      renderAssets(data.assets || []);
+      renderAnalytics(analytics, data.health || {});
+      renderTimeline(data.timeline || []);
+    } catch (err) {
+      error.textContent = "Mission control could not load: " + err.message;
+      error.hidden = false;
+      ["policy-graph", "incident-list", "approval-list", "analytics-chart"].forEach((id) => {
+        document.getElementById(id).innerHTML =
+          '<p class="empty-state">Snapshot unavailable. Refresh after resolving the connection.</p>';
+      });
+    }
+  }
+
+  function renderPolicyGraph(graph) {
+    const container = document.getElementById("policy-graph");
+    const policies = new Map((graph.nodes || [])
+      .filter((node) => node.kind === "policy")
+      .map((node) => [node.id, []]));
+    for (const edge of graph.edges || []) {
+      if (policies.has(edge.from)) policies.get(edge.from).push(edge.to);
+    }
+    if (!policies.size) {
+      container.innerHTML = '<p class="empty-state">No policies are registered.</p>';
+      return;
+    }
+    container.innerHTML = [...policies.entries()].map(([policyId, actions]) =>
+      '<div class="graph-row"><div class="graph-policy"><strong>' + escapeHtml(policyId) +
+      '</strong><br><small>policy</small></div><div class="graph-arrow" aria-hidden="true">→</div>' +
+      '<div>' + (actions.length
+        ? actions.sort().map((action) => '<span class="graph-action">' + escapeHtml(action) + '</span>').join("")
+        : '<span class="empty-state">No linked action</span>') +
+      '</div></div>'
+    ).join("");
+  }
+
+  function renderIncidents(incidents) {
+    const container = document.getElementById("incident-list");
+    if (!incidents.length) {
+      container.innerHTML = '<p class="empty-state">No denied requests or failed executions in the replay ledger.</p>';
+      return;
+    }
+    container.innerHTML = incidents.slice(0, 12).map((incident) =>
+      '<article class="incident-item ' + escapeHtml(incident.severity) + '">' +
+      '<strong>' + escapeHtml(incident.summary) + '</strong>' +
+      '<p>' + escapeHtml(incident.detail || "No additional details recorded.") + '</p>' +
+      '<p>' + escapeHtml(incident.action || incident.policy_id || incident.frame_id) +
+      ' · frame ' + escapeHtml(String(incident.sequence)) + '</p></article>'
+    ).join("");
+  }
+
+  function renderApprovals(proposalData) {
+    const container = document.getElementById("approval-list");
+    const pending = (proposalData.proposals || []).filter((proposal) => proposal.status === "pending");
+    if (!pending.length) {
+      container.innerHTML = '<p class="empty-state">No policy changes are waiting for approval.</p>';
+      return;
+    }
+    const required = proposalData.required_approvals;
+    container.innerHTML = pending.map((proposal) => {
+      const count = Number(proposal.approval_count || 0);
+      const quorum = Number(required || 0);
+      return '<article class="approval-item"><strong>' + escapeHtml(proposal.policy_id) +
+        '</strong><p>' + escapeHtml(proposal.proposal_id) + '</p><p>Approvals: ' +
+        escapeHtml(String(count)) + (quorum ? ' / ' + escapeHtml(String(quorum)) : '') +
+        ' · proposer ' + escapeHtml(proposal.proposed_by_key_id) + '</p></article>';
+    }).join("");
+  }
+
+  function renderAssets(assets) {
+    const tbody = document.querySelector("#asset-table tbody");
+    if (!assets.length) {
+      tbody.innerHTML = '<tr><td colspan="3">No executable action handlers are registered.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = assets.map((asset) =>
+      '<tr><td>' + escapeHtml(asset.asset_id) + '</td><td><span class="status-pill ' +
+      escapeHtml(asset.status) + '">' + escapeHtml(asset.status) + '</span></td><td>' +
+      escapeHtml((asset.policies || []).join(", ") || "No policy mapping") + '</td></tr>'
+    ).join("");
+  }
+
+  function renderAnalytics(metrics, health) {
+    const container = document.getElementById("analytics-chart");
+    const values = [
+      ["Authorizations", Number(metrics.authorization_count || 0), ""],
+      ["Executions", Number(metrics.execution_count || 0), ""],
+      ["Successful", Number(metrics.success_count || 0), "success"],
+      ["Failed", Number(metrics.failure_count || 0), "failure"],
+    ];
+    const maximum = Math.max(1, ...values.map((value) => value[1]));
+    container.innerHTML = values.map(([label, value, kind]) => {
+      const width = Math.round(value / maximum * 100);
+      return '<div class="analytics-row"><span>' + escapeHtml(label) + '</span><svg class="analytics-track" ' +
+        'viewBox="0 0 100 10" preserveAspectRatio="none" role="img" aria-label="' +
+        escapeHtml(label + ": " + value) + '"><rect class="analytics-bar ' + kind +
+        '" x="0" y="0" width="' + width + '" height="10" rx="5"></rect></svg><strong>' +
+        escapeHtml(String(value)) + '</strong></div>';
+    }).join("");
+    const replay = health.checks && health.checks.replay_chain;
+    document.getElementById("analytics-integrity").textContent = replay
+      ? `Replay integrity ${replay.ok ? "verified" : "failed"} · ${replay.frames} frames · ` +
+        `${metrics.trusted_key_count || 0} trusted keys · ${metrics.revoked_key_count || 0} revoked`
+      : "Replay integrity status unavailable.";
+  }
+
+  function renderTimeline(events) {
+    const tbody = document.querySelector("#timeline-table tbody");
+    const shown = events.slice(0, 30);
+    document.getElementById("timeline-count").textContent = `${events.length} recent frames`;
+    if (!shown.length) {
+      tbody.innerHTML = '<tr><td colspan="6">No audit frames have been recorded.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = shown.map((event) => {
+      const detail = event.action || event.policy_id || "—";
+      const actorNonce = event.actor_id !== "system" && event.actor_id
+        ? event.actor_id : event.nonce || "—";
+      const when = event.recorded_at || ("Frame " + event.sequence);
+      return '<tr><td>' + escapeHtml(when) + '</td><td>' + escapeHtml(event.event) +
+        '</td><td>' + escapeHtml(event.type) + '</td><td>' + escapeHtml(detail) +
+        '</td><td>' + escapeHtml(actorNonce) + '</td><td><code>' +
+        escapeHtml(String(event.frame_hash || "").slice(0, 12)) + '</code></td></tr>';
+    }).join("");
   }
 
   async function loadHealth() {
@@ -680,6 +874,7 @@ def render_admin_js() -> bytes:
   }
 
   const loaders = {
+    "mission-control": loadControlRoom,
     health: loadHealth,
     policies: loadPolicies,
     proposals: loadProposals,
@@ -696,11 +891,7 @@ def render_admin_js() -> bytes:
       return;
     }
     setStatus("Connected (token held in memory only).", true);
-    if (authToken.startsWith("gasop_")) {
-      loaders.operators();
-    } else {
-      loaders.health();
-    }
+    loaders["mission-control"]();
   }
 
   document.addEventListener("DOMContentLoaded", () => {

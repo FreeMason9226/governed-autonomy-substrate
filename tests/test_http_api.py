@@ -16,7 +16,7 @@ from governed_autonomy import (
 
 @pytest.fixture
 def server():
-    service, issuer, _ = build_demo_service()
+    service, _, _ = build_demo_service()
     instance = create_server(service, bearer_token="test-token")
     thread = threading.Thread(target=instance.serve_forever, daemon=True)
     thread.start()
@@ -70,6 +70,49 @@ def test_http_api_authorizes_executes_reports_health_and_audit(server):
     assert audit["audit_summary"]["execution_count"] == 1
 
 
+def test_control_room_snapshot_combines_governance_and_runtime_state():
+    service, _, _ = build_demo_service()
+    instance = create_server(
+        service,
+        bearer_token="test-token",
+        operator_token="operator-token",
+    )
+    thread = threading.Thread(target=instance.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, denied = request(
+            instance,
+            "POST",
+            "/authorize",
+            {
+                "policy_id": "demo-files-v1",
+                "request": {"action": "write_file", "path": "blocked.txt"},
+            },
+            token="operator-token",
+        )
+        assert status == 403
+        assert denied["error"] == "policy denied"
+
+        status, snapshot = request(
+            instance, "GET", "/admin/control-room", token="operator-token"
+        )
+        assert status == 200
+        assert snapshot["analytics"]["policy_count"] >= 1
+        assert snapshot["analytics"]["asset_count"] == 2
+        assert snapshot["health"]["ok"] is True
+        assert {asset["asset_id"] for asset in snapshot["assets"]} == {"run_job", "write_file"}
+        assert any(
+            edge["from"] == "demo-files-v1" and edge["to"] == "write_file"
+            for edge in snapshot["graph"]["edges"]
+        )
+        assert snapshot["incidents"][0]["summary"] == "Authorization denied"
+        assert snapshot["timeline"][0]["type"] == "authorization"
+    finally:
+        instance.shutdown()
+        instance.server_close()
+        thread.join(timeout=2)
+
+
 def test_http_api_routes_query_bearing_urls_and_exposes_openapi_document(server):
     status, health = request(server, "GET", "/health?verbose=true")
     assert status == 200
@@ -81,6 +124,10 @@ def test_http_api_routes_query_bearing_urls_and_exposes_openapi_document(server)
     assert "/api/v1/authorize" in schema["paths"]
     assert "/admin/operator-keys" in schema["paths"]
     assert "/admin/operator-keys/{key_id}/revoke" in schema["paths"]
+    assert "/admin/control-room" in schema["paths"]
+    assert "/auth/login" in schema["paths"]
+    assert "/auth/callback" in schema["paths"]
+    assert "/auth/logout" in schema["paths"]
     assert schema["components"]["securitySchemes"]["bearerAuth"]["scheme"] == "bearer"
 
 
@@ -248,7 +295,7 @@ def test_http_api_main_rejects_incomplete_discovery_configuration(monkeypatch):
 def _admin_server(*, required_approvals=1):
     from governed_autonomy import PolicyChangeManager
 
-    service, issuer, _ = build_demo_service()
+    service, _, _ = build_demo_service()
     proposer = KeyPair.generate("proposer-1")
     reviewer = KeyPair.generate("reviewer-1")
     service.boundary.trust_store.add(proposer.key_id, proposer.public_key)
@@ -604,7 +651,7 @@ def test_http_api_operator_keys_are_revocable_and_governance_events_attribute_ac
 
     from governed_autonomy.operator_auth import OperatorKeyStore
 
-    service, issuer, _ = build_demo_service()
+    service, _, _ = build_demo_service()
     operator_store = OperatorKeyStore(tmp_path / "operator-keys.sqlite")
     instance = create_server(
         service,
@@ -641,79 +688,52 @@ def test_http_api_operator_keys_are_revocable_and_governance_events_attribute_ac
             ).fetchone()[0]
         assert first["token"] not in token_hash
 
-        status, second = operator_request(
+        status, _ = operator_request(
             "POST",
             "/admin/operator-keys",
             {"operator_id": "bob"},
             token=first["token"],
         )
-        assert status == 201
+        assert status == 403
 
-        from governed_autonomy.canonical import b64encode
+        status, _ = operator_request(
+            "GET", "/admin/operator-keys", token=first["token"]
+        )
+        assert status == 403
 
-        delegated_key = KeyPair.generate("delegated-trusted-key")
-        public_key_b64 = b64encode(delegated_key.public_key_bytes())
-        status, prepared = operator_request(
-            "POST",
-            "/admin/trust/keys/prepare",
-            {
-                "key_id": delegated_key.key_id,
-                "public_key_b64": public_key_b64,
-                "requested_by_key_id": issuer.key_id,
-            },
-            token=second["token"],
+        status, _ = operator_request(
+            "GET", "/admin/metrics", token=first["token"]
         )
         assert status == 200
-        trust_signature = issuer.sign(prepared["unsigned_payload"].encode("utf-8"))
+
+        status, _ = operator_request("GET", "/health", token=first["token"])
+        assert status == 401
+
         status, _ = operator_request(
             "POST",
-            "/admin/trust/keys",
-            {
-                "key_id": delegated_key.key_id,
-                "public_key_b64": public_key_b64,
-                "requested_by_key_id": issuer.key_id,
-                "signature": trust_signature,
-            },
-            token=second["token"],
+            f"/admin/operator-keys/{first['key_id']}/revoke",
+            token=first["token"],
         )
-        assert status == 201
-
-        status, key_list = operator_request(
-            "GET", "/admin/operator-keys", token=second["token"]
-        )
-        assert status == 200
-        assert {key["operator_id"] for key in key_list["keys"]} == {"alice", "bob"}
-        assert all("token" not in key and "token_hash" not in key for key in key_list["keys"])
-
-        status, _ = operator_request("GET", "/health", token=second["token"])
-        assert status == 401
+        assert status == 403
 
         status, revoked = operator_request(
             "POST",
             f"/admin/operator-keys/{first['key_id']}/revoke",
-            token=second["token"],
         )
-        assert status == 200
-        assert revoked["revoked"] is True
+        assert status == 200 and revoked["revoked"] is True
 
         status, _ = operator_request("GET", "/admin/operator-keys", token=first["token"])
         assert status == 401
 
-        status, audit = operator_request(
-            "GET", "/admin/governance-log", token=second["token"]
-        )
+        status, audit = operator_request("GET", "/admin/governance-log")
         assert status == 200
         events = audit["events"]
         assert [event["event"] for event in events] == [
             "operator.key_added",
-            "operator.key_added",
-            "trust.key_added",
             "operator.key_revoked",
         ]
         assert events[0]["actor_id"] == "shared-token"
-        assert events[1]["actor_id"] == f"api-key:alice:{first['key_id']}"
-        assert events[2]["actor_id"] == f"api-key:bob:{second['key_id']}"
-        assert events[3]["actor_id"] == f"api-key:bob:{second['key_id']}"
+        assert events[1]["actor_id"] == "shared-token"
     finally:
         instance.shutdown()
         instance.server_close()
@@ -730,7 +750,7 @@ def test_http_api_oidc_subject_is_recorded_as_governance_actor():
             return ExternalIdentity(
                 subject="operator-42",
                 issuer="https://identity.example",
-                claims={"roles": ["gas-admin"]},
+                claims={"roles": ["PolicyAdmin"]},
             )
 
     service, issuer, _ = build_demo_service()
@@ -954,6 +974,83 @@ def test_http_api_auditor_role_is_read_only():
     try:
         assert call("GET", "/admin/policies") == 200
         assert call("POST", "/admin/proposals/prepare", b"{}") == 403
+    finally:
+        instance.shutdown()
+        instance.server_close()
+        thread.join(timeout=2)
+
+
+def test_http_api_enforces_role_specific_admin_routes():
+    from governed_autonomy import ExternalIdentity
+
+    claims_by_token = {
+        "policy-admin": ["PolicyAdmin"],
+        "approver": ["Approver"],
+        "operator": ["Operator"],
+        "auditor": ["Auditor"],
+        "platform-admin": ["PlatformAdmin"],
+    }
+
+    class StubOIDCValidator:
+        def validate(self, token):
+            return ExternalIdentity(
+                subject=token,
+                issuer="https://identity.example",
+                claims={"roles": claims_by_token[token]},
+            )
+
+    service, _, _ = build_demo_service()
+    instance = create_server(
+        service,
+        bearer_token="unused",
+        oidc_validator=StubOIDCValidator(),
+        oidc_only=True,
+    )
+    thread = threading.Thread(target=instance.serve_forever, daemon=True)
+    thread.start()
+
+    try:
+        assert request(instance, "GET", "/admin/policies", token="policy-admin")[0] == 200
+        assert request(instance, "POST", "/admin/proposals/prepare", {}, token="policy-admin")[0] == 404
+        assert request(instance, "POST", "/admin/proposals/prepare", {}, token="operator")[0] == 403
+        assert request(instance, "POST", "/authorize", {}, token="operator")[0] == 400
+        assert request(instance, "POST", "/execute", {}, token="operator")[0] == 400
+        assert request(instance, "POST", "/authorize", {}, token="auditor")[0] == 403
+        assert request(instance, "POST", "/execute", {}, token="auditor")[0] == 403
+        assert request(instance, "GET", "/audit", token="auditor")[0] == 200
+        assert request(instance, "GET", "/audit", token="operator")[0] == 403
+        assert request(
+            instance,
+            "POST",
+            "/admin/proposals/proposal-1/prepare-approval",
+            {},
+            token="approver",
+        )[0] == 404
+        assert request(
+            instance,
+            "POST",
+            "/admin/proposals/proposal-1/activate",
+            {},
+            token="approver",
+        )[0] == 403
+        assert request(
+            instance,
+            "POST",
+            "/admin/proposals/proposal-1/approve",
+            {},
+            token="policy-admin",
+        )[0] == 403
+        assert request(instance, "GET", "/admin/trust", token="auditor")[0] == 200
+        assert request(instance, "POST", "/admin/jobs", {}, token="auditor")[0] == 403
+        assert request(instance, "POST", "/admin/jobs", {}, token="operator")[0] == 503
+        assert request(instance, "GET", "/admin/operator-keys", token="platform-admin")[0] == 503
+        assert request(
+            instance,
+            "POST",
+            "/admin/trust/keys/prepare",
+            {},
+            token="platform-admin",
+        )[0] == 404
     finally:
         instance.shutdown()
         instance.server_close()

@@ -18,6 +18,17 @@ def test_legacy_admin_role_and_scope_map_to_operator():
     assert Role.OPERATOR in mapper.map_to_identity({"sub": "a", "scope": "x gas.admin"}).roles
 
 
+def test_maps_enterprise_app_role_names_case_insensitively():
+    identity = ClaimsMapper().map_to_identity(
+        {
+            "sub": "enterprise-user",
+            "roles": ["PlatformAdmin", "PolicyAdmin", "Approver", "Auditor", "Operator"],
+        }
+    )
+
+    assert identity.roles == set(Role)
+
+
 def test_missing_subject_rejected():
     with pytest.raises(ValueError):
         ClaimsMapper().map_to_identity({"roles": ["operator"]})

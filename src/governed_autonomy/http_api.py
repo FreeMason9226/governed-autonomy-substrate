@@ -1,17 +1,24 @@
 import argparse
+import base64
+import hashlib
 import hmac
 import json
 import logging
 import os
 import re
+import secrets
 import sqlite3
 import ssl
+import threading
+import time
 import uuid
 from collections.abc import Sequence
+from dataclasses import dataclass, replace
 from http import HTTPStatus
+from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 from .admin_ui import render_admin_css, render_admin_js, render_admin_ui
 from .bootstrap import build_runtime_service
@@ -19,9 +26,14 @@ from .deployment import BoundedRateLimiter, TLSConfig, security_headers
 from .errors import AuthorizationError
 from .health import health_report
 from .identity import (
+    EntraOIDCConfig,
+    ExternalIdentity,
     IdentityValidationError,
+    OIDCAuthCodeClient,
     OIDCValidator,
     UrlJWKSProvider,
+    discover_oidc_configuration,
+    entra_oidc_validator_from_discovery,
     oidc_validator_from_discovery,
 )
 from .issuer import PolicyDeniedError
@@ -29,9 +41,10 @@ from .jobs import JobStoreError, JobSubmissionStore, SQLiteJobStore
 from .logging_config import configure_logging
 from .mesh import GovernanceInput
 from .operator_auth import OperatorKeyStore
+from .platform import RuntimeIdentity
 from .platform_admin import PolicyChangeManager, TrustChangeManager
 from .policy import policy_from_dict
-from .rbac import ClaimsMapper, Role, require_roles
+from .rbac import Role
 from .service import GovernedService
 
 API_VERSION = "1"
@@ -50,6 +63,112 @@ def _unversioned(route: str) -> str:
 
 
 access_log = logging.getLogger("governed_autonomy.access")
+_OIDC_SESSION_COOKIE = "__Host-gas-session"
+_OIDC_STATE_COOKIE = "__Host-gas-login"
+_LOGIN_STATE_TTL_SECONDS = 600
+_MAX_BROWSER_SESSION_SECONDS = 8 * 60 * 60
+
+
+@dataclass(frozen=True)
+class _PendingOIDCLogin:
+    nonce: str
+    code_verifier: str
+    expires_at: float
+    next_path: str
+
+
+@dataclass(frozen=True)
+class _BrowserSession:
+    identity: RuntimeIdentity
+    expires_at: float
+
+
+class _OIDCSessionStore:
+    """Process-local, bounded, single-use OAuth state and browser sessions."""
+
+    def __init__(self, *, clock: Any = time.time, max_entries: int = 10_000) -> None:
+        self._clock = clock
+        self._max_entries = max_entries
+        self._lock = threading.RLock()
+        self._pending: dict[str, _PendingOIDCLogin] = {}
+        self._sessions: dict[str, _BrowserSession] = {}
+
+    def begin_login(self, *, next_path: str) -> tuple[str, str, str]:
+        now = self._clock()
+        with self._lock:
+            self._prune(now)
+            if len(self._pending) + len(self._sessions) >= self._max_entries:
+                raise IdentityValidationError("OIDC session capacity is exhausted")
+            state = secrets.token_urlsafe(32)
+            nonce = secrets.token_urlsafe(32)
+            verifier = secrets.token_urlsafe(48)
+            self._pending[state] = _PendingOIDCLogin(
+                nonce=nonce,
+                code_verifier=verifier,
+                expires_at=now + _LOGIN_STATE_TTL_SECONDS,
+                next_path=next_path,
+            )
+            challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest())
+            return state, nonce, challenge.rstrip(b"=").decode("ascii")
+
+    def consume_login(self, state: str) -> _PendingOIDCLogin:
+        now = self._clock()
+        with self._lock:
+            self._prune(now)
+            pending = self._pending.pop(state, None)
+            if pending is None or now >= pending.expires_at:
+                raise IdentityValidationError("OIDC login state is invalid or expired")
+            return pending
+
+    def create_session(self, identity: ExternalIdentity) -> tuple[str, int]:
+        now = self._clock()
+        token_expiry = identity.claims.get("exp")
+        if (
+            not isinstance(token_expiry, (int, float))
+            or isinstance(token_expiry, bool)
+            or token_expiry <= now
+        ):
+            raise IdentityValidationError("OIDC identity token expiry is invalid")
+        expires_at = min(float(token_expiry), now + _MAX_BROWSER_SESSION_SECONDS)
+        core_identity = RuntimeIdentity.from_external_identity(identity)
+        session_token = secrets.token_urlsafe(32)
+        with self._lock:
+            self._prune(now)
+            if len(self._pending) + len(self._sessions) >= self._max_entries:
+                raise IdentityValidationError("OIDC session capacity is exhausted")
+            self._sessions[self._session_key(session_token)] = _BrowserSession(
+                identity=core_identity,
+                expires_at=expires_at,
+            )
+        return session_token, max(1, int(expires_at - now))
+
+    def get_session(self, session_token: str) -> RuntimeIdentity | None:
+        now = self._clock()
+        key = self._session_key(session_token)
+        with self._lock:
+            session = self._sessions.get(key)
+            if session is None:
+                return None
+            if now >= session.expires_at:
+                self._sessions.pop(key, None)
+                return None
+            return session.identity
+
+    def revoke_session(self, session_token: str) -> None:
+        with self._lock:
+            self._sessions.pop(self._session_key(session_token), None)
+
+    def _prune(self, now: float) -> None:
+        self._pending = {
+            state: login for state, login in self._pending.items() if now < login.expires_at
+        }
+        self._sessions = {
+            key: session for key, session in self._sessions.items() if now < session.expires_at
+        }
+
+    @staticmethod
+    def _session_key(session_token: str) -> str:
+        return hashlib.sha256(session_token.encode("utf-8")).hexdigest()
 
 
 class AuthenticatedAPI:
@@ -59,6 +178,10 @@ class AuthenticatedAPI:
         *,
         bearer_token: str | None = None,
         oidc_validator: OIDCValidator | None = None,
+        oidc_only: bool = False,
+        oidc_auth_client: OIDCAuthCodeClient | None = None,
+        oidc_login_validator: OIDCValidator | None = None,
+        oidc_cookie_secure: bool = True,
         operator_token: str | None = None,
         operator_role: str = "gas-admin",
         operator_key_store: OperatorKeyStore | None = None,
@@ -69,11 +192,22 @@ class AuthenticatedAPI:
     ) -> None:
         if not bearer_token and oidc_validator is None:
             raise ValueError("bearer_token or oidc_validator is required")
+        if oidc_only and oidc_validator is None:
+            raise ValueError("oidc_validator is required when oidc_only is enabled")
+        if oidc_auth_client is not None and oidc_validator is None:
+            raise ValueError("oidc_validator is required for browser sign-in")
+        if oidc_auth_client is not None and oidc_login_validator is None:
+            oidc_login_validator = oidc_validator
         if max_body_bytes <= 0:
             raise ValueError("positive max_body_bytes is required")
         self.service = service
         self.bearer_token = bearer_token
         self.oidc_validator = oidc_validator
+        self.oidc_only = oidc_only
+        self.oidc_auth_client = oidc_auth_client
+        self.oidc_login_validator = oidc_login_validator
+        self.oidc_cookie_secure = oidc_cookie_secure
+        self.oidc_sessions = _OIDCSessionStore() if oidc_auth_client is not None else None
         self.operator_token = operator_token
         self.operator_role = operator_role
         self.operator_key_store = operator_key_store
@@ -158,6 +292,12 @@ class AuthenticatedAPI:
                 if not api._allowed(self):
                     self._send(HTTPStatus.TOO_MANY_REQUESTS, {"error": "rate limit exceeded"})
                     return
+                if route == "/auth/login":
+                    api._handle_oidc_login(self)
+                    return
+                if route == "/auth/callback":
+                    api._handle_oidc_callback(self)
+                    return
                 try:
                     authenticated = api._authenticated(self)
                 except sqlite3.Error:
@@ -167,12 +307,33 @@ class AuthenticatedAPI:
                     )
                     return
                 if not authenticated:
+                    if (
+                        api.oidc_auth_client is not None
+                        and route.startswith("/admin")
+                        and not self.headers.get("Authorization")
+                    ):
+                        next_path = urlencode({"next": self.path})
+                        self.send_response(HTTPStatus.FOUND)
+                        self.send_header("Location", f"/auth/login?{next_path}")
+                        self.send_header("Cache-Control", "no-store")
+                        for key, value in security_headers().items():
+                            self.send_header(key, value)
+                        self.end_headers()
+                        return
                     self._send(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
                     return
-                if route.startswith("/admin") and not api._operator_authorized(self, write=False):
+                if route.startswith("/admin") and not api._admin_authorized(
+                    self, method="GET", route=route
+                ):
                     self._send(
                         HTTPStatus.FORBIDDEN,
-                        {"error": "operator authorization required"},
+                        {"error": "role authorization required"},
+                    )
+                    return
+                if not api._api_authorized(self, method="GET", route=route):
+                    self._send(
+                        HTTPStatus.FORBIDDEN,
+                        {"error": "role authorization required"},
                     )
                     return
                 if route == "/admin":
@@ -236,6 +397,9 @@ class AuthenticatedAPI:
                 if route == "/admin/metrics":
                     self._send(HTTPStatus.OK, api.service.audit_report()["audit_summary"])
                     return
+                if route == "/admin/control-room":
+                    self._send(HTTPStatus.OK, api.control_room_snapshot())
+                    return
                 if route == "/openapi.json":
                     self._send(HTTPStatus.OK, API_SCHEMA)
                     return
@@ -257,10 +421,39 @@ class AuthenticatedAPI:
                 if not authenticated:
                     self._send(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
                     return
-                if route.startswith("/admin") and not api._operator_authorized(self):
+                if route == "/auth/logout":
+                    if not getattr(self, "gas_session_authenticated", False):
+                        self._send(HTTPStatus.UNAUTHORIZED, {"error": "browser session required"})
+                        return
+                    if not api._session_origin_allowed(self):
+                        self._send(HTTPStatus.FORBIDDEN, {"error": "invalid request origin"})
+                        return
+                    if self.headers.get("Content-Length", "0") != "0":
+                        self._send(HTTPStatus.BAD_REQUEST, {"error": "logout request must be empty"})
+                        return
+                    api._revoke_browser_session(self)
+                    self.send_response(HTTPStatus.NO_CONTENT)
+                    self.send_header("Set-Cookie", api._session_cookie("", max_age=0))
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                if getattr(self, "gas_session_authenticated", False) and not api._session_origin_allowed(
+                    self
+                ):
+                    self._send(HTTPStatus.FORBIDDEN, {"error": "invalid request origin"})
+                    return
+                if route.startswith("/admin") and not api._admin_authorized(
+                    self, method="POST", route=route
+                ):
                     self._send(
                         HTTPStatus.FORBIDDEN,
-                        {"error": "operator authorization required"},
+                        {"error": "role authorization required"},
+                    )
+                    return
+                if not api._api_authorized(self, method="POST", route=route):
+                    self._send(
+                        HTTPStatus.FORBIDDEN,
+                        {"error": "role authorization required"},
                     )
                     return
                 if route.startswith("/admin/proposals"):
@@ -289,8 +482,23 @@ class AuthenticatedAPI:
                             mesh_inputs = tuple(
                                 GovernanceInput.from_dict(item) for item in mesh_inputs
                             )
+                        action_request = payload["request"]
+                        if not isinstance(action_request, dict):
+                            raise TypeError("request must be an object")
+                        runtime_identity = getattr(self, "gas_runtime_identity", None)
+                        if runtime_identity is not None:
+                            supplied_context = action_request.get("context", {})
+                            if not isinstance(supplied_context, dict):
+                                raise TypeError("request context must be an object")
+                            action_request = {
+                                **action_request,
+                                "context": {
+                                    **supplied_context,
+                                    **runtime_identity.context(),
+                                },
+                            }
                         result = api.service.authorize(
-                            payload["request"],
+                            action_request,
                             payload["policy_id"],
                             ttl_seconds=payload.get("ttl_seconds", 300),
                             approvals=payload.get("approvals"),
@@ -510,24 +718,230 @@ class AuthenticatedAPI:
 
         return Handler
 
+    def _handle_oidc_login(self, request: BaseHTTPRequestHandler) -> None:
+        if self.oidc_auth_client is None or self.oidc_sessions is None:
+            self._send_auth_error(request, HTTPStatus.NOT_FOUND, "OIDC sign-in is not configured")
+            return
+        query = parse_qs(urlsplit(request.path).query, keep_blank_values=True)
+        next_path = query.get("next", ["/admin"])[0]
+        parsed_next = urlsplit(next_path)
+        if (
+            not isinstance(next_path, str)
+            or not next_path.startswith("/")
+            or next_path.startswith("//")
+            or "\\" in next_path
+            or parsed_next.scheme
+            or parsed_next.netloc
+        ):
+            next_path = "/admin"
+        try:
+            state, nonce, challenge = self.oidc_sessions.begin_login(next_path=next_path)
+            location = self.oidc_auth_client.authorization_url(
+                state=state,
+                nonce=nonce,
+                code_challenge=challenge,
+            )
+        except (IdentityValidationError, ValueError):
+            self._send_auth_error(request, HTTPStatus.SERVICE_UNAVAILABLE, "OIDC sign-in unavailable")
+            return
+        request.send_response(HTTPStatus.FOUND)
+        request.send_header("Location", location)
+        request.send_header("Cache-Control", "no-store")
+        request.send_header("Pragma", "no-cache")
+        request.send_header(
+            "Set-Cookie",
+            self._state_cookie(state, max_age=_LOGIN_STATE_TTL_SECONDS),
+        )
+        for key, value in security_headers().items():
+            request.send_header(key, value)
+        request.end_headers()
+
+    def _handle_oidc_callback(self, request: BaseHTTPRequestHandler) -> None:
+        if (
+            self.oidc_auth_client is None
+            or self.oidc_login_validator is None
+            or self.oidc_sessions is None
+        ):
+            self._send_auth_error(request, HTTPStatus.NOT_FOUND, "OIDC sign-in is not configured")
+            return
+        query = parse_qs(urlsplit(request.path).query, keep_blank_values=True)
+        states = query.get("state", [])
+        state_cookie = self._cookie_value(request, self.state_cookie_name)
+        if (
+            len(states) != 1
+            or state_cookie is None
+            or not hmac.compare_digest(states[0], state_cookie)
+        ):
+            self._send_auth_error(
+                request,
+                HTTPStatus.BAD_REQUEST,
+                "invalid OIDC callback",
+                cookie=self._state_cookie("", max_age=0),
+            )
+            return
+        if query.get("error"):
+            try:
+                self.oidc_sessions.consume_login(states[0])
+            except IdentityValidationError:
+                self._send_auth_error(
+                    request,
+                    HTTPStatus.BAD_REQUEST,
+                    "invalid OIDC callback",
+                    cookie=self._state_cookie("", max_age=0),
+                )
+                return
+            self._send_auth_error(
+                request,
+                HTTPStatus.UNAUTHORIZED,
+                "Entra sign-in was not completed",
+                cookie=self._state_cookie("", max_age=0),
+            )
+            return
+        codes = query.get("code", [])
+        if len(codes) != 1 or not codes[0] or len(codes[0]) > 8192:
+            self._send_auth_error(
+                request,
+                HTTPStatus.BAD_REQUEST,
+                "invalid OIDC callback",
+                cookie=self._state_cookie("", max_age=0),
+            )
+            return
+        try:
+            pending = self.oidc_sessions.consume_login(states[0])
+            token_response = self.oidc_auth_client.exchange_code(
+                code=codes[0],
+                code_verifier=pending.code_verifier,
+            )
+            identity = self.oidc_login_validator.validate(
+                token_response["id_token"],
+                nonce=pending.nonce,
+            )
+            session_token, max_age = self.oidc_sessions.create_session(identity)
+        except (IdentityValidationError, ValueError):
+            self._send_auth_error(
+                request,
+                HTTPStatus.UNAUTHORIZED,
+                "Entra sign-in could not be validated",
+                cookie=self._state_cookie("", max_age=0),
+            )
+            return
+        request.send_response(HTTPStatus.FOUND)
+        request.send_header("Location", pending.next_path)
+        request.send_header("Cache-Control", "no-store")
+        request.send_header("Set-Cookie", self._session_cookie(session_token, max_age=max_age))
+        request.send_header("Set-Cookie", self._state_cookie("", max_age=0))
+        for key, value in security_headers().items():
+            request.send_header(key, value)
+        request.end_headers()
+
+    @staticmethod
+    def _send_auth_error(
+        request: BaseHTTPRequestHandler,
+        status: HTTPStatus,
+        message: str,
+        *,
+        cookie: str | None = None,
+    ) -> None:
+        encoded = json.dumps({"error": message}).encode("utf-8")
+        request.send_response(status)
+        request.send_header("Content-Type", "application/json")
+        request.send_header("Content-Length", str(len(encoded)))
+        request.send_header("Cache-Control", "no-store")
+        if cookie is not None:
+            request.send_header("Set-Cookie", cookie)
+        for key, value in security_headers().items():
+            request.send_header(key, value)
+        request.end_headers()
+        request.wfile.write(encoded)
+
+    @property
+    def session_cookie_name(self) -> str:
+        return _OIDC_SESSION_COOKIE if self.oidc_cookie_secure else "gas-session"
+
+    @property
+    def state_cookie_name(self) -> str:
+        return _OIDC_STATE_COOKIE if self.oidc_cookie_secure else "gas-login"
+
+    def _session_cookie(self, token: str, *, max_age: int) -> str:
+        cookie = (
+            f"{self.session_cookie_name}={token}; Path=/; HttpOnly; SameSite=Lax; "
+            f"Max-Age={max_age}"
+        )
+        return f"{cookie}; Secure" if self.oidc_cookie_secure else cookie
+
+    def _state_cookie(self, token: str, *, max_age: int) -> str:
+        cookie = (
+            f"{self.state_cookie_name}={token}; Path=/; HttpOnly; SameSite=Lax; "
+            f"Max-Age={max_age}"
+        )
+        return f"{cookie}; Secure" if self.oidc_cookie_secure else cookie
+
+    def _revoke_browser_session(self, request: BaseHTTPRequestHandler) -> None:
+        if self.oidc_sessions is None:
+            return
+        token = self._session_token(request)
+        if token:
+            self.oidc_sessions.revoke_session(token)
+
+    def _session_token(self, request: BaseHTTPRequestHandler) -> str | None:
+        return self._cookie_value(request, self.session_cookie_name)
+
+    @staticmethod
+    def _cookie_value(request: BaseHTTPRequestHandler, name: str) -> str | None:
+        cookie_header = request.headers.get("Cookie", "")
+        cookies = SimpleCookie()
+        try:
+            cookies.load(cookie_header)
+        except CookieError:
+            return None
+        morsel = cookies.get(name)
+        return morsel.value if morsel is not None and morsel.value else None
+
+    def _session_origin_allowed(self, request: BaseHTTPRequestHandler) -> bool:
+        if self.oidc_auth_client is None:
+            return False
+        expected = urlsplit(self.oidc_auth_client.redirect_uri)
+        origin = request.headers.get("Origin", "")
+        expected_origin = f"{expected.scheme}://{expected.netloc}"
+        return bool(origin and hmac.compare_digest(origin, expected_origin))
+
     def _authenticated(self, request: BaseHTTPRequestHandler) -> bool:
         supplied = request.headers.get("Authorization", "")
         scheme, separator, credential = supplied.partition(" ")
         bearer_credential = credential.strip() if separator and scheme.lower() == "bearer" else ""
-        if self.operator_key_store is not None and bearer_credential:
+        if not self.oidc_only and self.operator_key_store is not None and bearer_credential:
             operator_key = self.operator_key_store.authenticate(bearer_credential)
             if operator_key is not None:
                 if not urlsplit(request.path).path.startswith("/admin"):
                     return False
                 request.gas_operator_id = operator_key.operator_id  # type: ignore[attr-defined]
                 request.gas_operator_key_id = operator_key.key_id  # type: ignore[attr-defined]
+                request.gas_roles = (Role.OPERATOR.value,)  # type: ignore[attr-defined]
                 return True
         if self.oidc_validator is not None and bearer_credential:
             try:
-                request.gas_identity = self.oidc_validator.validate(bearer_credential)  # type: ignore[attr-defined]
+                external_identity = self.oidc_validator.validate(bearer_credential)
             except IdentityValidationError:
-                return False
+                return self._health_probe_authorized(request, supplied)
+            request.gas_identity = external_identity  # type: ignore[attr-defined]
+            request.gas_runtime_identity = RuntimeIdentity.from_external_identity(  # type: ignore[attr-defined]
+                external_identity,
+                request_id=self._request_id(request),
+                legacy_admin_role=self.operator_role,
+            )
             return True
+        session_token = self._session_token(request)
+        if self.oidc_sessions is not None and session_token is not None:
+            runtime_identity = self.oidc_sessions.get_session(session_token)
+            if runtime_identity is not None:
+                request.gas_runtime_identity = replace(  # type: ignore[attr-defined]
+                    runtime_identity,
+                    request_id=self._request_id(request),
+                )
+                request.gas_session_authenticated = True  # type: ignore[attr-defined]
+                return True
+        if self.oidc_only:
+            return self._health_probe_authorized(request, supplied)
         if not self.bearer_token:
             return self.operator_token is not None and hmac.compare_digest(
                 supplied, f"Bearer {self.operator_token}"
@@ -540,30 +954,143 @@ class AuthenticatedAPI:
             supplied, self.bearer_token
         )
 
+    def _health_probe_authorized(self, request: BaseHTTPRequestHandler, supplied: str) -> bool:
+        return (
+            request.command == "GET"
+            and urlsplit(request.path).path in {"/health", "/livez", "/readyz", "/startupz"}
+            and self.bearer_token is not None
+            and hmac.compare_digest(supplied, f"Bearer {self.bearer_token}")
+        )
+
     @staticmethod
     def _actor_id(request: BaseHTTPRequestHandler) -> str:
         operator_id = getattr(request, "gas_operator_id", None)
         if operator_id is not None:
             key_id = getattr(request, "gas_operator_key_id", None)
             return f"api-key:{operator_id}:{key_id}" if key_id else f"api-key:{operator_id}"
-        identity = getattr(request, "gas_identity", None)
-        if identity is not None:
-            return f"oidc:{identity.issuer}:{identity.subject}"
+        runtime_identity = getattr(request, "gas_runtime_identity", None)
+        if runtime_identity is not None:
+            return runtime_identity.actor_id or "shared-token"
         return "shared-token"
+
+    @staticmethod
+    def _api_required_roles(method: str, route: str) -> frozenset[Role]:
+        if method == "GET" and route in {"/audit", "/api/v1/audit"}:
+            return frozenset({Role.AUDITOR})
+        if method == "POST" and route in {
+            "/authorize",
+            "/execute",
+            "/api/v1/authorize",
+            "/api/v1/execute",
+        }:
+            return frozenset({Role.OPERATOR})
+        return frozenset()
+
+    def _api_authorized(
+        self, request: BaseHTTPRequestHandler, *, method: str, route: str
+    ) -> bool:
+        required = self._api_required_roles(method, route)
+        if not required:
+            return True
+        runtime_identity = getattr(request, "gas_runtime_identity", None)
+        if runtime_identity is None:
+            return not self.oidc_only
+        roles = set(runtime_identity.roles)
+        return Role.PLATFORM_ADMIN.value in roles or bool(
+            roles.intersection(role.value for role in required)
+        )
+
+    @staticmethod
+    def _admin_required_roles(method: str, route: str) -> frozenset[Role]:
+        if method == "GET":
+            if route in {"/admin", "/admin/app.js", "/admin/app.css"}:
+                return frozenset(
+                    {Role.POLICY_ADMIN, Role.OPERATOR, Role.AUDITOR, Role.APPROVER}
+                )
+            if route == "/admin/policies":
+                return frozenset({Role.POLICY_ADMIN, Role.OPERATOR, Role.AUDITOR})
+            if route == "/admin/proposals":
+                return frozenset({Role.POLICY_ADMIN, Role.APPROVER, Role.AUDITOR})
+            if route == "/admin/trust":
+                return frozenset({Role.PLATFORM_ADMIN, Role.AUDITOR})
+            if route == "/admin/operator-keys":
+                return frozenset({Role.PLATFORM_ADMIN})
+            if route.startswith("/admin/jobs/"):
+                return frozenset({Role.OPERATOR, Role.AUDITOR})
+            if route in {
+                "/admin/governance-log",
+                "/admin/metrics",
+                "/admin/control-room",
+            }:
+                return frozenset(
+                    {
+                        Role.POLICY_ADMIN,
+                        Role.OPERATOR,
+                        Role.AUDITOR,
+                        Role.APPROVER,
+                    }
+                )
+            return frozenset()
+
+        if method != "POST":
+            return frozenset()
+        if route in {"/admin/proposals/prepare", "/admin/proposals"}:
+            return frozenset({Role.POLICY_ADMIN})
+        if re.fullmatch(r"/admin/proposals/[^/]+/activate", route):
+            return frozenset({Role.POLICY_ADMIN})
+        if re.fullmatch(r"/admin/proposals/[^/]+/(?:prepare-approval|approve)", route):
+            return frozenset({Role.APPROVER})
+        if route.startswith("/admin/trust/keys"):
+            return frozenset({Role.PLATFORM_ADMIN})
+        if route == "/admin/operator-keys" or re.fullmatch(
+            r"/admin/operator-keys/[^/]+/revoke", route
+        ):
+            return frozenset({Role.PLATFORM_ADMIN})
+        if route == "/admin/jobs":
+            return frozenset({Role.OPERATOR})
+        return frozenset()
+
+    def _admin_authorized(
+        self, request: BaseHTTPRequestHandler, *, method: str, route: str
+    ) -> bool:
+        required = self._admin_required_roles(method, route)
+        if not required:
+            return False
+
+        supplied = request.headers.get("Authorization", "")
+        scheme, separator, credential = supplied.partition(" ")
+        if (
+            not self.oidc_only
+            and self.operator_token is not None
+            and separator
+            and scheme.lower() == "bearer"
+            and hmac.compare_digest(credential.strip(), self.operator_token)
+        ):
+            return True
+
+        runtime_identity = getattr(request, "gas_runtime_identity", None)
+        roles = (
+            set(runtime_identity.roles)
+            if runtime_identity is not None
+            else set(getattr(request, "gas_roles", ()))
+        )
+        return Role.PLATFORM_ADMIN.value in roles or bool(
+            roles.intersection(role.value for role in required)
+        )
 
     def _operator_authorized(self, request: BaseHTTPRequestHandler, *, write: bool = True) -> bool:
         if getattr(request, "gas_operator_id", None) is not None:
             return True
-        identity = getattr(request, "gas_identity", None)
-        if identity is not None:
-            mapper = ClaimsMapper(legacy_admin_role=self.operator_role)
-            try:
-                mapped = mapper.map_to_identity({**identity.claims, "sub": identity.subject})
-                needed = [Role.OPERATOR] if write else [Role.OPERATOR, Role.AUDITOR]
-                require_roles(mapped, needed)
-            except (ValueError, PermissionError):
-                return False
-            return True
+        runtime_identity = getattr(request, "gas_runtime_identity", None)
+        if runtime_identity is not None:
+            roles = set(runtime_identity.roles)
+            if "platform_admin" in roles:
+                return True
+            needed = {Role.OPERATOR.value} if write else {
+                Role.OPERATOR.value,
+                Role.AUDITOR.value,
+            }
+            return bool(roles.intersection(needed))
         supplied = request.headers.get("Authorization", "")
         return self.operator_token is not None and hmac.compare_digest(
             supplied, f"Bearer {self.operator_token}"
@@ -653,6 +1180,60 @@ class AuthenticatedAPI:
         return {
             "proposals": [proposal.to_summary_dict() for proposal in manager.proposals()],
             "required_approvals": manager.required_approvals,
+        }
+
+    def control_room_snapshot(self) -> dict[str, Any]:
+        """Return the compact, read-only mission-control view."""
+        service = self.service
+        registry = service.policies
+        summary = service.boundary.replay_log.audit_summary()
+        proposals = self.list_proposals()
+        trust = self.trust_snapshot()
+        policies = [
+            {"id": policy.policy_id, "actions": list(policy.allowed_actions)}
+            for policy in registry.policies()
+        ]
+        coverage = {
+            action: [p["id"] for p in policies if action in p["actions"]]
+            for action in service.actions
+        }
+        events = service.boundary.replay_log.events()
+        incidents = [
+            {
+                "event": event.get("error_type", "Authorization denied"),
+                "detail": event.get("error", "; ".join(event.get("decision", {}).get("reasons", []))),
+                "type": event.get("type"),
+            }
+            for event in events
+            if (event.get("type") == "execution" and event.get("status") == "failed")
+            or (event.get("type") == "authorization" and event.get("issued") is False)
+        ]
+        execution_count = summary["execution_count"]
+        return {
+            "health": service.audit_report()["health"]["ok"],
+            "assets": [{"id": key, "policies": coverage[key]} for key in sorted(coverage)],
+            "policies": policies,
+            "approvals": [
+                p for p in proposals["proposals"] if p["status"] == "pending"
+            ],
+            "incidents": incidents[-10:],
+            "timeline": [
+                {
+                    "type": e.get("type", "unknown"),
+                    "event": e.get("event", e.get("status", e.get("type", "unknown"))),
+                    "subject": e.get("subject_id", e.get("nonce", "")),
+                }
+                for e in events[-20:][::-1]
+            ],
+            "analytics": {
+                "authorizations": summary["authorization_count"],
+                "executions": execution_count,
+                "failures": summary["failure_count"],
+                "success_rate": round(summary["success_count"] / execution_count * 100, 1)
+                if execution_count else None,
+                "trusted_keys": len(trust["keys"]),
+                "frames": summary["frame_count"],
+            },
         }
 
     def _require_trust_change_manager(self) -> TrustChangeManager:
@@ -769,6 +1350,16 @@ def parse_server_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--oidc-issuer", default=os.environ.get("OIDC_ISSUER"))
     parser.add_argument("--oidc-audience", default=os.environ.get("OIDC_AUDIENCE"))
     parser.add_argument("--oidc-jwks-url", default=os.environ.get("OIDC_JWKS_URL"))
+    parser.add_argument("--entra-tenant-id", default=os.environ.get("ENTRA_TENANT_ID"))
+    parser.add_argument("--entra-client-id", default=os.environ.get("ENTRA_CLIENT_ID"))
+    parser.add_argument("--entra-client-secret", default=os.environ.get("ENTRA_CLIENT_SECRET"))
+    parser.add_argument("--entra-redirect-uri", default=os.environ.get("ENTRA_REDIRECT_URI"))
+    parser.add_argument(
+        "--oidc-cookie-insecure",
+        action="store_true",
+        default=_env_flag("OIDC_COOKIE_INSECURE"),
+        help="Disable Secure on the OIDC session cookie for local HTTP development only.",
+    )
     parser.add_argument(
         "--oidc-discovery",
         action="store_true",
@@ -810,13 +1401,17 @@ def parse_server_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def create_server(
     service: GovernedService,
     *,
-    bearer_token: str,
+    bearer_token: str | None = None,
     host: str = "127.0.0.1",
     port: int = 0,
     max_body_bytes: int = 64 * 1024,
     rate_limit: int = 120,
     tls: TLSConfig | None = None,
     oidc_validator: OIDCValidator | None = None,
+    oidc_only: bool = False,
+    oidc_auth_client: OIDCAuthCodeClient | None = None,
+    oidc_login_validator: OIDCValidator | None = None,
+    oidc_cookie_secure: bool = True,
     operator_token: str | None = None,
     operator_role: str = "gas-admin",
     operator_key_store: OperatorKeyStore | None = None,
@@ -829,6 +1424,10 @@ def create_server(
             service,
             bearer_token=bearer_token,
             oidc_validator=oidc_validator,
+            oidc_only=oidc_only,
+            oidc_auth_client=oidc_auth_client,
+            oidc_login_validator=oidc_login_validator,
+            oidc_cookie_secure=oidc_cookie_secure,
             operator_token=operator_token,
             operator_role=operator_role,
             operator_key_store=operator_key_store,
@@ -859,7 +1458,48 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_server_args(argv)
     configure_logging()
     oidc_validator = None
-    if args.oidc_discovery:
+    oidc_auth_client = None
+    entra_configured = bool(
+        getattr(args, "entra_tenant_id", None) or getattr(args, "entra_client_id", None)
+    )
+    generic_oidc_configured = bool(
+        getattr(args, "oidc_issuer", None)
+        or getattr(args, "oidc_audience", None)
+        or getattr(args, "oidc_jwks_url", None)
+        or getattr(args, "oidc_discovery", False)
+    )
+    bearer_token = getattr(args, "bearer_token", None)
+    oidc_only = False
+    entra_redirect_uri = getattr(args, "entra_redirect_uri", None)
+    entra_client_secret = getattr(args, "entra_client_secret", None)
+    if (entra_redirect_uri or entra_client_secret) and not entra_configured:
+        raise SystemExit("Entra browser sign-in requires ENTRA_TENANT_ID and ENTRA_CLIENT_ID")
+    if entra_configured:
+        if not getattr(args, "entra_tenant_id", None) or not getattr(args, "entra_client_id", None):
+            raise SystemExit("ENTRA_TENANT_ID and ENTRA_CLIENT_ID are required together")
+        if generic_oidc_configured:
+            raise SystemExit("Entra ID settings cannot be combined with generic OIDC settings")
+        try:
+            entra_config = EntraOIDCConfig(
+                tenant_id=args.entra_tenant_id,
+                client_id=args.entra_client_id,
+            )
+            discovery = discover_oidc_configuration(entra_config.issuer)
+            oidc_validator = entra_oidc_validator_from_discovery(
+                entra_config,
+                discovery=discovery,
+            )
+            if entra_redirect_uri:
+                oidc_auth_client = OIDCAuthCodeClient(
+                    discovery=discovery,
+                    client_id=entra_config.client_id,
+                    client_secret=entra_client_secret,
+                    redirect_uri=entra_redirect_uri,
+                )
+        except (IdentityValidationError, ValueError) as exc:
+            raise SystemExit(f"Entra ID OIDC configuration failed: {exc}") from exc
+        oidc_only = True
+    elif args.oidc_discovery:
         if not args.oidc_issuer or not args.oidc_audience:
             raise SystemExit("OIDC_ISSUER and OIDC_AUDIENCE are required for OIDC discovery")
         if args.oidc_jwks_url:
@@ -883,7 +1523,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 audience=args.oidc_audience,
                 jwks_provider=UrlJWKSProvider(args.oidc_jwks_url),
             )
-    if not args.bearer_token and oidc_validator is None:
+    if not bearer_token and oidc_validator is None:
         raise SystemExit(
             "GOVERNED_AUTONOMY_BEARER_TOKEN or complete OIDC configuration is required"
         )
@@ -909,8 +1549,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         service,
         job_store=job_store,
         cors_origins=[o.strip() for o in args.cors_origins.split(",")],
-        bearer_token=args.bearer_token,
+        bearer_token=bearer_token,
         oidc_validator=oidc_validator,
+        oidc_only=oidc_only,
+        oidc_auth_client=oidc_auth_client,
+        oidc_cookie_secure=not getattr(args, "oidc_cookie_insecure", False),
         operator_token=args.operator_token,
         operator_role=args.operator_role,
         operator_key_store=operator_key_store,
@@ -1102,6 +1745,35 @@ API_SCHEMA = {
             }
         },
         "/openapi.json": {"get": {"responses": {"200": {"description": "OpenAPI document"}}}},
+        "/auth/login": {
+            "get": {
+                "parameters": [
+                    {
+                        "name": "next",
+                        "in": "query",
+                        "required": False,
+                        "schema": {"type": "string"},
+                    }
+                ],
+                "responses": {
+                    "302": {"description": "Redirect to the discovered OpenID provider"}
+                },
+            }
+        },
+        "/auth/callback": {
+            "get": {
+                "responses": {
+                    "302": {"description": "Validated sign-in; sets browser session cookie"},
+                    "400": {"description": "Invalid callback state"},
+                    "401": {"description": "Sign-in token validation failed"},
+                }
+            }
+        },
+        "/auth/logout": {
+            "post": {
+                "responses": {"204": {"description": "Local browser session revoked"}}
+            }
+        },
         "/admin": {
             "get": {
                 "security": [{"bearerAuth": []}],
@@ -1130,6 +1802,19 @@ API_SCHEMA = {
             "get": {
                 "security": [{"bearerAuth": []}],
                 "responses": {"200": {"description": "Runtime metrics"}},
+            }
+        },
+        "/admin/control-room": {
+            "get": {
+                "security": [{"bearerAuth": []}],
+                "responses": {
+                    "200": {
+                        "description": (
+                            "Authenticated mission-control snapshot of inventory, policies, "
+                            "approvals, replay incidents, timeline, and analytics"
+                        )
+                    }
+                },
             }
         },
         "/admin/trust": {

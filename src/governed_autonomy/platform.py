@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .mesh import GovernanceInput, GovernanceSourceRegistry
 from .observability import PlatformObservability
+from .rbac import ClaimsMapper
 from .service import GovernedService
+
+if TYPE_CHECKING:
+    from .identity import ExternalIdentity
 
 
 @dataclass(frozen=True)
@@ -189,7 +193,7 @@ class PlatformDeploymentPolicy:
 
 @dataclass(frozen=True)
 class RuntimeIdentity:
-    """Identity and deployment context attached to governance decisions."""
+    """Validated principal and deployment context attached to governance decisions."""
 
     service: str
     environment: str = "dev"
@@ -200,6 +204,45 @@ class RuntimeIdentity:
     principal_id: str | None = None
     roles: tuple[str, ...] = ()
     scope: dict[str, Any] = field(default_factory=dict)
+    subject: str | None = None
+    name: str | None = None
+    email: str | None = None
+    groups: tuple[str, ...] = ()
+
+    @property
+    def tenant(self) -> str | None:
+        """Tenant claim using the short name common in external identity models."""
+        return self.tenant_id
+
+    @classmethod
+    def from_external_identity(
+        cls,
+        identity: ExternalIdentity,
+        *,
+        service: str = "http-api",
+        environment: str = "dev",
+        request_id: str | None = None,
+        source: str = "api",
+        legacy_admin_role: str = "gas-admin",
+    ) -> RuntimeIdentity:
+        """Normalize validated OIDC claims into the platform's trusted identity model."""
+        claims = {**identity.claims, "sub": identity.subject}
+        mapped = ClaimsMapper(legacy_admin_role=legacy_admin_role).map_to_identity(claims)
+        name = claims.get("name")
+        email = claims.get("email") or claims.get("preferred_username") or claims.get("upn")
+        return cls(
+            service=service,
+            environment=environment,
+            tenant_id=mapped.tenant_id,
+            actor_id=f"oidc:{identity.issuer}:{identity.subject}",
+            request_id=request_id,
+            source=source,
+            roles=tuple(sorted(role.value for role in mapped.roles)),
+            subject=mapped.subject,
+            name=name if isinstance(name, str) else None,
+            email=email if isinstance(email, str) else None,
+            groups=mapped.groups,
+        )
 
     def context(self) -> dict[str, Any]:
         context: dict[str, Any] = dict(self.scope)
@@ -217,6 +260,14 @@ class RuntimeIdentity:
             context["principal_id"] = self.principal_id
         if self.roles:
             context["roles"] = list(self.roles)
+        if self.subject is not None:
+            context["subject"] = self.subject
+        if self.name is not None:
+            context["name"] = self.name
+        if self.email is not None:
+            context["email"] = self.email
+        if self.groups:
+            context["groups"] = list(self.groups)
         return context
 
 
@@ -308,6 +359,10 @@ class GovernancePlatform:
             "request_id": self.identity.request_id,
             "principal_id": self.identity.principal_id,
             "roles": list(self.identity.roles),
+            "subject": self.identity.subject,
+            "name": self.identity.name,
+            "email": self.identity.email,
+            "groups": list(self.identity.groups),
             "health": self.service.audit_report()["health"],
             "policy_ids": sorted(self.service.policies.versions()),
             "actions": sorted(self.service.actions),

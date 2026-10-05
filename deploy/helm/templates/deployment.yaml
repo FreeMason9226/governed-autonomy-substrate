@@ -5,7 +5,11 @@ metadata:
   labels:
     {{- include "governed-autonomy.labels" . | nindent 4 }}
 spec:
+  {{- if and .Values.oidc.enabled .Values.oidc.redirectUri }}
+  replicas: 1
+  {{- else }}
   replicas: {{ .Values.replicaCount }}
+  {{- end }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "governed-autonomy.name" . }}
@@ -54,12 +58,29 @@ spec:
                   key: operator-token
                   optional: true
             {{- if .Values.oidc.enabled }}
+            {{- if or .Values.oidc.tenantId .Values.oidc.clientId }}
+            - name: ENTRA_TENANT_ID
+              value: {{ required "values.oidc.tenantId is required for Entra ID" .Values.oidc.tenantId | quote }}
+            - name: ENTRA_CLIENT_ID
+              value: {{ required "values.oidc.clientId is required for Entra ID" .Values.oidc.clientId | quote }}
+            {{- if .Values.oidc.redirectUri }}
+            - name: ENTRA_REDIRECT_URI
+              value: {{ .Values.oidc.redirectUri | quote }}
+            - name: ENTRA_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.oidc.clientSecretSecret | default .Values.runtimeSecret }}
+                  key: entra-client-secret
+                  optional: true
+            {{- end }}
+            {{- else }}
             - name: OIDC_ISSUER
               value: {{ required "values.oidc.issuer is required when oidc.enabled is true" .Values.oidc.issuer | quote }}
             - name: OIDC_AUDIENCE
               value: {{ required "values.oidc.audience is required when oidc.enabled is true" .Values.oidc.audience | quote }}
             - name: OIDC_JWKS_URL
               value: {{ required "values.oidc.jwksUrl is required when oidc.enabled is true" .Values.oidc.jwksUrl | quote }}
+            {{- end }}
             {{- end }}
           startupProbe:
             exec:

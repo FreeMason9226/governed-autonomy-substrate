@@ -6,6 +6,16 @@ maintains a separate **GAS Protocol Version** for wire-format changes.
 
 ## [Unreleased]
 
+- Added single-tenant Microsoft Entra ID API authentication using OIDC discovery, rotating JWKS validation, exact issuer/audience/tenant checks, and API-only federated authentication (`ENTRA_TENANT_ID`, `ENTRA_CLIENT_ID`); Helm accepts `oidc.tenantId` and `oidc.clientId`.
+
+- OIDC discovery now exposes validated authorization/token endpoints, JWKS URI, and advertised signing algorithms; discovery-based validators intersect provider algorithms with their configured allow-list.
+
+- JWKS retrieval now uses bounded HTTPS responses, thread-safe cache refresh, detached cache results, public-key-only validation, and key-material rotation detection; expired caches fail closed when refresh is unavailable.
+
+- Added `RuntimeIdentity.from_external_identity()` to normalize verified OIDC subject, tenant, name, email, roles, and groups; authenticated API authorization requests bind this context server-side and use it for operator-role checks and audit attribution.
+
+- Added Microsoft Entra browser sign-in with Authorization Code + PKCE, one-time state/nonce validation, discovered endpoint code exchange, HttpOnly session cookies, same-origin logout/POST protection, and configurable Helm redirect URI/client secret.
+
 - API versioning: `/api/v1/{health,livez,readyz,startupz,audit,openapi.json}` aliases and an `X-API-Version` response header.
 
 - Structured JSON logging (`GOVERNED_AUTONOMY_LOG_LEVEL`, `GOVERNED_AUTONOMY_LOG_FORMAT`) with per-request access log; OpenAPI now documents response and error schemas.
@@ -16,7 +26,7 @@ maintains a separate **GAS Protocol Version** for wire-format changes.
 
 - Helm chart now verified on a real kind cluster in CI (cluster.yml). The test found and fixed a NetworkPolicy that blocked Postgres egress; added startup probe and longer probe timeouts.
 
-- Add claims-to-role mapping (`governed_autonomy.rbac`): OIDC `roles`/`scope`/`groups` map to `platform_admin`, `operator` and a read-only `auditor`; the admin API lets auditors read but not write. `gas policy show` and `gas proposals` added.
+- Add API-enforced enterprise RBAC for `platform_admin`, `policy_admin`, `operator`, `auditor`, and `approver`; governed action authorization/execution, policy lifecycle, approvals, jobs, audit reads, trust keys, and operator-key administration have separate role gates. Entra role values are case-insensitive; bootstrap operator tokens remain break-glass credentials and issued operator keys have only the Operator role.
 
 ### Added
 - Opt-in CORS (`--cors-origins` / `GOVERNED_AUTONOMY_CORS_ORIGINS`, exact-origin allow-list, `OPTIONS` preflight); pipeline demo gained a *real server* mode.

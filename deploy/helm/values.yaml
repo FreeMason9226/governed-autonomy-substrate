@@ -43,6 +43,10 @@ externalSecrets:
   issuerPrivateKeyRemoteKey: governed-autonomy/issuer-private-key
 oidc:
   enabled: false
+  tenantId: ""
+  clientId: ""
+  clientSecretSecret: ""
+  redirectUri: ""
   issuer: ""
   audience: ""
   jwksUrl: ""

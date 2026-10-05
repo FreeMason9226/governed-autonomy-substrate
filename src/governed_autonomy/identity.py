@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import copy
+import hashlib
 import json
+import math
+import secrets
+import threading
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Any, Protocol
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from cryptography.exceptions import InvalidSignature
@@ -34,10 +42,46 @@ class StaticJWKSProvider:
         self._jwks = jwks
 
 
+_PRIVATE_JWK_FIELDS = frozenset({"d", "p", "q", "dp", "dq", "qi", "oth", "k"})
+_MAX_JWKS_BYTES = 1024 * 1024
+_MAX_OIDC_METADATA_BYTES = 1024 * 1024
+
+
+def _signing_keys_by_id(jwks: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    raw_keys = jwks.get("keys")
+    if not isinstance(raw_keys, list):
+        raise IdentityValidationError("JWKS document is invalid")
+    keys: dict[str, dict[str, Any]] = {}
+    for item in raw_keys:
+        if not isinstance(item, dict) or _PRIVATE_JWK_FIELDS.intersection(item):
+            raise IdentityValidationError("JWKS must contain public keys only")
+        if item.get("use", "sig") != "sig":
+            continue
+        key_ops = item.get("key_ops")
+        if key_ops is not None and (
+            not isinstance(key_ops, list) or "verify" not in key_ops
+        ):
+            continue
+        kid = item.get("kid")
+        if not isinstance(kid, str) or not kid:
+            raise IdentityValidationError("JWKS signing key is missing a key id")
+        if kid in keys:
+            raise IdentityValidationError("JWKS contains duplicate signing key ids")
+        keys[kid] = item
+    return keys
+
+
 class UrlJWKSProvider:
     """Fetch and cache JWKS documents from an operator-approved HTTPS endpoint."""
 
-    def __init__(self, url: str, *, cache_seconds: int = 300, timeout_seconds: int = 5) -> None:
+    def __init__(
+        self,
+        url: str,
+        *,
+        cache_seconds: int = 300,
+        timeout_seconds: int = 5,
+        clock: Any = time.monotonic,
+    ) -> None:
         if not url.startswith("https://"):
             raise ValueError("JWKS URL must use HTTPS")
         if cache_seconds <= 0 or timeout_seconds <= 0:
@@ -45,42 +89,55 @@ class UrlJWKSProvider:
         self.url = url
         self.cache_seconds = cache_seconds
         self.timeout_seconds = timeout_seconds
+        self._clock = clock
+        self._lock = threading.RLock()
         self._jwks: dict[str, Any] | None = None
         self._expires_at = 0.0
         self._last_rotated_at = 0.0
+        self._key_fingerprint: str | None = None
 
     def get_jwks(self) -> dict[str, Any]:
-        if self._jwks is None or time.time() >= self._expires_at:
-            self.refresh()
-        if self._jwks is None:
-            raise IdentityValidationError("JWKS document is unavailable")
-        return self._jwks
+        with self._lock:
+            if self._jwks is None or self._clock() >= self._expires_at:
+                self._refresh_locked()
+            if self._jwks is None:
+                raise IdentityValidationError("JWKS document is unavailable")
+            return copy.deepcopy(self._jwks)
 
     def refresh(self) -> None:
+        with self._lock:
+            self._refresh_locked()
+
+    def _refresh_locked(self) -> None:
         request = Request(self.url, headers={"Accept": "application/json"})
         try:
             with urlopen(request, timeout=self.timeout_seconds) as response:  # nosec B310
-                document = json.loads(response.read())
+                raw_document = response.read(_MAX_JWKS_BYTES + 1)
+            if len(raw_document) > _MAX_JWKS_BYTES:
+                raise IdentityValidationError("JWKS document exceeds the maximum size")
+            document = json.loads(raw_document)
+        except IdentityValidationError:
+            raise
         except Exception as exc:
             raise IdentityValidationError("JWKS endpoint is unavailable") from exc
         if not isinstance(document, dict) or not isinstance(document.get("keys"), list):
             raise IdentityValidationError("JWKS document is invalid")
-        previous_kids = (
-            {item.get("kid") for item in self._jwks.get("keys", []) if isinstance(item, dict)}
-            if isinstance(self._jwks, dict)
-            else set()
-        )
-        current_kids = {item.get("kid") for item in document["keys"] if isinstance(item, dict)}
-        now = time.time()
-        if self._jwks is not None and current_kids != previous_kids:
-            self._last_rotated_at = now
-        self._jwks = document
+        current_keys = _signing_keys_by_id(document)
+        fingerprint = hashlib.sha256(
+            json.dumps(current_keys, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        now = self._clock()
+        if self._key_fingerprint is not None and fingerprint != self._key_fingerprint:
+            self._last_rotated_at = time.time()
+        self._jwks = copy.deepcopy(document)
         self._expires_at = now + self.cache_seconds
+        self._key_fingerprint = fingerprint
 
     @property
     def last_rotated_at(self) -> float:
         """Unix timestamp of the last observed change in the JWKS key set (0.0 if none yet)."""
-        return self._last_rotated_at
+        with self._lock:
+            return self._last_rotated_at
 
 
 @dataclass(frozen=True)
@@ -89,6 +146,7 @@ class OIDCDiscoveryDocument:
     jwks_uri: str
     authorization_endpoint: str | None = None
     token_endpoint: str | None = None
+    supported_signing_algorithms: tuple[str, ...] = ()
     raw: dict[str, Any] | None = None
 
 
@@ -109,7 +167,12 @@ def discover_oidc_configuration(
     request = Request(discovery_url, headers={"Accept": "application/json"})
     try:
         with urlopen(request, timeout=timeout_seconds) as response:  # nosec B310
-            document = json.loads(response.read())
+            raw_document = response.read(_MAX_OIDC_METADATA_BYTES + 1)
+        if len(raw_document) > _MAX_OIDC_METADATA_BYTES:
+            raise IdentityValidationError("OIDC discovery document exceeds the maximum size")
+        document = json.loads(raw_document)
+    except IdentityValidationError:
+        raise
     except Exception as exc:
         raise IdentityValidationError("OIDC discovery endpoint is unavailable") from exc
     if not isinstance(document, dict):
@@ -122,13 +185,34 @@ def discover_oidc_configuration(
         raise IdentityValidationError("OIDC discovery document is missing a valid jwks_uri")
     authorization_endpoint = document.get("authorization_endpoint")
     token_endpoint = document.get("token_endpoint")
+    for name, endpoint in (
+        ("authorization_endpoint", authorization_endpoint),
+        ("token_endpoint", token_endpoint),
+    ):
+        if endpoint is not None and (
+            not isinstance(endpoint, str) or not endpoint.startswith("https://")
+        ):
+            raise IdentityValidationError(f"OIDC discovery document has an invalid {name}")
+    raw_algorithms = document.get("id_token_signing_alg_values_supported")
+    if raw_algorithms is None:
+        supported_algorithms: tuple[str, ...] = ()
+    elif isinstance(raw_algorithms, list) and all(
+        isinstance(algorithm, str) and algorithm and algorithm != "none"
+        for algorithm in raw_algorithms
+    ):
+        supported_algorithms = tuple(dict.fromkeys(raw_algorithms))
+        if not supported_algorithms:
+            raise IdentityValidationError("OIDC discovery document has no supported signing algorithms")
+    else:
+        raise IdentityValidationError(
+            "OIDC discovery document has an invalid supported signing algorithms list"
+        )
     return OIDCDiscoveryDocument(
         issuer=discovered_issuer,
         jwks_uri=jwks_uri,
-        authorization_endpoint=(
-            authorization_endpoint if isinstance(authorization_endpoint, str) else None
-        ),
-        token_endpoint=token_endpoint if isinstance(token_endpoint, str) else None,
+        authorization_endpoint=authorization_endpoint,
+        token_endpoint=token_endpoint,
+        supported_signing_algorithms=supported_algorithms,
         raw=document,
     )
 
@@ -137,6 +221,8 @@ def oidc_validator_from_discovery(
     *,
     issuer: str,
     audience: str | tuple[str, ...],
+    tenant_id: str | None = None,
+    discovery: OIDCDiscoveryDocument | None = None,
     algorithms: tuple[str, ...] = ("RS256", "ES256", "EdDSA"),
     cache_seconds: int = 300,
     timeout_seconds: int = 5,
@@ -148,7 +234,18 @@ def oidc_validator_from_discovery(
     hardcoded JWKS URL, so key rotation and JWKS endpoint changes on the
     identity provider side require no redeployment.
     """
-    discovery = discover_oidc_configuration(issuer, timeout_seconds=timeout_seconds)
+    discovery = discovery or discover_oidc_configuration(issuer, timeout_seconds=timeout_seconds)
+    accepted_algorithms = algorithms
+    if discovery.supported_signing_algorithms:
+        accepted_algorithms = tuple(
+            algorithm
+            for algorithm in algorithms
+            if algorithm in discovery.supported_signing_algorithms
+        )
+        if not accepted_algorithms:
+            raise IdentityValidationError(
+                "OIDC provider has no signing algorithm allowed by this validator"
+            )
     jwks_provider = UrlJWKSProvider(
         discovery.jwks_uri, cache_seconds=cache_seconds, timeout_seconds=timeout_seconds
     )
@@ -156,9 +253,145 @@ def oidc_validator_from_discovery(
         issuer=issuer,
         audience=audience,
         jwks_provider=jwks_provider,
+        algorithms=accepted_algorithms,
+        clock=clock,
+        tenant_id=tenant_id,
+    )
+
+
+@dataclass(frozen=True)
+class EntraOIDCConfig:
+    """Single-tenant Microsoft Entra ID settings for validating API access tokens."""
+
+    tenant_id: str
+    client_id: str
+
+    def __post_init__(self) -> None:
+        for name, value in (("tenant_id", self.tenant_id), ("client_id", self.client_id)):
+            try:
+                normalized = str(uuid.UUID(value))
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise ValueError(f"{name} must be a Microsoft Entra GUID") from exc
+            object.__setattr__(self, name, normalized)
+
+    @property
+    def issuer(self) -> str:
+        return f"https://login.microsoftonline.com/{self.tenant_id}/v2.0"
+
+    @property
+    def audience(self) -> str:
+        return self.client_id
+
+
+def entra_oidc_validator_from_discovery(
+    config: EntraOIDCConfig,
+    *,
+    discovery: OIDCDiscoveryDocument | None = None,
+    algorithms: tuple[str, ...] = ("RS256",),
+    cache_seconds: int = 300,
+    timeout_seconds: int = 5,
+    clock: Any = time.time,
+) -> OIDCValidator:
+    """Build a tenant-bound Entra validator using Microsoft OIDC discovery/JWKS."""
+    return oidc_validator_from_discovery(
+        issuer=config.issuer,
+        audience=config.audience,
+        tenant_id=config.tenant_id,
+        discovery=discovery,
         algorithms=algorithms,
+        cache_seconds=cache_seconds,
+        timeout_seconds=timeout_seconds,
         clock=clock,
     )
+
+
+class OIDCAuthCodeClient:
+    """OIDC authorization-code client with PKCE for server-side token exchange."""
+
+    def __init__(
+        self,
+        *,
+        discovery: OIDCDiscoveryDocument,
+        client_id: str,
+        redirect_uri: str,
+        client_secret: str | None = None,
+        timeout_seconds: int = 5,
+    ) -> None:
+        if not client_id:
+            raise ValueError("client_id is required")
+        if not redirect_uri.startswith("https://"):
+            raise ValueError("OIDC redirect URI must use HTTPS")
+        if timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive")
+        authorization_endpoint = discovery.authorization_endpoint
+        token_endpoint = discovery.token_endpoint
+        if not authorization_endpoint or not token_endpoint:
+            raise IdentityValidationError(
+                "OIDC discovery document is missing authorization or token endpoint"
+            )
+        self.discovery = discovery
+        self.authorization_endpoint = authorization_endpoint
+        self.token_endpoint = token_endpoint
+        self.client_id = client_id
+        self.redirect_uri = redirect_uri
+        self.client_secret = client_secret
+        self.timeout_seconds = timeout_seconds
+
+    def authorization_url(self, *, state: str, nonce: str, code_challenge: str) -> str:
+        parameters = urlencode(
+            {
+                "client_id": self.client_id,
+                "response_type": "code",
+                "redirect_uri": self.redirect_uri,
+                "response_mode": "query",
+                "scope": "openid profile email",
+                "state": state,
+                "nonce": nonce,
+                "code_challenge": code_challenge,
+                "code_challenge_method": "S256",
+            }
+        )
+        separator = "&" if "?" in self.authorization_endpoint else "?"
+        return f"{self.authorization_endpoint}{separator}{parameters}"
+
+    def exchange_code(self, *, code: str, code_verifier: str) -> dict[str, Any]:
+        if not code or not code_verifier:
+            raise ValueError("authorization code and PKCE verifier are required")
+        parameters = {
+            "client_id": self.client_id,
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": self.redirect_uri,
+            "code_verifier": code_verifier,
+        }
+        if self.client_secret:
+            parameters["client_secret"] = self.client_secret
+        request = Request(
+            self.token_endpoint,
+            data=urlencode(parameters).encode("ascii"),
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=self.timeout_seconds) as response:  # nosec B310
+                raw_document = response.read(_MAX_JWKS_BYTES + 1)
+            if len(raw_document) > _MAX_JWKS_BYTES:
+                raise IdentityValidationError("OIDC token response exceeds the maximum size")
+            document = json.loads(raw_document)
+        except IdentityValidationError:
+            raise
+        except Exception as exc:
+            raise IdentityValidationError("OIDC token endpoint is unavailable") from exc
+        if (
+            not isinstance(document, dict)
+            or not isinstance(document.get("id_token"), str)
+            or not document["id_token"]
+        ):
+            raise IdentityValidationError("OIDC token response is invalid")
+        return document
 
 
 def _b64(value: str) -> bytes:
@@ -205,6 +438,7 @@ class OIDCValidator:
         jwks_provider: JWKSProvider,
         algorithms: tuple[str, ...] = ("RS256", "ES256", "EdDSA"),
         clock: Any = time.time,
+        tenant_id: str | None = None,
     ) -> None:
         if not issuer or not algorithms:
             raise ValueError("issuer and algorithms are required")
@@ -212,9 +446,12 @@ class OIDCValidator:
         self.audience = (audience,) if isinstance(audience, str) else tuple(audience)
         if not self.audience:
             raise ValueError("audience is required")
+        self.tenant_id = tenant_id
         self.provider, self.algorithms, self.clock = jwks_provider, frozenset(algorithms), clock
 
-    def validate(self, token: str) -> ExternalIdentity:
+    def validate(self, token: str, *, nonce: str | None = None) -> ExternalIdentity:
+        if not isinstance(token, str) or not token:
+            raise IdentityValidationError("token must be a non-empty string")
         try:
             header_raw, payload_raw, signature_raw = token.split(".")
             header = json.loads(_b64(header_raw))
@@ -226,7 +463,13 @@ class OIDCValidator:
         if not isinstance(header, dict) or not isinstance(claims, dict):
             raise IdentityValidationError("JWT objects are invalid")
         alg, kid = header.get("alg"), header.get("kid")
-        if alg == "none" or alg not in self.algorithms or not kid:
+        if (
+            not isinstance(alg, str)
+            or alg == "none"
+            or alg not in self.algorithms
+            or not isinstance(kid, str)
+            or not kid
+        ):
             raise IdentityValidationError("JWT algorithm or key id is not trusted")
         if (
             claims.get("iss") != self.issuer
@@ -234,6 +477,13 @@ class OIDCValidator:
             or not claims["sub"]
         ):
             raise IdentityValidationError("issuer or subject claim is invalid")
+        if self.tenant_id is not None and claims.get("tid") != self.tenant_id:
+            raise IdentityValidationError("tenant claim is invalid")
+        if nonce is not None and (
+            not isinstance(claims.get("nonce"), str)
+            or not secrets.compare_digest(claims["nonce"], nonce)
+        ):
+            raise IdentityValidationError("token nonce is invalid")
         aud = claims.get("aud")
         if not (
             aud in self.audience
@@ -243,25 +493,42 @@ class OIDCValidator:
             raise IdentityValidationError("audience claim is invalid")
         now = float(self.clock())
         exp = claims.get("exp")
-        if not isinstance(exp, (int, float)) or now >= exp:
+        if (
+            not isinstance(exp, (int, float))
+            or isinstance(exp, bool)
+            or not math.isfinite(exp)
+            or now >= exp
+        ):
             raise IdentityValidationError("token is expired or has no expiry")
-        if "nbf" in claims and (not isinstance(claims["nbf"], (int, float)) or now < claims["nbf"]):
-            raise IdentityValidationError("token is not yet valid")
+        if "nbf" in claims:
+            not_before = claims["nbf"]
+            if (
+                not isinstance(not_before, (int, float))
+                or isinstance(not_before, bool)
+                or not math.isfinite(not_before)
+                or now < not_before
+            ):
+                raise IdentityValidationError("token is not yet valid")
         if "iat" in claims and (
-            not isinstance(claims["iat"], (int, float)) or claims["iat"] > now + 30
+            not isinstance(claims["iat"], (int, float))
+            or isinstance(claims["iat"], bool)
+            or not math.isfinite(claims["iat"])
+            or claims["iat"] > now + 30
         ):
             raise IdentityValidationError("token issued-at is invalid")
         jwks = self.provider.get_jwks()
-        keys = {item.get("kid"): item for item in jwks.get("keys", []) if isinstance(item, dict)}
+        if not isinstance(jwks, dict):
+            raise IdentityValidationError("JWKS document is invalid")
+        keys = _signing_keys_by_id(jwks)
         jwk = keys.get(kid)
         if jwk is None:  # providers may refresh their cache on rotation
             refresh = getattr(self.provider, "refresh", None)
             if callable(refresh):
                 refresh()
             jwks = self.provider.get_jwks()
-            keys = {
-                item.get("kid"): item for item in jwks.get("keys", []) if isinstance(item, dict)
-            }
+            if not isinstance(jwks, dict):
+                raise IdentityValidationError("JWKS document is invalid")
+            keys = _signing_keys_by_id(jwks)
             jwk = keys.get(kid)
         if jwk is None or jwk.get("alg", alg) != alg:
             raise IdentityValidationError("signing key is not trusted")
@@ -297,6 +564,12 @@ class OIDCValidator:
         except (InvalidSignature, KeyError, ValueError, TypeError) as exc:
             raise IdentityValidationError("JWT signature is invalid") from exc
         return ExternalIdentity(claims["sub"], self.issuer, claims)
+
+    async def validate_async(
+        self, token: str, *, nonce: str | None = None
+    ) -> ExternalIdentity:
+        """Validate without blocking an async caller's event loop."""
+        return await asyncio.to_thread(self.validate, token, nonce=nonce)
 
     def validate_token(self, token: str) -> ExternalIdentity:
         """Explicit alias useful at HTTP middleware boundaries."""

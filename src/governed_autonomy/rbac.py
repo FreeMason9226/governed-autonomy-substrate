@@ -10,8 +10,10 @@ from typing import Any
 
 class Role(StrEnum):
     PLATFORM_ADMIN = "platform_admin"
+    POLICY_ADMIN = "policy_admin"
     OPERATOR = "operator"
     AUDITOR = "auditor"
+    APPROVER = "approver"
 
 
 @dataclass(frozen=True)
@@ -45,6 +47,13 @@ class ClaimsMapper:
         self.role_mapping = dict(role_mapping or {})
         self.role_mapping.setdefault(legacy_admin_role, Role.OPERATOR)
         self.role_mapping.setdefault(legacy_admin_scope, Role.OPERATOR)
+        self._normalized_role_mapping = {
+            self._normalize(item): role for item, role in self.role_mapping.items()
+        }
+
+    @staticmethod
+    def _normalize(value: str) -> str:
+        return "".join(character.lower() for character in value if character.isalnum())
 
     def map_to_identity(self, claims: Mapping[str, Any]) -> ClaimsIdentity:
         subject = claims.get("sub")
@@ -62,10 +71,15 @@ class ClaimsMapper:
             if item in self.role_mapping:
                 roles.add(self.role_mapping[item])
             else:
-                try:
-                    roles.add(Role(item))
-                except ValueError:
+                mapped_role = self._normalized_role_mapping.get(self._normalize(item))
+                if mapped_role is not None:
+                    roles.add(mapped_role)
                     continue
+                normalized = self._normalize(item)
+                for role in Role:
+                    if normalized in {self._normalize(role.value), self._normalize(role.name)}:
+                        roles.add(role)
+                        break
         service = claims.get("appid") or claims.get("azp") or claims.get("client_id")
         email = claims.get("email") or claims.get("upn")
         tenant = claims.get("tid") or claims.get("tenant_id")
@@ -85,4 +99,3 @@ def require_roles(identity: ClaimsIdentity, required: Iterable[Role]) -> None:
     if Role.PLATFORM_ADMIN in identity.roles or identity.roles & needed:
         return
     raise PermissionError(f"access denied; required roles: {sorted(r.value for r in needed)}")
-
