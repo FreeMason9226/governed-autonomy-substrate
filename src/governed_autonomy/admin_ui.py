@@ -57,8 +57,8 @@ enter here is persisted: it is held only in this page's memory and is lost on re
 </div>
 <div class="mission-grid">
   <section><h3>Assets &amp; policy graph</h3><table id="mission-assets"><thead><tr><th>Action</th><th>Governing policies</th></tr></thead><tbody></tbody></table></section>
-  <section><h3>Approval queue</h3><table id="mission-approvals"><thead><tr><th>Policy</th><th>Proposal</th><th>Approvals</th></tr></thead><tbody></tbody></table></section>
-  <section><h3>Incident center</h3><table id="mission-incidents"><thead><tr><th>Event</th><th>Detail</th></tr></thead><tbody></tbody></table></section>
+  <section><h3>Approval queue</h3><table id="mission-approvals"><thead><tr><th>Policy</th><th>Proposal</th><th>Approvals</th><th></th></tr></thead><tbody></tbody></table></section>
+  <section><h3>Incident center</h3><table id="mission-incidents"><thead><tr><th>Severity</th><th>Event</th><th>Detail</th></tr></thead><tbody></tbody></table></section>
   <section><h3>Analytics &amp; audit timeline</h3><p id="mission-analytics" class="hint"></p><ol id="mission-timeline"></ol></section>
 </div>
 </section>
@@ -380,161 +380,87 @@ def render_admin_js() -> bytes:
     });
   }
 
-  function setMetric(id, value, tone) {
-    const element = document.getElementById(id);
-    element.textContent = value;
-    element.className = tone ? tone : "";
-  }
-
   async function loadControlRoom() {
-    const error = document.getElementById("mission-error");
-    error.hidden = true;
+    const status = document.getElementById("mission-status");
     try {
       const data = await api("/admin/control-room");
-      const analytics = data.analytics || {};
-      const healthy = Boolean(data.health && data.health.ok);
-      setMetric("mc-health", healthy ? "OPERATIONAL" : "DEGRADED", healthy ? "good" : "bad");
-      document.getElementById("mc-health-detail").textContent = healthy
-        ? "Replay and governance checks passing"
-        : "One or more readiness checks need attention";
-      setMetric("mc-assets", analytics.asset_count ?? 0);
-      setMetric("mc-policies", analytics.policy_count ?? 0);
-      setMetric("mc-approvals", analytics.pending_approval_count ?? 0,
-        analytics.pending_approval_count ? "warn" : "good");
-      setMetric("mc-incidents", (data.incidents || []).length,
-        data.incidents && data.incidents.length ? "bad" : "good");
-      setMetric("mc-success-rate",
-        analytics.success_rate === null ? "—" : analytics.success_rate + "%",
-        analytics.success_rate === null ? "" : analytics.success_rate >= 95 ? "good" : "warn");
-      document.getElementById("mc-execution-count").textContent =
-        `${analytics.execution_count || 0} executions · ${analytics.failure_count || 0} failed`;
+      const analytics = data.analytics;
+      document.getElementById("mc-assets").textContent = analytics.asset_count;
+      document.getElementById("mc-policies").textContent = analytics.policy_count;
+      document.getElementById("mc-approvals").textContent = data.approvals.length;
+      document.getElementById("mc-incidents").textContent = data.incidents.length;
+      document.getElementById("mc-success-rate").textContent =
+        analytics.success_rate === null ? "—" : analytics.success_rate + "%";
+      status.textContent = data.health.ok ? "System operational" : "System health check failed";
+      status.className = data.health.ok ? "status ok" : "status error";
 
-      renderPolicyGraph(data.graph || {});
-      renderIncidents(data.incidents || []);
-      renderApprovals(data.proposals || {});
-      renderAssets(data.assets || []);
-      renderAnalytics(analytics, data.health || {});
-      renderTimeline(data.timeline || []);
+      fillTable("mission-assets", data.assets.map((asset) => [
+        asset.asset_id, asset.policies.join(", ") || "No policy mapping"
+      ]), 2);
+      renderApprovalQueue(data.approvals);
+      fillTable("mission-incidents", data.incidents.map((incident) => [
+        incident.severity.toUpperCase(), incident.summary, incident.detail
+      ]), 3);
+      document.getElementById("mission-analytics").textContent =
+        `${analytics.authorizations} authorizations · ${analytics.executions} executions · ` +
+        `${analytics.failures} failures · ${analytics.trusted_keys} trusted keys · ` +
+        `${analytics.frames} audit frames`;
+      const timeline = document.getElementById("mission-timeline");
+      timeline.replaceChildren();
+      for (const entry of data.timeline) {
+        const item = document.createElement("li");
+        item.textContent = `${entry.type}: ${entry.event} ${entry.subject}`.trim();
+        timeline.appendChild(item);
+      }
     } catch (err) {
-      error.textContent = "Mission control could not load: " + err.message;
-      error.hidden = false;
-      ["policy-graph", "incident-list", "approval-list", "analytics-chart"].forEach((id) => {
-        document.getElementById(id).innerHTML =
-          '<p class="empty-state">Snapshot unavailable. Refresh after resolving the connection.</p>';
+      status.textContent = "Mission control unavailable: " + err.message;
+      status.className = "status error";
+    }
+  }
+
+  function fillTable(tableId, rows, columns) {
+    const body = document.querySelector(`#${tableId} tbody`);
+    body.replaceChildren();
+    if (!rows.length) {
+      const row = body.insertRow();
+      const cell = row.insertCell();
+      cell.colSpan = columns;
+      cell.textContent = "None";
+      return;
+    }
+    for (const values of rows) {
+      const row = body.insertRow();
+      for (const value of values) {
+        row.insertCell().textContent = value || "—";
+      }
+    }
+  }
+
+  function renderApprovalQueue(proposals) {
+    const body = document.querySelector("#mission-approvals tbody");
+    body.replaceChildren();
+    if (!proposals.length) {
+      const cell = body.insertRow().insertCell();
+      cell.colSpan = 4;
+      cell.textContent = "None";
+      return;
+    }
+    for (const proposal of proposals) {
+      const row = body.insertRow();
+      row.insertCell().textContent = proposal.policy_id;
+      row.insertCell().textContent = proposal.proposal_id;
+      row.insertCell().textContent = String(proposal.approval_count);
+      const action = row.insertCell();
+      const review = document.createElement("button");
+      review.type = "button";
+      review.textContent = "Review";
+      review.addEventListener("click", () => {
+        document.getElementById("approve-proposal-id").value = proposal.proposal_id;
+        showTab("proposals");
+        document.getElementById("approve-proposal-id").focus();
       });
+      action.appendChild(review);
     }
-  }
-
-  function renderPolicyGraph(graph) {
-    const container = document.getElementById("policy-graph");
-    const policies = new Map((graph.nodes || [])
-      .filter((node) => node.kind === "policy")
-      .map((node) => [node.id, []]));
-    for (const edge of graph.edges || []) {
-      if (policies.has(edge.from)) policies.get(edge.from).push(edge.to);
-    }
-    if (!policies.size) {
-      container.innerHTML = '<p class="empty-state">No policies are registered.</p>';
-      return;
-    }
-    container.innerHTML = [...policies.entries()].map(([policyId, actions]) =>
-      '<div class="graph-row"><div class="graph-policy"><strong>' + escapeHtml(policyId) +
-      '</strong><br><small>policy</small></div><div class="graph-arrow" aria-hidden="true">→</div>' +
-      '<div>' + (actions.length
-        ? actions.sort().map((action) => '<span class="graph-action">' + escapeHtml(action) + '</span>').join("")
-        : '<span class="empty-state">No linked action</span>') +
-      '</div></div>'
-    ).join("");
-  }
-
-  function renderIncidents(incidents) {
-    const container = document.getElementById("incident-list");
-    if (!incidents.length) {
-      container.innerHTML = '<p class="empty-state">No denied requests or failed executions in the replay ledger.</p>';
-      return;
-    }
-    container.innerHTML = incidents.slice(0, 12).map((incident) =>
-      '<article class="incident-item ' + escapeHtml(incident.severity) + '">' +
-      '<strong>' + escapeHtml(incident.summary) + '</strong>' +
-      '<p>' + escapeHtml(incident.detail || "No additional details recorded.") + '</p>' +
-      '<p>' + escapeHtml(incident.action || incident.policy_id || incident.frame_id) +
-      ' · frame ' + escapeHtml(String(incident.sequence)) + '</p></article>'
-    ).join("");
-  }
-
-  function renderApprovals(proposalData) {
-    const container = document.getElementById("approval-list");
-    const pending = (proposalData.proposals || []).filter((proposal) => proposal.status === "pending");
-    if (!pending.length) {
-      container.innerHTML = '<p class="empty-state">No policy changes are waiting for approval.</p>';
-      return;
-    }
-    const required = proposalData.required_approvals;
-    container.innerHTML = pending.map((proposal) => {
-      const count = Number(proposal.approval_count || 0);
-      const quorum = Number(required || 0);
-      return '<article class="approval-item"><strong>' + escapeHtml(proposal.policy_id) +
-        '</strong><p>' + escapeHtml(proposal.proposal_id) + '</p><p>Approvals: ' +
-        escapeHtml(String(count)) + (quorum ? ' / ' + escapeHtml(String(quorum)) : '') +
-        ' · proposer ' + escapeHtml(proposal.proposed_by_key_id) + '</p></article>';
-    }).join("");
-  }
-
-  function renderAssets(assets) {
-    const tbody = document.querySelector("#asset-table tbody");
-    if (!assets.length) {
-      tbody.innerHTML = '<tr><td colspan="3">No executable action handlers are registered.</td></tr>';
-      return;
-    }
-    tbody.innerHTML = assets.map((asset) =>
-      '<tr><td>' + escapeHtml(asset.asset_id) + '</td><td><span class="status-pill ' +
-      escapeHtml(asset.status) + '">' + escapeHtml(asset.status) + '</span></td><td>' +
-      escapeHtml((asset.policies || []).join(", ") || "No policy mapping") + '</td></tr>'
-    ).join("");
-  }
-
-  function renderAnalytics(metrics, health) {
-    const container = document.getElementById("analytics-chart");
-    const values = [
-      ["Authorizations", Number(metrics.authorization_count || 0), ""],
-      ["Executions", Number(metrics.execution_count || 0), ""],
-      ["Successful", Number(metrics.success_count || 0), "success"],
-      ["Failed", Number(metrics.failure_count || 0), "failure"],
-    ];
-    const maximum = Math.max(1, ...values.map((value) => value[1]));
-    container.innerHTML = values.map(([label, value, kind]) => {
-      const width = Math.round(value / maximum * 100);
-      return '<div class="analytics-row"><span>' + escapeHtml(label) + '</span><svg class="analytics-track" ' +
-        'viewBox="0 0 100 10" preserveAspectRatio="none" role="img" aria-label="' +
-        escapeHtml(label + ": " + value) + '"><rect class="analytics-bar ' + kind +
-        '" x="0" y="0" width="' + width + '" height="10" rx="5"></rect></svg><strong>' +
-        escapeHtml(String(value)) + '</strong></div>';
-    }).join("");
-    const replay = health.checks && health.checks.replay_chain;
-    document.getElementById("analytics-integrity").textContent = replay
-      ? `Replay integrity ${replay.ok ? "verified" : "failed"} · ${replay.frames} frames · ` +
-        `${metrics.trusted_key_count || 0} trusted keys · ${metrics.revoked_key_count || 0} revoked`
-      : "Replay integrity status unavailable.";
-  }
-
-  function renderTimeline(events) {
-    const tbody = document.querySelector("#timeline-table tbody");
-    const shown = events.slice(0, 30);
-    document.getElementById("timeline-count").textContent = `${events.length} recent frames`;
-    if (!shown.length) {
-      tbody.innerHTML = '<tr><td colspan="6">No audit frames have been recorded.</td></tr>';
-      return;
-    }
-    tbody.innerHTML = shown.map((event) => {
-      const detail = event.action || event.policy_id || "—";
-      const actorNonce = event.actor_id !== "system" && event.actor_id
-        ? event.actor_id : event.nonce || "—";
-      const when = event.recorded_at || ("Frame " + event.sequence);
-      return '<tr><td>' + escapeHtml(when) + '</td><td>' + escapeHtml(event.event) +
-        '</td><td>' + escapeHtml(event.type) + '</td><td>' + escapeHtml(detail) +
-        '</td><td>' + escapeHtml(actorNonce) + '</td><td><code>' +
-        escapeHtml(String(event.frame_hash || "").slice(0, 12)) + '</code></td></tr>';
-    }).join("");
   }
 
   async function loadHealth() {

@@ -1200,19 +1200,34 @@ class AuthenticatedAPI:
         events = service.boundary.replay_log.events()
         incidents = [
             {
-                "event": event.get("error_type", "Authorization denied"),
+                "summary": event.get("error_type", "Authorization denied"),
                 "detail": event.get("error", "; ".join(event.get("decision", {}).get("reasons", []))),
                 "type": event.get("type"),
+                "severity": (
+                    "high"
+                    if event.get("type") == "execution"
+                    else "medium"
+                ),
             }
             for event in events
             if (event.get("type") == "execution" and event.get("status") == "failed")
             or (event.get("type") == "authorization" and event.get("issued") is False)
         ]
         execution_count = summary["execution_count"]
+        assets = [
+            {"asset_id": key, "policies": coverage[key]}
+            for key in sorted(coverage)
+        ]
+        graph_edges = [
+            {"from": policy["id"], "to": action}
+            for policy in policies
+            for action in policy["actions"]
+        ]
         return {
-            "health": service.audit_report()["health"]["ok"],
-            "assets": [{"id": key, "policies": coverage[key]} for key in sorted(coverage)],
+            "health": {"ok": service.audit_report()["health"]["ok"]},
+            "assets": assets,
             "policies": policies,
+            "graph": {"edges": graph_edges},
             "approvals": [
                 p for p in proposals["proposals"] if p["status"] == "pending"
             ],
@@ -1226,6 +1241,8 @@ class AuthenticatedAPI:
                 for e in events[-20:][::-1]
             ],
             "analytics": {
+                "policy_count": len(policies),
+                "asset_count": len(assets),
                 "authorizations": summary["authorization_count"],
                 "executions": execution_count,
                 "failures": summary["failure_count"],

@@ -92,6 +92,16 @@ def test_control_room_snapshot_combines_governance_and_runtime_state():
         )
         assert status == 403
         assert denied["error"] == "policy denied"
+        service.boundary.replay_log.append(
+            "test-failed-execution",
+            {
+                "type": "execution",
+                "nonce": "failed-nonce",
+                "status": "failed",
+                "error_type": "RuntimeError",
+                "error": "test failure",
+            },
+        )
 
         status, snapshot = request(
             instance, "GET", "/admin/control-room", token="operator-token"
@@ -106,7 +116,12 @@ def test_control_room_snapshot_combines_governance_and_runtime_state():
             for edge in snapshot["graph"]["edges"]
         )
         assert snapshot["incidents"][0]["summary"] == "Authorization denied"
-        assert snapshot["timeline"][0]["type"] == "authorization"
+        assert snapshot["incidents"][0]["severity"] == "medium"
+        assert snapshot["incidents"][1]["summary"] == "RuntimeError"
+        assert snapshot["incidents"][1]["severity"] == "high"
+        assert any(entry["type"] == "authorization" for entry in snapshot["timeline"])
+        assert len(snapshot["approvals"]) == 0
+        assert snapshot["analytics"]["authorizations"] == 1
     finally:
         instance.shutdown()
         instance.server_close()
