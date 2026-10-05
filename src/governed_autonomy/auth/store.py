@@ -6,10 +6,10 @@ import json
 import sqlite3
 import threading
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from functools import wraps
 from pathlib import Path
-from collections.abc import Callable
 from typing import Any, Concatenate, ParamSpec, Protocol, TypeVar
 
 from ..rbac import Role
