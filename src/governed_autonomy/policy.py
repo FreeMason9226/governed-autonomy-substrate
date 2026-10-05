@@ -1,5 +1,6 @@
 import hashlib
 import json
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,6 +25,7 @@ class Policy:
     max_request_bytes: int = 64 * 1024
     max_ttl_seconds: int = 300
     required_approvals: dict[str, int] = field(default_factory=dict)
+    max_numeric_fields: dict[str, dict[str, float]] = field(default_factory=dict)
     required_mesh_inputs: dict[str, int] = field(default_factory=dict)
     required_mesh_sources: dict[str, tuple[str, ...]] = field(default_factory=dict)
     mesh_required_actions: tuple[str, ...] = ()
@@ -79,6 +81,18 @@ class Policy:
                 raise ValueError("required_approvals action names must be non-empty strings")
             if not isinstance(count, int) or isinstance(count, bool) or count < 0:
                 raise ValueError("required_approvals must use non-negative integers")
+        for action, fields in self.max_numeric_fields.items():
+            if not isinstance(action, str) or not action or not isinstance(fields, dict):
+                raise ValueError("max_numeric_fields must map action names to field limits")
+            for field_name, maximum in fields.items():
+                if (
+                    not isinstance(field_name, str)
+                    or not field_name
+                    or not isinstance(maximum, (int, float))
+                    or isinstance(maximum, bool)
+                    or not math.isfinite(maximum)
+                ):
+                    raise ValueError("numeric field limits must use finite numbers")
         for action, count in self.required_mesh_inputs.items():
             if not isinstance(action, str) or not action:
                 raise ValueError("required_mesh_inputs action names must be non-empty strings")
@@ -113,6 +127,10 @@ class Policy:
             "max_request_bytes": self.max_request_bytes,
             "max_ttl_seconds": self.max_ttl_seconds,
             "required_approvals": dict(sorted(self.required_approvals.items())),
+            "max_numeric_fields": {
+                action: dict(sorted(fields.items()))
+                for action, fields in sorted(self.max_numeric_fields.items())
+            },
         }
         if self.required_mesh_inputs:
             result["required_mesh_inputs"] = dict(sorted(self.required_mesh_inputs.items()))
@@ -214,6 +232,17 @@ class DeterministicArbiter:
             if request.get(field_name) != expected:
                 reasons.append(f"field does not match policy: {field_name}")
                 reason_codes.append("field_mismatch")
+
+        for field_name, maximum in policy.max_numeric_fields.get(action, {}).items():
+            value = request.get(field_name)
+            if (
+                not isinstance(value, (int, float))
+                or isinstance(value, bool)
+                or not math.isfinite(value)
+                or value > maximum
+            ):
+                reasons.append(f"numeric field exceeds policy maximum: {field_name}")
+                reason_codes.append("numeric_limit_exceeded")
 
         for context_name in policy.required_context:
             if context_name not in context:
@@ -454,6 +483,7 @@ def policy_from_dict(value: dict[str, Any]) -> Policy:
     }
     optional = {
         "required_approvals",
+        "max_numeric_fields",
         "required_mesh_inputs",
         "required_mesh_sources",
         "mesh_required_actions",
@@ -476,6 +506,7 @@ def policy_from_dict(value: dict[str, Any]) -> Policy:
         max_request_bytes=value["max_request_bytes"],
         max_ttl_seconds=value["max_ttl_seconds"],
         required_approvals=value.get("required_approvals", {}),
+        max_numeric_fields=value.get("max_numeric_fields", {}),
         required_mesh_inputs=value.get("required_mesh_inputs", {}),
         required_mesh_sources={
             action: tuple(sources)
