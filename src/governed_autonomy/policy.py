@@ -127,11 +127,12 @@ class Policy:
             "max_request_bytes": self.max_request_bytes,
             "max_ttl_seconds": self.max_ttl_seconds,
             "required_approvals": dict(sorted(self.required_approvals.items())),
-            "max_numeric_fields": {
+        }
+        if self.max_numeric_fields:
+            result["max_numeric_fields"] = {
                 action: dict(sorted(fields.items()))
                 for action, fields in sorted(self.max_numeric_fields.items())
-            },
-        }
+            }
         if self.required_mesh_inputs:
             result["required_mesh_inputs"] = dict(sorted(self.required_mesh_inputs.items()))
         if self.required_mesh_sources:

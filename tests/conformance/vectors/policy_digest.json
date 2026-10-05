@@ -43,14 +43,19 @@
         "exact_context": {
           "environment": "production"
         },
+        "max_numeric_fields": {
+          "write_file": {
+            "size": 1048576
+          }
+        },
         "max_request_bytes": 65536,
         "max_ttl_seconds": 300,
         "required_approvals": {
           "write_file": 2
         }
       },
-      "expected_canonical_utf8": "{\"allowed_actions\":[\"read_file\",\"write_file\"],\"exact_context\":{\"environment\":\"production\"},\"exact_fields\":{},\"max_request_bytes\":65536,\"max_ttl_seconds\":300,\"policy_id\":\"conformance-v1\",\"required_approvals\":{\"write_file\":2},\"required_context\":[\"tenant_id\"],\"required_fields\":{\"write_file\":[\"path\",\"content\"]}}",
-      "expected_digest": "5885b7507374bfd8e700476faddd7590b3d9b4386df91b3abbdf184cb9022037"
+      "expected_canonical_utf8": "{\"allowed_actions\":[\"read_file\",\"write_file\"],\"exact_context\":{\"environment\":\"production\"},\"exact_fields\":{},\"max_numeric_fields\":{\"write_file\":{\"size\":1048576}},\"max_request_bytes\":65536,\"max_ttl_seconds\":300,\"policy_id\":\"conformance-v1\",\"required_approvals\":{\"write_file\":2},\"required_context\":[\"tenant_id\"],\"required_fields\":{\"write_file\":[\"path\",\"content\"]}}",
+      "expected_digest": "c6c72b39cc2c4a90254b05f6868f7307415cc5aa7006742a597b5257c5f37a01"
     }
   ]
 }
