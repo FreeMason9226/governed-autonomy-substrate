@@ -1223,6 +1223,17 @@ class AuthenticatedAPI:
             for policy in policies
             for action in policy["actions"]
         ]
+        analytics = {
+            "policy_count": len(policies),
+            "asset_count": len(assets),
+            "authorizations": summary["authorization_count"],
+            "executions": execution_count,
+            "failures": summary["failure_count"],
+            "success_rate": round(summary["success_count"] / execution_count * 100, 1)
+            if execution_count else None,
+            "trusted_keys": len(trust["keys"]),
+            "frames": summary["frame_count"],
+        }
         return {
             "health": {"ok": service.audit_report()["health"]["ok"]},
             "assets": assets,
@@ -1240,17 +1251,7 @@ class AuthenticatedAPI:
                 }
                 for e in events[-20:][::-1]
             ],
-            "analytics": {
-                "policy_count": len(policies),
-                "asset_count": len(assets),
-                "authorizations": summary["authorization_count"],
-                "executions": execution_count,
-                "failures": summary["failure_count"],
-                "success_rate": round(summary["success_count"] / execution_count * 100, 1)
-                if execution_count else None,
-                "trusted_keys": len(trust["keys"]),
-                "frames": summary["frame_count"],
-            },
+            "analytics": analytics,
         }
 
     def _require_trust_change_manager(self) -> TrustChangeManager:
