@@ -34,7 +34,7 @@ def config_path() -> Path:
 def load_credentials() -> dict[str, Any]:
     creds: dict[str, Any] = {
         "api_url": DEFAULT_API_URL,
-        "token": None,
+        "token": None,  # nosec B105
         "tenant_id": None,
         "client_id": None,
         "scopes": None,
