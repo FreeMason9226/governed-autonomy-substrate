@@ -3,15 +3,6 @@ package policy
 import rego.v1
 
 dependency_manifest_names := {
-	"Cargo.toml",
-	"Cargo.lock",
-	"package.json",
-	"package-lock.json",
-	"npm-shrinkwrap.json",
-	"yarn.lock",
-	"pnpm-lock.yaml",
-	"go.mod",
-	"go.sum",
 	"pyproject.toml",
 	"poetry.lock",
 	"requirements-ci.txt",
@@ -30,6 +21,21 @@ infra_path_change if {
 infra_path_change if {
 	some path in input.changed_files
 	startswith(path, "runtime/")
+}
+
+infra_path_change if {
+	some path in input.changed_files
+	startswith(path, ".github/workflows/")
+}
+
+infra_path_change if {
+	some path in input.changed_files
+	startswith(path, "scripts/")
+}
+
+infra_path_change if {
+	some path in input.changed_files
+	path in {"Dockerfile", "compose.yaml", "render.yaml"}
 }
 
 default infra_path_change := false

@@ -64,7 +64,7 @@ Agents are untrusted. The API, issuer and barrier form the trusted computing bas
 ## Hardening checklist
 
 - [ ] Use `GAS_RUNTIME_MODE=postgres` with TLS to the database; never the in-memory mode.
-- [ ] Sign with KMS (`GAS_ISSUER_*` pointing at a KMS key); do not ship raw private keys in env.
+- [ ] Sign with KMS (`GAS_ISSUER_SIGNER=aws-kms` and `GAS_ISSUER_KMS_KEY_ID`); use workload identity and do not ship raw private keys in env.
 - [ ] Replace the default bearer/operator tokens; store them in a secret manager (External Secrets template provided).
 - [ ] Enable tenant-bound Entra/OIDC validation with `oidc_only`; do not use static bearer tokens for governance operations.
 - [ ] Apply `002_identity_schema.sql` and configure `DATABASE_URL` for shared identity assignments and identity-event records.

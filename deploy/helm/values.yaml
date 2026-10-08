@@ -1,9 +1,17 @@
 image:
-  repository: ghcr.io/example/governed-autonomy-substrate
-  tag: latest
+  repository: ghcr.io/freemason9226/governed-autonomy-substrate
+  tag: "0.1.0"
   pullPolicy: IfNotPresent
 replicaCount: 2
 runtimeMode: postgres
+serviceAccount:
+  create: false
+  name: ""
+  annotations: {}
+kms:
+  enabled: false
+  keyId: ""
+  region: ""
 bearerTokenSecret: governed-autonomy
 databaseUrlSecret: governed-autonomy-runtime
 runtimeSecret: governed-autonomy-runtime

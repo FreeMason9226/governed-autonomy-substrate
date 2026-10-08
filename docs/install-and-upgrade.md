@@ -45,6 +45,24 @@ Flags override nothing implicitly; environment variables supply defaults.
 Run `gas-server --help` for the full flag list. Invalid configuration fails
 at startup, before the listener binds.
 
+### AWS KMS signing
+
+The AWS KMS signer can be selected with `GAS_ISSUER_SIGNER=aws-kms` and
+`GAS_ISSUER_KMS_KEY_ID=<key-id-or-arn>`. The runtime uses the AWS SDK default
+credential chain, so Kubernetes deployments should use workload identity (for
+example, EKS IRSA) rather than static AWS credentials. Install the `aws` extra;
+the provided container image includes it.
+
+For Helm, enable `kms.enabled`, set `kms.keyId`, and configure a service account
+using `serviceAccount.create` and `serviceAccount.annotations` for the cluster's
+workload-identity binding. Set `kms.region` when it cannot be inferred from the
+runtime environment. The chart mounts the service-account token only when KMS is
+enabled and omits the raw issuer-private-key environment variable in that mode.
+The configured AWS role must be scoped to the selected KMS key and signing
+operations. API and worker currently share this service account; separate
+least-privilege identities are a remaining hardening item. KMS mode does not
+provision keys or IAM permissions.
+
 ### Microsoft Entra ID
 
 Register GAS as an API in the Entra admin center, expose an application ID URI,
