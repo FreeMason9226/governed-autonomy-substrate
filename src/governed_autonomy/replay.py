@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
 from .audit import AuditAnchor, AuditAnchorSink
 from .canonical import canonical_json
 from .signing import Signer
@@ -217,6 +219,18 @@ class ReplayLog:
             anchor = sign_audit_anchor(self.verify_integrity(), signer)
             sink.append(anchor)
             return anchor
+
+    def verify_anchor(self, anchor: AuditAnchor, public_key: Ed25519PublicKey) -> bool:
+        """Verify a trusted checkpoint against this log's current valid integrity state."""
+        with self._lock:
+            integrity = self.verify_integrity()
+            return (
+                integrity["ok"] is True
+                and anchor.verify(public_key)
+                and anchor.replay_digest == integrity["replay_digest"]
+                and anchor.head_hash == integrity["head_hash"]
+                and anchor.frame_count == integrity["frame_count"]
+            )
 
 
 class SQLiteReplayLog(ReplayLog):

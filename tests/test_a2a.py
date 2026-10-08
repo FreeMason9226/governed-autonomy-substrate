@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from governed_autonomy import (
     AuthorizationError,
     AuthorizationIssuer,
     ExecutionBoundary,
+    JSONLAuditAnchorSink,
     KeyPair,
     Policy,
     PolicyRegistry,
@@ -14,6 +16,7 @@ from governed_autonomy import (
 )
 from governed_autonomy.a2a import A2AGuard, A2ATaskDelegation
 from governed_autonomy.policy import DeterministicArbiter
+from governed_autonomy.signing import LocalEd25519Signer
 
 
 @pytest.fixture
@@ -64,6 +67,7 @@ def a2a_setup() -> tuple[KeyPair, KeyPair, KeyPair, TrustStore, ReplayLog, Autho
 
 def test_successful_a2a_delegation_flow(
     a2a_setup: tuple[KeyPair, KeyPair, KeyPair, TrustStore, ReplayLog, AuthorizationIssuer, ExecutionBoundary, Policy],
+    tmp_path,
 ) -> None:
     _, delegator_key, worker_key, trust, replay, issuer, boundary, policy = a2a_setup
 
@@ -100,6 +104,12 @@ def test_successful_a2a_delegation_flow(
     summary = replay.audit_summary()
     assert summary["execution_count"] == 1
     assert summary["success_count"] == 1
+    signer = LocalEd25519Signer("a2a-attestation")
+    sink = JSONLAuditAnchorSink(tmp_path / "a2a-anchors.jsonl")
+    anchor = replay.anchor(signer, sink)
+    public_key = Ed25519PublicKey.from_public_bytes(signer.public_key_bytes())
+    assert sink.anchors() == (anchor,)
+    assert replay.verify_anchor(anchor, public_key)
 
 
 def test_recipient_mismatch_rejected(

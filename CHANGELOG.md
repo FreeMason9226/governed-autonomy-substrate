@@ -6,6 +6,8 @@ maintains a separate **GAS Protocol Version** for wire-format changes.
 
 ## [Unreleased]
 
+- Added trusted replay-anchor verification and documented independently retained
+  attestation evidence for LangChain, MCP, and A2A integrations.
 - Added a signed immutable semantic-version policy registry with SHA-256 content
   verification, lifecycle states, authorization-aware activation/rollback history,
   compare-and-swap revisions, registry API/CLI commands, and local development

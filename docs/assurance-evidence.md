@@ -13,6 +13,10 @@ transparency-log adapter). The included `JSONLAuditAnchorSink` is an adapter
 for separately retained storage, not a WORM service by itself. Each anchor
 contains the frame count, head hash, replay digest, signer key ID, and signature;
 verify it against the managed public key during restoration and investigation.
+`ReplayLog.verify_anchor(anchor, public_key)` verifies both that signature and
+that all checkpoint fields match the current, valid replay state. It intentionally
+returns false after later frames are appended, so retain the checkpointed evidence
+for historical comparisons.
 
 ## SOC 2 and ISO/IEC 27001 evidence
 
