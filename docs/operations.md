@@ -9,7 +9,8 @@ authorization, key rotation, and network policy remain deployment controls.
 
 ## Migrations, backup, and disaster recovery
 
-Apply `POSTGRES_NONCE_SCHEMA` and `POSTGRES_REPLAY_SCHEMA` through a reviewed,
+Apply `POSTGRES_NONCE_SCHEMA`, `POSTGRES_REPLAY_SCHEMA`, and
+`deploy/postgres/migrations/003_ha_sessions_rate_limit.sql` through a reviewed,
 versioned migration tool. Back up replay frames and policy/trust snapshots
 with encryption and retention controls. Restore into an isolated environment,
 verify the hash chain and signatures, then promote only after readiness checks.

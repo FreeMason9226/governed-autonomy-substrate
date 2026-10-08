@@ -1,6 +1,7 @@
 """Governed Autonomy Substrate MVP."""
 
 from .a2a import A2AGuard, A2ATaskDelegation
+from .audit import AuditAnchor, AuditAnchorSink, JSONLAuditAnchorSink
 from .auth.entra import EntraDeviceAuthorizationClient
 from .auth.store import SQLiteIdentityStore
 from .bootstrap import build_demo_service, build_runtime_service
@@ -18,7 +19,7 @@ from .federation import (
 )
 from .governance import GovernanceRuleTranslator
 from .health import health_report
-from .http_api import create_server, parse_server_args
+from .http_api import PostgresOIDCSessionRepository, create_server, parse_server_args
 from .identity import EntraOIDCConfig, ExternalIdentity, OIDCAuthCodeClient, OIDCDiscoveryDocument
 from .issuer import AuthorizationIssuer, PolicyDeniedError
 from .jobs import SQLiteJobStore, run_once
@@ -27,6 +28,7 @@ from .langchain_adapter import GASCallbackHandler, GASExecutionBarrierTool
 from .mcp_gateway import GASMCPGateway, MCPGatewayContext
 from .mesh import GovernanceInput, GovernanceMesh, GovernanceMeshError, GovernanceSourceRegistry
 from .models import GovernanceAuthorizationArtifact, SignedApproval
+from .observability import InMemoryTraceRecorder, TraceContext, TraceRecorder
 from .platform import (
     GovernancePlatform,
     PlatformDeploymentPolicy,
@@ -86,6 +88,9 @@ __all__ = [
 
     # Compliance & Audit
     "ComplianceAuditor",
+    "AuditAnchor",
+    "AuditAnchorSink",
+    "JSONLAuditAnchorSink",
     "ControlPlane",
     "ReplayLog",
     "SQLiteReplayLog",
@@ -104,12 +109,16 @@ __all__ = [
     "MCPGatewayContext",
     "GASExecutionBarrierTool",
     "GASCallbackHandler",
+    "TraceContext",
+    "TraceRecorder",
+    "InMemoryTraceRecorder",
 
     # Runtime bootstrap, HTTP API, and job/storage adapters
     "build_demo_service",
     "build_runtime_service",
     "create_server",
     "parse_server_args",
+    "PostgresOIDCSessionRepository",
     "SQLiteJobStore",
     "PostgresJobStore",
     "POSTGRES_JOBS_SCHEMA",

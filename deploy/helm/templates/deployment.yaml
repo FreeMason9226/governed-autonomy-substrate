@@ -8,11 +8,7 @@ metadata:
   labels:
     {{- include "governed-autonomy.labels" . | nindent 4 }}
 spec:
-  {{- if and .Values.oidc.enabled .Values.oidc.redirectUri }}
-  replicas: 1
-  {{- else }}
   replicas: {{ .Values.replicaCount }}
-  {{- end }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "governed-autonomy.name" . }}

@@ -361,11 +361,17 @@ class GovernancePlatform:
         mesh_inputs: list[GovernanceInput] | None = None,
     ):
         effective_request = dict(request)
-        effective_context = dict(self.identity.context())
+        requested_context = effective_request.get("context", {})
+        if not isinstance(requested_context, dict):
+            raise TypeError("request context must be an object")
+        effective_context = dict(requested_context)
         if context:
             effective_context.update(context)
-        effective_request.setdefault("context", {})
-        effective_request["context"] = {**effective_context, **effective_request["context"]}
+        # Runtime identity is validated outside the request boundary.  It must
+        # therefore win over caller-supplied values, particularly tenant and
+        # subject claims, so an untrusted request cannot cross a tenant boundary.
+        effective_context.update(self.identity.context())
+        effective_request["context"] = effective_context
         if self.principal_registry is not None:
             self.principal_registry.validate_runtime(
                 identity=self.identity,

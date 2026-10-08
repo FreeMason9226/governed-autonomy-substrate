@@ -13,17 +13,23 @@ import threading
 import time
 import uuid
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from http import HTTPStatus
 from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from typing import Any, Protocol
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 from .admin_ui import render_admin_css, render_admin_js, render_admin_ui
 from .auth.store import IdentityStore, PostgresIdentityStore, SQLiteIdentityStore
 from .bootstrap import build_runtime_service
-from .deployment import BoundedRateLimiter, TLSConfig, security_headers
+from .deployment import (
+    BoundedRateLimiter,
+    PostgresRateLimiter,
+    RateLimiter,
+    TLSConfig,
+    security_headers,
+)
 from .errors import AuthorizationError
 from .health import health_report
 from .identity import (
@@ -41,6 +47,7 @@ from .issuer import PolicyDeniedError
 from .jobs import JobStoreError, JobSubmissionStore, SQLiteJobStore
 from .logging_config import configure_logging
 from .mesh import GovernanceInput
+from .observability import TraceContext, TraceRecorder
 from .operator_auth import OperatorKeyStore
 from .platform import RuntimeIdentity
 from .platform_admin import PolicyChangeManager, TrustChangeManager
@@ -84,15 +91,159 @@ class _BrowserSession:
     expires_at: float
 
 
+class OIDCSessionRepository(Protocol):
+    """Shared storage for one-time OIDC state and browser sessions."""
+
+    def save_pending(self, state: str, pending: _PendingOIDCLogin) -> None: ...
+    def consume_pending(self, state: str, now: float) -> _PendingOIDCLogin | None: ...
+    def save_session(self, token: str, session: _BrowserSession) -> None: ...
+    def get_session(self, token: str, now: float) -> _BrowserSession | None: ...
+    def revoke_session(self, token: str) -> None: ...
+
+
+class PostgresOIDCSessionRepository:
+    """PostgreSQL session store for horizontally scaled OIDC browser sign-in."""
+
+    def __init__(self, connection: Any) -> None:
+        self.connection = connection
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS gas_oidc_sessions (
+                    token_hash TEXT PRIMARY KEY,
+                    record_type TEXT NOT NULL CHECK (record_type IN ('pending', 'session')),
+                    payload JSONB NOT NULL,
+                    expires_at TIMESTAMPTZ NOT NULL
+                )
+                """
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS gas_oidc_sessions_expiry_idx "
+                "ON gas_oidc_sessions(expires_at)"
+            )
+            self.connection.commit()
+        finally:
+            cursor.close()
+
+    @staticmethod
+    def _key(token: str) -> str:
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+    def save_pending(self, state: str, pending: _PendingOIDCLogin) -> None:
+        self._save(
+            state,
+            "pending",
+            {
+                "nonce": pending.nonce,
+                "code_verifier": pending.code_verifier,
+                "next_path": pending.next_path,
+            },
+            pending.expires_at,
+        )
+
+    def consume_pending(self, state: str, now: float) -> _PendingOIDCLogin | None:
+        payload = self._consume(state, "pending", now)
+        if payload is None:
+            return None
+        return _PendingOIDCLogin(
+            nonce=str(payload["nonce"]),
+            code_verifier=str(payload["code_verifier"]),
+            expires_at=now + 1,
+            next_path=str(payload["next_path"]),
+        )
+
+    def save_session(self, token: str, session: _BrowserSession) -> None:
+        self._save(token, "session", asdict(session.identity), session.expires_at)
+
+    def get_session(self, token: str, now: float) -> _BrowserSession | None:
+        payload = self._get(token, "session", now)
+        if payload is None:
+            return None
+        payload["roles"] = tuple(payload.get("roles", ()))
+        payload["groups"] = tuple(payload.get("groups", ()))
+        payload["scope"] = dict(payload.get("scope", {}))
+        return _BrowserSession(identity=RuntimeIdentity(**payload), expires_at=now + 1)
+
+    def revoke_session(self, token: str) -> None:
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute(
+                "DELETE FROM gas_oidc_sessions WHERE token_hash=%s AND record_type='session'",
+                (self._key(token),),
+            )
+            self.connection.commit()
+        except Exception:
+            self.connection.rollback()
+            raise
+        finally:
+            cursor.close()
+
+    def _save(self, token: str, record_type: str, payload: dict[str, Any], expires_at: float) -> None:
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute(
+                "INSERT INTO gas_oidc_sessions(token_hash, record_type, payload, expires_at) "
+                "VALUES (%s, %s, %s::jsonb, to_timestamp(%s)) "
+                "ON CONFLICT(token_hash) DO UPDATE SET record_type=EXCLUDED.record_type, "
+                "payload=EXCLUDED.payload, expires_at=EXCLUDED.expires_at",
+                (self._key(token), record_type, json.dumps(payload), expires_at),
+            )
+            self.connection.commit()
+        except Exception:
+            self.connection.rollback()
+            raise
+        finally:
+            cursor.close()
+
+    def _get(self, token: str, record_type: str, now: float) -> dict[str, Any] | None:
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute(
+                "SELECT payload FROM gas_oidc_sessions "
+                "WHERE token_hash=%s AND record_type=%s AND expires_at > to_timestamp(%s)",
+                (self._key(token), record_type, now),
+            )
+            row = cursor.fetchone()
+            return dict(row[0]) if row is not None else None
+        finally:
+            cursor.close()
+
+    def _consume(self, token: str, record_type: str, now: float) -> dict[str, Any] | None:
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute(
+                "DELETE FROM gas_oidc_sessions "
+                "WHERE token_hash=%s AND record_type=%s AND expires_at > to_timestamp(%s) "
+                "RETURNING payload",
+                (self._key(token), record_type, now),
+            )
+            row = cursor.fetchone()
+            self.connection.commit()
+            return dict(row[0]) if row is not None else None
+        except Exception:
+            self.connection.rollback()
+            raise
+        finally:
+            cursor.close()
+
+
 class _OIDCSessionStore:
     """Process-local, bounded, single-use OAuth state and browser sessions."""
 
-    def __init__(self, *, clock: Any = time.time, max_entries: int = 10_000) -> None:
+    def __init__(
+        self,
+        *,
+        clock: Any = time.time,
+        max_entries: int = 10_000,
+        repository: OIDCSessionRepository | None = None,
+    ) -> None:
         self._clock = clock
         self._max_entries = max_entries
         self._lock = threading.RLock()
         self._pending: dict[str, _PendingOIDCLogin] = {}
         self._sessions: dict[str, _BrowserSession] = {}
+        self._repository = repository
 
     def begin_login(self, *, next_path: str) -> tuple[str, str, str]:
         now = self._clock()
@@ -109,6 +260,8 @@ class _OIDCSessionStore:
                 expires_at=now + _LOGIN_STATE_TTL_SECONDS,
                 next_path=next_path,
             )
+            if self._repository is not None:
+                self._repository.save_pending(state, self._pending.pop(state))
             challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest())
             return state, nonce, challenge.rstrip(b"=").decode("ascii")
 
@@ -116,7 +269,11 @@ class _OIDCSessionStore:
         now = self._clock()
         with self._lock:
             self._prune(now)
-            pending = self._pending.pop(state, None)
+            pending = (
+                self._repository.consume_pending(state, now)
+                if self._repository is not None
+                else self._pending.pop(state, None)
+            )
             if pending is None or now >= pending.expires_at:
                 raise IdentityValidationError("OIDC login state is invalid or expired")
             return pending
@@ -137,16 +294,22 @@ class _OIDCSessionStore:
             self._prune(now)
             if len(self._pending) + len(self._sessions) >= self._max_entries:
                 raise IdentityValidationError("OIDC session capacity is exhausted")
-            self._sessions[self._session_key(session_token)] = _BrowserSession(
+            session = _BrowserSession(
                 identity=core_identity,
                 expires_at=expires_at,
             )
+            if self._repository is not None:
+                self._repository.save_session(session_token, session)
+            else:
+                self._sessions[self._session_key(session_token)] = session
         return session_token, max(1, int(expires_at - now))
 
     def get_session(self, session_token: str) -> RuntimeIdentity | None:
         now = self._clock()
         key = self._session_key(session_token)
         with self._lock:
+            if self._repository is not None:
+                return self._repository.get_session(session_token, now)
             session = self._sessions.get(key)
             if session is None:
                 return None
@@ -157,7 +320,10 @@ class _OIDCSessionStore:
 
     def revoke_session(self, session_token: str) -> None:
         with self._lock:
-            self._sessions.pop(self._session_key(session_token), None)
+            if self._repository is not None:
+                self._repository.revoke_session(session_token)
+            else:
+                self._sessions.pop(self._session_key(session_token), None)
 
     def _prune(self, now: float) -> None:
         self._pending = {
@@ -183,6 +349,7 @@ class AuthenticatedAPI:
         oidc_auth_client: OIDCAuthCodeClient | None = None,
         oidc_login_validator: OIDCValidator | None = None,
         oidc_cookie_secure: bool = True,
+        oidc_session_repository: OIDCSessionRepository | None = None,
         operator_token: str | None = None,
         operator_role: str = "gas-admin",
         operator_key_store: OperatorKeyStore | None = None,
@@ -190,6 +357,8 @@ class AuthenticatedAPI:
         job_store: JobSubmissionStore | None = None,
         max_body_bytes: int = 64 * 1024,
         rate_limit: int = 120,
+        rate_limiter: RateLimiter | None = None,
+        tracer: TraceRecorder | None = None,
         cors_origins: Sequence[str] = (),
     ) -> None:
         if not bearer_token and oidc_validator is None:
@@ -209,7 +378,9 @@ class AuthenticatedAPI:
         self.oidc_auth_client = oidc_auth_client
         self.oidc_login_validator = oidc_login_validator
         self.oidc_cookie_secure = oidc_cookie_secure
-        self.oidc_sessions = _OIDCSessionStore() if oidc_auth_client is not None else None
+        self.oidc_sessions = (
+            _OIDCSessionStore(repository=oidc_session_repository) if oidc_auth_client is not None else None
+        )
         self.operator_token = operator_token
         self.operator_role = operator_role
         self.operator_key_store = operator_key_store
@@ -217,7 +388,8 @@ class AuthenticatedAPI:
         self.job_store = job_store
         self.max_body_bytes = max_body_bytes
         self.cors_origins = frozenset(o.rstrip("/") for o in cors_origins if o)
-        self.rate_limiter = BoundedRateLimiter(rate_limit)
+        self.rate_limiter = rate_limiter or BoundedRateLimiter(rate_limit)
+        self.tracer = tracer
         if (
             self.service.policy_change_manager is not None
             and self.service.policy_change_manager.actor_audit_hook is None
@@ -766,11 +938,24 @@ class AuthenticatedAPI:
                 self.send_header("Content-Length", str(len(encoded)))
                 self.send_header("X-Request-ID", self._rid)
                 self.send_header("X-API-Version", API_VERSION)
+                trace_context = api._trace_context(self)
+                if trace_context is not None:
+                    self.send_header("traceparent", trace_context.traceparent())
                 self._send_cors()
                 for k, v in security_headers().items():
                     self.send_header(k, v)
                 self.end_headers()
                 self.wfile.write(encoded)
+                api._record_trace(
+                    "gas.http.response",
+                    {
+                        "http.request.method": self.command,
+                        "url.path": urlsplit(self.path).path,
+                        "http.response.status_code": int(status),
+                        "request.id": self._rid,
+                    },
+                    trace_context,
+                )
 
             def _send_static(self, body: bytes, content_type: str) -> None:
                 """Serve a same-origin admin UI asset with a relaxed, still-strict CSP.
@@ -833,6 +1018,18 @@ class AuthenticatedAPI:
         for key, value in security_headers().items():
             request.send_header(key, value)
         request.end_headers()
+
+    def _trace_context(self, request: BaseHTTPRequestHandler) -> TraceContext | None:
+        return TraceContext.from_traceparent(request.headers.get("traceparent"))
+
+    def _record_trace(
+        self,
+        name: str,
+        attributes: dict[str, Any],
+        context: TraceContext | None,
+    ) -> None:
+        if self.tracer is not None:
+            self.tracer.record(name, attributes, context)
 
     def _handle_oidc_callback(self, request: BaseHTTPRequestHandler) -> None:
         if (
@@ -1567,11 +1764,14 @@ def create_server(
     oidc_auth_client: OIDCAuthCodeClient | None = None,
     oidc_login_validator: OIDCValidator | None = None,
     oidc_cookie_secure: bool = True,
+    oidc_session_repository: OIDCSessionRepository | None = None,
     operator_token: str | None = None,
     operator_role: str = "gas-admin",
     operator_key_store: OperatorKeyStore | None = None,
     identity_store: IdentityStore | None = None,
     job_store: JobSubmissionStore | None = None,
+    rate_limiter: RateLimiter | None = None,
+    tracer: TraceRecorder | None = None,
     cors_origins: Sequence[str] = (),
 ) -> ThreadingHTTPServer:
     server = ThreadingHTTPServer(
@@ -1584,6 +1784,7 @@ def create_server(
             oidc_auth_client=oidc_auth_client,
             oidc_login_validator=oidc_login_validator,
             oidc_cookie_secure=oidc_cookie_secure,
+            oidc_session_repository=oidc_session_repository,
             operator_token=operator_token,
             operator_role=operator_role,
             operator_key_store=operator_key_store,
@@ -1591,6 +1792,8 @@ def create_server(
             job_store=job_store,
             max_body_bytes=max_body_bytes,
             rate_limit=rate_limit,
+            rate_limiter=rate_limiter,
+            tracer=tracer,
             cors_origins=cors_origins,
         ).handler(),
     )
@@ -1714,6 +1917,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         job_store = PostgresJobStore(job_connection)
     else:
         job_store = None
+    ha_connection = None
+    oidc_session_repository = None
+    rate_limiter = None
+    if os.environ.get("DATABASE_URL"):
+        try:
+            import psycopg
+        except ImportError as exc:
+            raise SystemExit("install the postgres extra: pip install .[postgres]") from exc
+        ha_connection = psycopg.connect(os.environ["DATABASE_URL"])
+        rate_limiter = PostgresRateLimiter(ha_connection, limit=args.rate_limit)
+        if oidc_auth_client is not None:
+            oidc_session_repository = PostgresOIDCSessionRepository(ha_connection)
     server = create_server(
         service,
         job_store=job_store,
@@ -1723,6 +1938,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         oidc_only=oidc_only,
         oidc_auth_client=oidc_auth_client,
         oidc_cookie_secure=not getattr(args, "oidc_cookie_insecure", False),
+        oidc_session_repository=oidc_session_repository,
         operator_token=args.operator_token,
         operator_role=args.operator_role,
         operator_key_store=operator_key_store,
@@ -1731,6 +1947,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         port=args.port,
         max_body_bytes=args.max_body_bytes,
         rate_limit=args.rate_limit,
+        rate_limiter=rate_limiter,
     )
     print(f"Serving Governed Autonomy HTTP API on http://{args.host}:{server.server_address[1]}")
     try:
@@ -1750,6 +1967,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 job_store.close()
             elif job_connection is not None:
                 job_connection.close()
+        if ha_connection is not None:
+            ha_connection.close()
     return 0
 
 

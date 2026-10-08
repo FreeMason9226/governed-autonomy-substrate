@@ -7,6 +7,11 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
+from typing import Any, Protocol
+
+
+class RateLimiter(Protocol):
+    def allow(self, client: str) -> bool: ...
 
 
 @dataclass(frozen=True)
@@ -40,6 +45,73 @@ class BoundedRateLimiter:
             hits.append(now)
             self._hits[client] = hits
             return True
+
+
+class PostgresRateLimiter:
+    """Shared sliding-window rate limiter for stateless API replicas."""
+
+    def __init__(
+        self,
+        connection: Any,
+        *,
+        limit: int = 60,
+        window_seconds: int = 60,
+        namespace: str = "http",
+    ) -> None:
+        if limit <= 0 or window_seconds <= 0 or not namespace:
+            raise ValueError("rate limiter bounds and namespace must be positive")
+        self.connection = connection
+        self.limit = limit
+        self.window_seconds = window_seconds
+        self.namespace = namespace
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS gas_rate_limit_hits (
+                    namespace TEXT NOT NULL,
+                    client_key TEXT NOT NULL,
+                    observed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS gas_rate_limit_window_idx "
+                "ON gas_rate_limit_hits(namespace, client_key, observed_at)"
+            )
+            self.connection.commit()
+        finally:
+            cursor.close()
+
+    def allow(self, client: str) -> bool:
+        if not client:
+            return False
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"{self.namespace}:{client}",))
+            cursor.execute(
+                "DELETE FROM gas_rate_limit_hits WHERE observed_at < "
+                "CURRENT_TIMESTAMP - (%s * INTERVAL '1 second')",
+                (self.window_seconds,),
+            )
+            cursor.execute(
+                "SELECT count(*) FROM gas_rate_limit_hits "
+                "WHERE namespace=%s AND client_key=%s",
+                (self.namespace, client),
+            )
+            allowed = int(cursor.fetchone()[0]) < self.limit
+            if allowed:
+                cursor.execute(
+                    "INSERT INTO gas_rate_limit_hits(namespace, client_key) VALUES (%s, %s)",
+                    (self.namespace, client),
+                )
+            self.connection.commit()
+            return allowed
+        except Exception:
+            self.connection.rollback()
+            return False
+        finally:
+            cursor.close()
 
 
 def correlation_id(value: str | None = None) -> str:
