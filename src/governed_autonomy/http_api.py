@@ -21,6 +21,7 @@ from typing import Any, Protocol
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 from .admin_ui import render_admin_css, render_admin_js, render_admin_ui
+from .audit import AuditAnchor
 from .auth.store import IdentityStore, PostgresIdentityStore, SQLiteIdentityStore
 from .bootstrap import build_runtime_service
 from .deployment import (
@@ -61,7 +62,9 @@ from .rbac import Role
 from .service import GovernedService
 
 API_VERSION = "1"
-_VERSIONED_GET = frozenset({"/health", "/livez", "/readyz", "/startupz", "/audit", "/openapi.json"})
+_VERSIONED_GET = frozenset(
+    {"/health", "/livez", "/readyz", "/startupz", "/audit", "/audit/replay", "/openapi.json"}
+)
 
 
 def _unversioned(route: str) -> str:
@@ -560,6 +563,9 @@ class AuthenticatedAPI:
                 if route == "/audit":
                     self._send(HTTPStatus.OK, api.service.audit_report())
                     return
+                if route == "/audit/replay":
+                    self._send(HTTPStatus.OK, {"integrity": api.replay_integrity()})
+                    return
                 if route == "/admin/policies":
                     self._send(HTTPStatus.OK, {"policies": api.service.policies.to_dict()})
                     return
@@ -692,6 +698,39 @@ class AuthenticatedAPI:
                         HTTPStatus.FORBIDDEN,
                         {"error": "role authorization required"},
                     )
+                    return
+                if route == "/audit/replay/certify":
+                    try:
+                        certification = api.certify_replay_anchor(api._read_json(self))
+                    except ValueError:
+                        self._send(HTTPStatus.BAD_REQUEST, {"error": "invalid replay anchor"})
+                        return
+                    except RuntimeError as exc:
+                        self._send(
+                            HTTPStatus.SERVICE_UNAVAILABLE,
+                            {"error": str(exc) or "replay certification unavailable"},
+                        )
+                        return
+                    self._send(
+                        HTTPStatus.OK if certification["certified"] else HTTPStatus.CONFLICT,
+                        certification,
+                    )
+                    return
+                if route == "/admin/replay/anchor":
+                    try:
+                        if api._read_json(self):
+                            raise ValueError("replay anchor requests must be empty")
+                        self._send(
+                            HTTPStatus.CREATED,
+                            api.create_replay_anchor(actor_id=api._actor_id(self)).to_dict(),
+                        )
+                    except (TypeError, ValueError):
+                        self._send(HTTPStatus.BAD_REQUEST, {"error": "invalid replay anchor request"})
+                    except RuntimeError as exc:
+                        self._send(
+                            HTTPStatus.SERVICE_UNAVAILABLE,
+                            {"error": str(exc) or "replay anchor unavailable"},
+                        )
                     return
                 if route.startswith("/admin/proposals"):
                     self._handle_admin_proposals_post(route)
@@ -1419,7 +1458,9 @@ class AuthenticatedAPI:
 
     @staticmethod
     def _api_required_roles(method: str, route: str) -> frozenset[Role]:
-        if method == "GET" and route in {"/audit", "/api/v1/audit"}:
+        if method == "GET" and route in {"/audit", "/api/v1/audit", "/audit/replay"}:
+            return frozenset({Role.AUDITOR})
+        if method == "POST" and route == "/audit/replay/certify":
             return frozenset({Role.AUDITOR})
         if method == "POST" and route in {
             "/authorize",
@@ -1520,6 +1561,8 @@ class AuthenticatedAPI:
         ):
             return frozenset({Role.PLATFORM_ADMIN})
         if route == "/admin/identities/role-assignments":
+            return frozenset({Role.PLATFORM_ADMIN})
+        if route == "/admin/replay/anchor":
             return frozenset({Role.PLATFORM_ADMIN})
         if route == "/admin/jobs":
             return frozenset({Role.OPERATOR})
@@ -1772,6 +1815,36 @@ class AuthenticatedAPI:
     def trust_snapshot(self) -> dict[str, Any]:
         trust_store = self.service.boundary.trust_store
         return trust_store.to_dict() if trust_store is not None else {"keys": {}, "revoked": []}
+
+    def replay_integrity(self) -> dict[str, Any]:
+        return self.service.boundary.replay_log.verify_integrity()
+
+    def create_replay_anchor(self, *, actor_id: str) -> AuditAnchor:
+        signer = self.service.issuer.issuer
+        self.service.record_governance_event(
+            "replay.anchor_created",
+            signer.key_id,
+            actor_id=actor_id,
+        )
+        return self.service.boundary.replay_log.create_anchor(signer)
+
+    def certify_replay_anchor(self, payload: dict[str, Any]) -> dict[str, Any]:
+        anchor = AuditAnchor.from_dict(payload)
+        trust_store = self.service.boundary.trust_store
+        if trust_store is None:
+            raise RuntimeError("replay certification requires a trust store")
+        public_key = trust_store.resolve(anchor.signer_key_id)
+        if public_key is None:
+            return {
+                "certified": False,
+                "integrity": self.replay_integrity(),
+                "reason": "anchor_signer_untrusted",
+                "signer_key_id": anchor.signer_key_id,
+            }
+        certification = self.service.boundary.replay_log.certify_anchor(anchor, public_key)
+        if not certification["certified"]:
+            certification["reason"] = "replay_state_mismatch"
+        return certification
 
     @staticmethod
     def _policy_record_payload(record: StoredPolicy) -> dict[str, Any]:
@@ -2182,6 +2255,33 @@ API_SCHEMA = {
                 "properties": {"ok": {"type": "boolean"}, "status": {"type": "string"}},
                 "additionalProperties": True,
             },
+            "ReplayAnchor": {
+                "type": "object",
+                "required": [
+                    "replay_digest",
+                    "head_hash",
+                    "frame_count",
+                    "signer_key_id",
+                    "signature",
+                ],
+                "properties": {
+                    "replay_digest": {"type": "string"},
+                    "head_hash": {"type": "string"},
+                    "frame_count": {"type": "integer", "minimum": 0},
+                    "signer_key_id": {"type": "string"},
+                    "signature": {"type": "string"},
+                },
+            },
+            "ReplayCertification": {
+                "type": "object",
+                "required": ["certified", "integrity", "signer_key_id"],
+                "properties": {
+                    "certified": {"type": "boolean"},
+                    "integrity": {"type": "object", "additionalProperties": True},
+                    "reason": {"type": "string"},
+                    "signer_key_id": {"type": "string"},
+                },
+            },
             "JobSubmission": {
                 "type": "object",
                 "required": ["artifact", "idempotency_key"],
@@ -2340,6 +2440,76 @@ API_SCHEMA = {
             }
         },
         "/audit": {"get": {"responses": {"200": {"description": "Audit summary"}}}},
+        "/audit/replay": {
+            "get": {
+                "security": [{"bearerAuth": []}],
+                "responses": {
+                    "200": {
+                        "description": "Current replay integrity evidence",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": ["integrity"],
+                                    "properties": {
+                                        "integrity": {
+                                            "type": "object",
+                                            "additionalProperties": True,
+                                        }
+                                    },
+                                }
+                            }
+                        },
+                    }
+                },
+            }
+        },
+        "/audit/replay/certify": {
+            "post": {
+                "security": [{"bearerAuth": []}],
+                "requestBody": {
+                    "required": True,
+                    "content": {
+                        "application/json": {"schema": {"$ref": "#/components/schemas/ReplayAnchor"}}
+                    },
+                },
+                "responses": {
+                    "200": {
+                        "description": "Anchor certifies the current replay state",
+                        "content": {
+                            "application/json": {
+                                "schema": {"$ref": "#/components/schemas/ReplayCertification"}
+                            }
+                        },
+                    },
+                    "400": {"description": "Invalid replay anchor"},
+                    "409": {"description": "Anchor does not certify the current replay state"},
+                    "503": {"description": "Replay trust store is unavailable"},
+                },
+            }
+        },
+        "/admin/replay/anchor": {
+            "post": {
+                "security": [{"bearerAuth": []}],
+                "description": "Create a signed replay checkpoint for independent retention.",
+                "requestBody": {
+                    "required": True,
+                    "content": {"application/json": {"schema": {"type": "object", "maxProperties": 0}}},
+                },
+                "responses": {
+                    "201": {
+                        "description": "Signed replay anchor; retain it outside the runtime system.",
+                        "content": {
+                            "application/json": {
+                                "schema": {"$ref": "#/components/schemas/ReplayAnchor"}
+                            }
+                        },
+                    },
+                    "400": {"description": "Invalid replay anchor request"},
+                    "503": {"description": "Replay anchor signer is unavailable"},
+                },
+            }
+        },
         "/admin/jobs": {
             "post": {
                 "security": [{"bearerAuth": []}],
@@ -2648,7 +2818,15 @@ def _complete_schema(schema: dict[str, Any]) -> None:
                     responses.setdefault(
                         status, {"description": text, "content": json_ref("Error")}
                     )
-    for path in ("/health", "/livez", "/readyz", "/startupz", "/audit", "/openapi.json"):
+    for path in (
+        "/health",
+        "/livez",
+        "/readyz",
+        "/startupz",
+        "/audit",
+        "/audit/replay",
+        "/openapi.json",
+    ):
         schema["paths"].setdefault(f"/api/v1{path}", schema["paths"][path])
 
 

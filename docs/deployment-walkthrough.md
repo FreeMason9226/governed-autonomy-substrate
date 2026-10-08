@@ -112,6 +112,10 @@ CORS is off by default. To let a web page call the API, set `GOVERNED_AUTONOMY_C
 - `/livez`, `/readyz`, `/startupz` for probes; `/health` for replay and trust integrity.
 - `/admin/metrics` (Prometheus) feeds the ServiceMonitor and alerts in `deploy/observability/`.
 - `gas replay verify <file>` checks an exported log offline.
+- Retain `POST /admin/replay/anchor` output in the independent Object Lock
+  store, then use `POST /audit/replay/certify` (or `gas replay certify`) to
+  certify a rollback or restored replay state. See the operations runbook for
+  the required audit role and retention model.
 
 ## Troubleshooting
 

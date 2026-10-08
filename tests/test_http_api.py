@@ -141,6 +141,51 @@ def test_http_api_authorizes_executes_reports_health_and_audit(server):
     assert audit["audit_summary"]["execution_count"] == 1
 
 
+def test_http_api_replay_anchor_certifies_the_current_replay_state():
+    service, _, replay = build_demo_service()
+    instance = create_server(
+        service,
+        bearer_token="test-token",
+        operator_token="operator-token",
+    )
+    thread = threading.Thread(target=instance.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, anchor = request(
+            instance,
+            "POST",
+            "/admin/replay/anchor",
+            {},
+            token="operator-token",
+        )
+        assert status == 201
+        assert anchor["signer_key_id"] == service.issuer.issuer.key_id
+
+        status, integrity = request(instance, "GET", "/audit/replay")
+        assert status == 200
+        assert integrity["integrity"]["frame_count"] == anchor["frame_count"]
+
+        status, certification = request(instance, "POST", "/audit/replay/certify", anchor)
+        assert status == 200
+        assert certification["certified"] is True
+        assert certification["integrity"]["replay_digest"] == anchor["replay_digest"]
+
+        replay.append("after-anchor", {"type": "governance", "event": "changed"})
+        status, certification = request(instance, "POST", "/audit/replay/certify", anchor)
+        assert status == 409
+        assert certification["certified"] is False
+        assert certification["reason"] == "replay_state_mismatch"
+
+        anchor["signer_key_id"] = "untrusted-anchor-signer"
+        status, certification = request(instance, "POST", "/audit/replay/certify", anchor)
+        assert status == 409
+        assert certification["reason"] == "anchor_signer_untrusted"
+    finally:
+        instance.shutdown()
+        instance.server_close()
+        thread.join(timeout=2)
+
+
 def test_control_room_snapshot_combines_governance_and_runtime_state():
     service, _, _ = build_demo_service()
     instance = create_server(
@@ -1108,6 +1153,10 @@ def test_http_api_enforces_role_specific_admin_routes():
         assert request(instance, "POST", "/execute", {}, token="auditor")[0] == 403
         assert request(instance, "GET", "/audit", token="auditor")[0] == 200
         assert request(instance, "GET", "/audit", token="operator")[0] == 403
+        assert request(instance, "GET", "/audit/replay", token="auditor")[0] == 200
+        assert request(instance, "POST", "/audit/replay/certify", {}, token="auditor")[0] == 400
+        assert request(instance, "POST", "/admin/replay/anchor", {}, token="auditor")[0] == 403
+        assert request(instance, "POST", "/admin/replay/anchor", {}, token="platform-admin")[0] == 201
         assert (
             request(
                 instance,
