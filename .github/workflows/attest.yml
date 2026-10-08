@@ -1,0 +1,57 @@
+name: PR attestation
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  attest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Install project dependencies
+        run: python -m pip install -e .
+      - name: Create demo policy result
+        run: |
+          python - <<'PY'
+          import json
+          with open("policy_result.json", "w", encoding="utf-8") as result_file:
+              json.dump({
+                  "policy_id": "demo-policy-v1",
+                  "risk_score": 8,
+                  "rationale": "Mock policy checks passed",
+              }, result_file)
+          PY
+      - name: Generate and verify PR attestation
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_ACTOR: ${{ github.actor }}
+          PR_COMMIT: ${{ github.event.pull_request.head.sha }}
+        run: |
+          POLICY_ID="$(python -c 'import json; print(json.load(open("policy_result.json", encoding="utf-8"))["policy_id"])')"
+          RISK_SCORE="$(python -c 'import json; print(json.load(open("policy_result.json", encoding="utf-8"))["risk_score"])')"
+          RATIONALE="$(python -c 'import json; print(json.load(open("policy_result.json", encoding="utf-8"))["rationale"])')"
+          ./scripts/attest.sh generate \
+            --pr "$PR_NUMBER" \
+            --actor "$PR_ACTOR" \
+            --approver "demo-reviewer (simulated)" \
+            --commit "$PR_COMMIT" \
+            --key attest/demo_key.pem \
+            --policy-id "$POLICY_ID" \
+            --risk-score "$RISK_SCORE" \
+            --rationale "$RATIONALE" \
+            --out attest/output.json
+      - name: Upload signed attestation
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pr-attestation
+          path: |
+            attest/output.json
+            audit/ledger.jsonl
+          if-no-files-found: error
