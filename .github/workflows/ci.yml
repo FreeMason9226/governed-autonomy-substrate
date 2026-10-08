@@ -45,6 +45,10 @@ jobs:
           src/governed_autonomy/crypto.py
           src/governed_autonomy/health.py
           src/governed_autonomy/replay.py
+          src/governed_autonomy/audit.py
+          src/governed_autonomy/compliance.py
+          src/governed_autonomy/deployment.py
+          src/governed_autonomy/observability.py
           --ignore-missing-imports
       - name: Verify mirrored workflow sources
         run: |
@@ -341,7 +345,7 @@ jobs:
 
   release:
     name: Create GitHub release
-    needs: [publish, production-verification]
+    needs: [publish, production-verification, release-provenance]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -356,3 +360,23 @@ jobs:
           files: |
             dist/*
             sbom-*.cdx.json
+
+  release-provenance:
+    name: Attest release artifacts
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      attestations: write
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-artifacts
+      - name: Generate release checksums
+        run: sha256sum dist/* sbom-*.cdx.json > SHA256SUMS
+      - name: Attest release checksums
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: SHA256SUMS
