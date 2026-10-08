@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Protocol
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -15,6 +16,10 @@ class Signer(Protocol):
 
     def sign(self, payload: bytes) -> str: ...
     def public_key_bytes(self) -> bytes: ...
+
+
+class KMSBackend(Protocol):
+    def sign(self, key_id: str, payload: bytes) -> bytes: ...
 
 
 class LocalEd25519Signer:
@@ -34,7 +39,9 @@ class LocalEd25519Signer:
 class RemoteSigner:
     """Provider boundary. The callback receives bytes only; no private key is accepted."""
 
-    def __init__(self, key_id: str, sign_callback, public_key: bytes) -> None:
+    def __init__(
+        self, key_id: str, sign_callback: Callable[[bytes], bytes], public_key: bytes
+    ) -> None:
         if not key_id or not callable(sign_callback) or not public_key:
             raise ValueError("key_id, callback, and public_key are required")
         self.key_id, self._callback, self._public_key = key_id, sign_callback, bytes(public_key)
@@ -55,7 +62,7 @@ class KMSSigner:
     def __init__(
         self,
         key_id: str,
-        kms_backend,
+        kms_backend: KMSBackend,
         *,
         public_key: bytes | None = None,
     ) -> None:

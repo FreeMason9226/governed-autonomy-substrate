@@ -28,6 +28,6 @@ test_risk_score_for_each_category if {
 }
 
 test_risk_score_combines_categories if {
-	data.policy.risk_score == 8 with input as {"changed_files": ["helm/values.yaml", "package.json"]}
-	data.policy.rules_triggered == ["infra-path-change", "dependency-bump"] with input as {"changed_files": ["helm/values.yaml", "package.json"]}
+	data.policy.risk_score == 8 with input as {"changed_files": ["deploy/helm/values.yaml", "poetry.lock"]}
+	data.policy.rules_triggered == ["infra-path-change", "dependency-bump"] with input as {"changed_files": ["deploy/helm/values.yaml", "poetry.lock"]}
 }
