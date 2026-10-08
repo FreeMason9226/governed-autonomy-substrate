@@ -3,8 +3,10 @@ import threading
 from http.client import HTTPConnection
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from governed_autonomy import (
+    DevelopmentPolicySigner,
     GovernanceInput,
     GovernanceSourceRegistry,
     KeyPair,
@@ -12,6 +14,7 @@ from governed_autonomy import (
     create_server,
     parse_server_args,
 )
+from governed_autonomy.policy_registry import StaticPolicyVerifier, VersionedPolicyRegistry
 
 
 @pytest.fixture
@@ -38,6 +41,74 @@ def request(server, method, path, payload=None, token="test-token"):
     data = json.loads(response.read())
     connection.close()
     return response.status, data
+
+
+def test_http_api_versioned_policy_registry_lifecycle():
+    service, _, _ = build_demo_service()
+    signer = DevelopmentPolicySigner("policy-authority")
+    registry = VersionedPolicyRegistry(
+        verifier=StaticPolicyVerifier(
+            {signer.key_id: Ed25519PublicKey.from_public_bytes(signer.public_key_bytes())}
+        )
+    )
+    instance = create_server(
+        service,
+        bearer_token="test-token",
+        operator_token="operator-token",
+        versioned_policy_registry=registry,
+        policy_registry_signer=signer,
+    )
+    thread = threading.Thread(target=instance.serve_forever, daemon=True)
+    thread.start()
+    policy = {
+        "id": "deployment-policy",
+        "name": "Deployment policy",
+        "version": "1.0.0",
+        "description": "Allows governed deployments",
+    }
+    try:
+        status, published = request(
+            instance,
+            "POST",
+            "/admin/policy-registry/publish",
+            {"policy": policy},
+            token="operator-token",
+        )
+        assert status == 201
+        assert published["content_digest"]
+
+        status, verified = request(
+            instance,
+            "GET",
+            "/admin/policy-registry/deployment-policy/1.0.0/verify",
+            token="operator-token",
+        )
+        assert status == 200 and verified["valid"] is True
+
+        status, activated = request(
+            instance,
+            "POST",
+            "/admin/policy-registry/activate",
+            {
+                "policy_id": "deployment-policy",
+                "version": "1.0.0",
+                "reason": "initial rollout",
+                "expected_revision": 0,
+            },
+            token="operator-token",
+        )
+        assert status == 200 and activated["revision"] == 1
+        status, active = request(
+            instance,
+            "GET",
+            "/admin/policy-registry/deployment-policy/active",
+            token="operator-token",
+        )
+        assert status == 200 and active["version"] == "1.0.0"
+    finally:
+        instance.shutdown()
+        instance.server_close()
+        thread.join(timeout=2)
 
 
 def test_http_api_authorizes_executes_reports_health_and_audit(server):
@@ -103,9 +174,7 @@ def test_control_room_snapshot_combines_governance_and_runtime_state():
             },
         )
 
-        status, snapshot = request(
-            instance, "GET", "/admin/control-room", token="operator-token"
-        )
+        status, snapshot = request(instance, "GET", "/admin/control-room", token="operator-token")
         assert status == 200
         assert snapshot["analytics"]["policy_count"] >= 1
         assert snapshot["analytics"]["asset_count"] == 2
@@ -320,9 +389,7 @@ def _admin_server(*, required_approvals=1):
         trust_store=service.boundary.trust_store,
         required_approvals=required_approvals,
     )
-    instance = create_server(
-        service, bearer_token="test-token", operator_token="operator-token"
-    )
+    instance = create_server(service, bearer_token="test-token", operator_token="operator-token")
     thread = threading.Thread(target=instance.serve_forever, daemon=True)
     thread.start()
     return instance, thread, proposer, reviewer
@@ -541,7 +608,9 @@ def test_http_api_admin_proposal_supports_mesh_governance_policy_fields():
 def test_http_api_admin_activate_unknown_proposal_returns_404():
     instance, thread, _proposer, _reviewer = _admin_server()
     try:
-        status, result = _admin_request(instance, "POST", "/admin/proposals/does-not-exist/activate")
+        status, result = _admin_request(
+            instance, "POST", "/admin/proposals/does-not-exist/activate"
+        )
         assert status == 404
         assert "does-not-exist" in result["error"]
     finally:
@@ -691,9 +760,7 @@ def test_http_api_operator_keys_are_revocable_and_governance_events_attribute_ac
         return response.status, result
 
     try:
-        status, first = operator_request(
-            "POST", "/admin/operator-keys", {"operator_id": "alice"}
-        )
+        status, first = operator_request("POST", "/admin/operator-keys", {"operator_id": "alice"})
         assert status == 201
         assert first["token"].startswith("gasop_")
         with sqlite3.connect(tmp_path / "operator-keys.sqlite") as connection:
@@ -711,14 +778,10 @@ def test_http_api_operator_keys_are_revocable_and_governance_events_attribute_ac
         )
         assert status == 403
 
-        status, _ = operator_request(
-            "GET", "/admin/operator-keys", token=first["token"]
-        )
+        status, _ = operator_request("GET", "/admin/operator-keys", token=first["token"])
         assert status == 403
 
-        status, _ = operator_request(
-            "GET", "/admin/metrics", token=first["token"]
-        )
+        status, _ = operator_request("GET", "/admin/metrics", token=first["token"])
         assert status == 200
 
         status, _ = operator_request("GET", "/health", token=first["token"])
@@ -827,9 +890,7 @@ def test_http_api_oidc_subject_is_recorded_as_governance_actor():
 
         status, audit = oidc_request("GET", "/admin/governance-log")
         assert status == 200
-        assert audit["events"][0]["actor_id"] == (
-            "oidc:https://identity.example:operator-42"
-        )
+        assert audit["events"][0]["actor_id"] == ("oidc:https://identity.example:operator-42")
     finally:
         instance.shutdown()
         instance.server_close()
@@ -859,6 +920,7 @@ def test_http_api_admin_trust_revoke_unknown_key_returns_404():
         instance.shutdown()
         instance.server_close()
         thread.join(timeout=2)
+
 
 def test_admin_jobs_endpoint_enqueues_and_is_idempotent():
     from governed_autonomy import SQLiteJobStore
@@ -896,7 +958,9 @@ def test_admin_jobs_endpoint_enqueues_and_is_idempotent():
         status, state = request(instance, "GET", f"/admin/jobs/{first['job_id']}")
         assert status == 200 and state["status"] == "queued"
         assert state["attempts"] == 0 and "payload" not in state
-        status, _ = request(instance, "POST", "/admin/jobs", {"artifact": "no", "idempotency_key": "k"})
+        status, _ = request(
+            instance, "POST", "/admin/jobs", {"artifact": "no", "idempotency_key": "k"}
+        )
         assert status == 400
         claimed = store.claim()
         assert claimed is not None
@@ -957,12 +1021,16 @@ def test_http_api_cors_is_opt_in_and_origin_scoped():
         )
         assert (status, origin) == (200, allowed)
         assert response.getheader("Vary") == "Origin"
-        assert call(cors, "GET", "https://evil.example.com", {"Authorization": "Bearer test-token"})[1] is None
+        assert (
+            call(cors, "GET", "https://evil.example.com", {"Authorization": "Bearer test-token"})[1]
+            is None
+        )
         assert call(plain, "GET", allowed, {"Authorization": "Bearer test-token"})[1] is None
     finally:
         for s in servers:
             s.shutdown()
             s.server_close()
+
 
 def test_http_api_auditor_role_is_read_only():
     from governed_autonomy import ExternalIdentity
@@ -1029,7 +1097,10 @@ def test_http_api_enforces_role_specific_admin_routes():
 
     try:
         assert request(instance, "GET", "/admin/policies", token="policy-admin")[0] == 200
-        assert request(instance, "POST", "/admin/proposals/prepare", {}, token="policy-admin")[0] == 404
+        assert (
+            request(instance, "POST", "/admin/proposals/prepare", {}, token="policy-admin")[0]
+            == 404
+        )
         assert request(instance, "POST", "/admin/proposals/prepare", {}, token="operator")[0] == 403
         assert request(instance, "POST", "/authorize", {}, token="operator")[0] == 400
         assert request(instance, "POST", "/execute", {}, token="operator")[0] == 400
@@ -1037,38 +1108,50 @@ def test_http_api_enforces_role_specific_admin_routes():
         assert request(instance, "POST", "/execute", {}, token="auditor")[0] == 403
         assert request(instance, "GET", "/audit", token="auditor")[0] == 200
         assert request(instance, "GET", "/audit", token="operator")[0] == 403
-        assert request(
-            instance,
-            "POST",
-            "/admin/proposals/proposal-1/prepare-approval",
-            {},
-            token="approver",
-        )[0] == 404
-        assert request(
-            instance,
-            "POST",
-            "/admin/proposals/proposal-1/activate",
-            {},
-            token="approver",
-        )[0] == 403
-        assert request(
-            instance,
-            "POST",
-            "/admin/proposals/proposal-1/approve",
-            {},
-            token="policy-admin",
-        )[0] == 403
+        assert (
+            request(
+                instance,
+                "POST",
+                "/admin/proposals/proposal-1/prepare-approval",
+                {},
+                token="approver",
+            )[0]
+            == 404
+        )
+        assert (
+            request(
+                instance,
+                "POST",
+                "/admin/proposals/proposal-1/activate",
+                {},
+                token="approver",
+            )[0]
+            == 403
+        )
+        assert (
+            request(
+                instance,
+                "POST",
+                "/admin/proposals/proposal-1/approve",
+                {},
+                token="policy-admin",
+            )[0]
+            == 403
+        )
         assert request(instance, "GET", "/admin/trust", token="auditor")[0] == 200
         assert request(instance, "POST", "/admin/jobs", {}, token="auditor")[0] == 403
         assert request(instance, "POST", "/admin/jobs", {}, token="operator")[0] == 503
         assert request(instance, "GET", "/admin/operator-keys", token="platform-admin")[0] == 503
-        assert request(
-            instance,
-            "POST",
-            "/admin/trust/keys/prepare",
-            {},
-            token="platform-admin",
-        )[0] == 404
+        assert (
+            request(
+                instance,
+                "POST",
+                "/admin/trust/keys/prepare",
+                {},
+                token="platform-admin",
+            )[0]
+            == 404
+        )
     finally:
         instance.shutdown()
         instance.server_close()
@@ -1081,7 +1164,9 @@ def test_json_log_formatter_emits_extras():
 
     from governed_autonomy.logging_config import JsonFormatter
 
-    record = _logging.LogRecord("governed_autonomy.access", _logging.INFO, "", 0, "request", None, None)
+    record = _logging.LogRecord(
+        "governed_autonomy.access", _logging.INFO, "", 0, "request", None, None
+    )
     record.status = "200"
     out = _json.loads(JsonFormatter().format(record))
     assert out["message"] == "request" and out["status"] == "200" and out["level"] == "INFO"

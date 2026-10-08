@@ -6,6 +6,10 @@ maintains a separate **GAS Protocol Version** for wire-format changes.
 
 ## [Unreleased]
 
+- Added a signed immutable semantic-version policy registry with SHA-256 content
+  verification, lifecycle states, authorization-aware activation/rollback history,
+  compare-and-swap revisions, registry API/CLI commands, and local development
+  signer/verifier boundaries.
 - Added an AWS KMS runtime signer configuration using the AWS credential chain and Helm service-account workload identity; the KMS deployment path does not inject raw issuer private keys.
 - Pull requests now build and scan the package/container, audit installed project dependencies, and check source and container vulnerabilities. Added a 75% overall coverage floor.
 - Aligned the OPA pull-request risk policy with the Python/deployment layout and added a CI check to detect drift in mirrored workflow sources.

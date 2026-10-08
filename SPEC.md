@@ -314,6 +314,25 @@ authority.
 - A registry MUST reject a manifest whose signature does not verify against a
   trusted issuer key.
 
+### 7.4 Immutable semantic-version registry
+
+The optional policy-document registry uses the strict JSON policy schema and
+Semantic Versioning 2.0. A published `(policy_id, version)` pair is write-once:
+duplicate publication MUST fail, and changing content requires a new version.
+The registry computes SHA-256 over Canonical JSON policy content and MUST verify
+that digest each time it loads a record.
+
+The publication signature covers canonical policy content, policy ID, semantic
+version, content digest, record schema version, signer identity, algorithm, and
+UTC signing timestamp; the signature field itself is excluded. Version records
+support `DRAFT`, `PUBLISHED`, `ACTIVE`, `DEPRECATED`, and `REVOKED` lifecycle
+states. A registry MUST verify a trusted supported signature before activating a
+`PUBLISHED` version, reject a revoked version, and record each activation or
+rollback as an append-only event with prior/selected version, actor, reason,
+timestamp, operation, and monotonically increasing revision. Implementations
+MAY require a compare-and-swap expected revision to prevent conflicting
+activation requests.
+
 ---
 
 ## 8. Replay Frame
