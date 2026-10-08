@@ -2,68 +2,31 @@
 
 from .a2a import A2AGuard, A2ATaskDelegation
 from .auth.entra import EntraDeviceAuthorizationClient
-from .auth.jwt_validator import JWTReplayCache
-from .auth.service_identity import ServiceIdentity, service_identity_from_claims
-from .auth.store import IdentityStore, PostgresIdentityStore, SQLiteIdentityStore
-from .bootstrap import build_demo_service, build_platform_demo, build_runtime_service
-from .compliance import ComplianceAuditor, ComplianceEvaluation
-from .control_plane import ControlPlane, build_control_plane
+from .auth.store import SQLiteIdentityStore
+from .bootstrap import build_demo_service, build_runtime_service
+from .compliance import ComplianceAuditor
+from .control_plane import ControlPlane
 from .crypto import KeyPair, verify_signature
-from .deployment import (
-    BoundedRateLimiter,
-    TLSConfig,
-    correlation_id,
-    security_headers,
-    validate_server_config,
-)
 from .engine import ExecutionBoundary
 from .errors import AuthorizationError
 from .federation import (
     FederationError,
     GovernanceReconciler,
     GovernanceSyncEnvelope,
-    ReconciliationResult,
     RegistrySnapshot,
     SignedSyncEvent,
 )
-from .governance import GovernanceRule, GovernanceRuleTranslator
+from .governance import GovernanceRuleTranslator
 from .health import health_report
-from .http_api import AuthenticatedAPI, create_server, parse_server_args
-from .identity import (
-    EntraOIDCConfig,
-    ExternalIdentity,
-    IdentityValidationError,
-    JWKSProvider,
-    JWTValidator,
-    OIDCAuthCodeClient,
-    OIDCDiscoveryDocument,
-    OIDCValidator,
-    StaticJWKSProvider,
-    UrlJWKSProvider,
-    discover_oidc_configuration,
-    entra_oidc_validator_from_discovery,
-    oidc_validator_from_discovery,
-)
+from .http_api import create_server, parse_server_args
+from .identity import EntraOIDCConfig, ExternalIdentity, OIDCAuthCodeClient, OIDCDiscoveryDocument
 from .issuer import AuthorizationIssuer, PolicyDeniedError
-from .jobs import Job, JobStore, SQLiteJobStore, run_once
+from .jobs import SQLiteJobStore, run_once
 from .jobs_postgres import POSTGRES_JOBS_SCHEMA, PostgresJobStore
-from .langchain_adapter import GASCallbackHandler, GASExecutionBarrierTool, GASToolOutput
-from .mcp_gateway import (
-    GASMCPGateway,
-    GASMCPServer,
-    MCPGatewayContext,
-    MCPToolDefinition,
-    MCPToolResult,
-)
-from .mesh import (
-    GovernanceInput,
-    GovernanceMesh,
-    GovernanceMeshError,
-    GovernancePreflightDecision,
-    GovernanceSourceRegistry,
-)
+from .langchain_adapter import GASCallbackHandler, GASExecutionBarrierTool
+from .mcp_gateway import GASMCPGateway, MCPGatewayContext
+from .mesh import GovernanceInput, GovernanceMesh, GovernanceMeshError, GovernanceSourceRegistry
 from .models import GovernanceAuthorizationArtifact, SignedApproval
-from .operator_auth import OperatorAPIKey, OperatorKeyStore
 from .platform import (
     GovernancePlatform,
     PlatformDeploymentPolicy,
@@ -71,13 +34,7 @@ from .platform import (
     ServicePrincipal,
     ServicePrincipalRegistry,
 )
-from .platform_admin import (
-    PolicyApproval,
-    PolicyChangeManager,
-    PolicyChangeProposal,
-    TrustChangeManager,
-    TrustChangeRequest,
-)
+from .platform_admin import PolicyChangeManager, TrustChangeManager
 from .policy import (
     DeterministicArbiter,
     Policy,
@@ -85,23 +42,12 @@ from .policy import (
     SignedPolicyManifest,
     signed_policy_manifest_from_dict,
 )
-from .rbac import ClaimsIdentity, ClaimsMapper, Role, require_roles
 from .replay import ReplayLog, SQLiteReplayLog
 from .service import GovernedService
-from .signing import KMSSigner, LocalEd25519Signer, RemoteSigner, Signer
-from .storage import (
-    POSTGRES_NONCE_SCHEMA,
-    POSTGRES_REPLAY_SCHEMA,
-    NonceRepository,
-    PostgresNonceRepository,
-    PostgresReplayLog,
-    PostgresTrustStore,
-    SQLiteNonceRepository,
-)
+from .signing import KMSSigner
+from .storage import PostgresReplayLog
 from .trust import TrustStore
 
-# Expose the full substrate API surface: high-level integration entry points plus the
-# storage/runtime adapters that deployment code and the existing test suite depend on.
 __all__ = [
     # Core Engine & Arbitration
     "ExecutionBoundary",
@@ -111,7 +57,6 @@ __all__ = [
     "Policy",
     "SignedPolicyManifest",
     "signed_policy_manifest_from_dict",
-    "GovernanceRule",
     "GovernanceRuleTranslator",
 
     # Platform & Mesh
@@ -119,58 +64,29 @@ __all__ = [
     "PlatformDeploymentPolicy",
     "GovernanceMesh",
     "GovernanceInput",
-    "GovernancePreflightDecision",
     "GovernanceSourceRegistry",
     "GovernedService",
     "ServicePrincipal",
     "ServicePrincipalRegistry",
     "RuntimeIdentity",
-    "PolicyApproval",
     "PolicyChangeManager",
-    "PolicyChangeProposal",
     "TrustChangeManager",
-    "TrustChangeRequest",
-    "OperatorAPIKey",
-    "OperatorKeyStore",
 
     # Security, Identity & Trust
     "TrustStore",
     "KeyPair",
     "verify_signature",
     "KMSSigner",
-    "LocalEd25519Signer",
-    "RemoteSigner",
-    "Signer",
     "ExternalIdentity",
     "EntraDeviceAuthorizationClient",
-    "JWTReplayCache",
-    "ServiceIdentity",
-    "service_identity_from_claims",
-    "IdentityStore",
     "SQLiteIdentityStore",
-    "PostgresIdentityStore",
-    "ClaimsIdentity",
-    "ClaimsMapper",
-    "Role",
-    "require_roles",
     "EntraOIDCConfig",
-    "IdentityValidationError",
-    "JWKSProvider",
-    "JWTValidator",
     "OIDCAuthCodeClient",
     "OIDCDiscoveryDocument",
-    "OIDCValidator",
-    "StaticJWKSProvider",
-    "UrlJWKSProvider",
-    "discover_oidc_configuration",
-    "entra_oidc_validator_from_discovery",
-    "oidc_validator_from_discovery",
 
     # Compliance & Audit
     "ComplianceAuditor",
-    "ComplianceEvaluation",
     "ControlPlane",
-    "build_control_plane",
     "ReplayLog",
     "SQLiteReplayLog",
     "GovernanceAuthorizationArtifact",
@@ -180,45 +96,25 @@ __all__ = [
     # Federation & Agent Integrations
     "GovernanceReconciler",
     "GovernanceSyncEnvelope",
-    "ReconciliationResult",
     "RegistrySnapshot",
     "SignedSyncEvent",
     "A2AGuard",
     "A2ATaskDelegation",
     "GASMCPGateway",
-    "GASMCPServer",
     "MCPGatewayContext",
-    "MCPToolDefinition",
-    "MCPToolResult",
     "GASExecutionBarrierTool",
     "GASCallbackHandler",
-    "GASToolOutput",
 
     # Runtime bootstrap, HTTP API, and job/storage adapters
     "build_demo_service",
-    "build_platform_demo",
     "build_runtime_service",
-    "AuthenticatedAPI",
     "create_server",
     "parse_server_args",
-    "Job",
-    "JobStore",
     "SQLiteJobStore",
     "PostgresJobStore",
     "POSTGRES_JOBS_SCHEMA",
     "run_once",
-    "NonceRepository",
-    "SQLiteNonceRepository",
-    "PostgresNonceRepository",
-    "POSTGRES_NONCE_SCHEMA",
     "PostgresReplayLog",
-    "PostgresTrustStore",
-    "POSTGRES_REPLAY_SCHEMA",
-    "BoundedRateLimiter",
-    "TLSConfig",
-    "correlation_id",
-    "security_headers",
-    "validate_server_config",
 
     # Core Exceptions
     "AuthorizationError",
