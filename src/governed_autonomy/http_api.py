@@ -439,7 +439,7 @@ class AuthenticatedAPI:
                     return {}
                 return {
                     "Access-Control-Allow-Origin": origin,
-                    "Access-Control-Expose-Headers": "X-Request-ID",
+                    "Access-Control-Expose-Headers": "X-Request-ID, traceparent",
                     "Vary": "Origin",
                 }
 
@@ -456,7 +456,7 @@ class AuthenticatedAPI:
                 if cors:
                     self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
                     self.send_header(
-                        "Access-Control-Allow-Headers", "Authorization, Content-Type"
+                        "Access-Control-Allow-Headers", "Authorization, Content-Type, traceparent"
                     )
                     self.send_header("Access-Control-Max-Age", "600")
                 self.send_header("Content-Length", "0")
