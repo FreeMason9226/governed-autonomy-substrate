@@ -34,12 +34,12 @@ jobs:
             --pr "$PR_NUMBER" \
             --base-ref "$BASE_REF" \
             --head-ref "$HEAD_REF" \
-            --out policy/policy_result.json \
+            --out "$RUNNER_TEMP/policy_result.json" \
             --threshold 7
       - name: Upload policy result
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: policy-result
-          path: policy/policy_result.json
+          path: ${{ runner.temp }}/policy_result.json
           if-no-files-found: warn

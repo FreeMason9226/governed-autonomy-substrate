@@ -12,11 +12,19 @@ dependency_manifest_names := {
 	"pnpm-lock.yaml",
 	"go.mod",
 	"go.sum",
+	"pyproject.toml",
+	"poetry.lock",
+	"requirements-ci.txt",
 }
 
 infra_path_change if {
 	some path in input.changed_files
 	startswith(path, "helm/")
+}
+
+infra_path_change if {
+	some path in input.changed_files
+	startswith(path, "deploy/")
 }
 
 infra_path_change if {
