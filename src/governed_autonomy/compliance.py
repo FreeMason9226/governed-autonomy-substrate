@@ -52,10 +52,10 @@ class ComplianceAuditor:
 
         # GV-1.2 / GV-4.2 (Trust Store and Revocation)
         trust_data = self.trust_store.to_dict()
-        # pyrefly: ignore [bad-argument-type]
-        keys_count = len(trust_data.get("keys", {}))
-        # pyrefly: ignore [bad-argument-type]
-        revoked_count = len(trust_data.get("revoked", []))
+        keys = trust_data.get("keys", {})
+        revoked = trust_data.get("revoked", [])
+        keys_count = len(keys) if isinstance(keys, dict) else 0
+        revoked_count = len(revoked) if isinstance(revoked, list) else 0
         if keys_count > 0:
             results.append(
                 ComplianceEvaluation(
@@ -145,7 +145,7 @@ class ComplianceAuditor:
         results: list[ComplianceEvaluation] = []
 
         # Article 9 (Risk Management & Pre-Execution Filter)
-        if self.policy_registry and self.policy_registry.policies:
+        if self.policy_registry and self.policy_registry.policies():
             results.append(
                 ComplianceEvaluation(
                     framework="EU AI Act",
@@ -222,12 +222,75 @@ class ComplianceAuditor:
 
         return results
 
+    def evaluate_soc2_iso27001(self) -> list[ComplianceEvaluation]:
+        """Evaluate evidence available for SOC 2 and ISO/IEC 27001 control reviews."""
+        integrity = self.replay_log.verify_integrity()
+        trust = self.trust_store.to_dict()
+        policies = self.policy_registry.policies() if self.policy_registry else ()
+        return [
+            ComplianceEvaluation(
+                framework="SOC 2",
+                control_id="CC7.2",
+                title="System Monitoring and Audit Evidence",
+                status="PASS" if integrity["ok"] else "FAIL",
+                details=(
+                    f"Hash-chained replay evidence verified at {integrity['frame_count']} frames."
+                    if integrity["ok"]
+                    else "Replay evidence integrity validation failed."
+                ),
+            ),
+            ComplianceEvaluation(
+                framework="ISO/IEC 27001:2022",
+                control_id="A.8.15",
+                title="Logging",
+                status="PASS" if integrity["ok"] else "FAIL",
+                details="Replay evidence is available for independent retention and review.",
+            ),
+            ComplianceEvaluation(
+                framework="ISO/IEC 27001:2022",
+                control_id="A.5.18",
+                title="Access Rights",
+                status="PASS" if trust.get("keys") else "WARNING",
+                details="Trust-key inventory is included in the evidence bundle.",
+            ),
+            ComplianceEvaluation(
+                framework="SOC 2",
+                control_id="CC6.1",
+                title="Logical Access Controls",
+                status="PASS" if policies else "WARNING",
+                details="Policy inventory is included in the evidence bundle.",
+            ),
+        ]
+
+    def evidence_bundle(self) -> dict[str, Any]:
+        """Produce retention-friendly, deterministic evidence without action payloads."""
+        integrity = self.replay_log.verify_integrity()
+        return {
+            "generated_at": datetime.datetime.now(datetime.UTC).isoformat(),
+            "replay_integrity": integrity,
+            "audit_summary": self.replay_log.audit_summary(),
+            "trust_store": self.trust_store.to_dict(),
+            "policy_digests": (
+                self.policy_registry.digests() if self.policy_registry is not None else {}
+            ),
+            "controls": [
+                {
+                    "framework": result.framework,
+                    "control_id": result.control_id,
+                    "status": result.status,
+                    "title": result.title,
+                }
+                for result in self.evaluate_soc2_iso27001()
+            ],
+        }
+
     def generate_report(self) -> dict[str, Any]:
         """Generate a structured compliance audit report."""
         nist_evals = self.evaluate_nist_ai_rmf()
         eu_evals = self.evaluate_eu_ai_act()
+        soc2_iso_evals = self.evaluate_soc2_iso27001()
 
-        all_evals = nist_evals + eu_evals
+        all_evals = nist_evals + eu_evals + soc2_iso_evals
         passes = sum(1 for e in all_evals if e.status == "PASS")
         fails = sum(1 for e in all_evals if e.status == "FAIL")
         warnings = sum(1 for e in all_evals if e.status in ("WARNING", "INFO"))
@@ -258,6 +321,16 @@ class ComplianceAuditor:
                     "details": e.details,
                 }
                 for e in eu_evals
+            ],
+            "soc2_iso27001": [
+                {
+                    "framework": e.framework,
+                    "control_id": e.control_id,
+                    "title": e.title,
+                    "status": e.status,
+                    "details": e.details,
+                }
+                for e in soc2_iso_evals
             ],
             "audit_summary": self.replay_log.audit_summary(),
         }
