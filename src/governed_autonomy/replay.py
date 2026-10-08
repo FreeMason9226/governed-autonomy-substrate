@@ -7,7 +7,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .audit import AuditAnchor, AuditAnchorSink
 from .canonical import canonical_json
+from .signing import Signer
 
 
 @dataclass(frozen=True)
@@ -206,6 +208,15 @@ class ReplayLog:
             "duplicate_frame_ids": sorted(duplicate_frame_ids),
             "first_error": first_error,
         }
+
+    def anchor(self, signer: Signer, sink: AuditAnchorSink) -> AuditAnchor:
+        """Sign and persist the current verified head to an independent retention sink."""
+        from .audit import sign_audit_anchor
+
+        with self._lock:
+            anchor = sign_audit_anchor(self.verify_integrity(), signer)
+            sink.append(anchor)
+            return anchor
 
 
 class SQLiteReplayLog(ReplayLog):

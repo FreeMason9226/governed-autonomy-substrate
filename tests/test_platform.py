@@ -57,7 +57,12 @@ def test_platform_context_binds_runtime_identity_to_authorization_requests():
     )
 
     artifact = platform.authorize(
-        {"action": "write_file", "path": "out.txt", "content": "ok"},
+        {
+            "action": "write_file",
+            "path": "out.txt",
+            "content": "ok",
+            "context": {"tenant_id": "attacker-tenant", "actor_id": "attacker"},
+        },
         "tenant-prod-v1",
     )
 
