@@ -16,3 +16,13 @@ coordinate a fix before publicly disclosing a vulnerability.
 The project is in pre-1.0 development. Security fixes are made against the
 current development branch; users should upgrade to the latest published
 release and review the changelog.
+
+## Policy registry security
+
+Policy content is canonicalized and hashed before publication. Registry records bind
+the policy ID, semantic version, digest, schema version, signing timestamp, and
+authority identity with an Ed25519 signature. A policy cannot be activated when its
+digest or trusted signature fails verification, and revoked versions are fail-closed.
+Use a KMS/HSM-backed signer and a durable, access-controlled backend in production;
+the local development signer and filesystem backend are not a substitute for
+independent WORM retention.

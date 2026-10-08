@@ -117,6 +117,9 @@ Implementation notes:
 - `PolicyRegistry.register()` rejects policy ID reuse with different digests.
 - `Policy.digest()` binds canonical policy contents to version/provenance.
 - `ExecutionBoundary` can optionally verify exact policy digest matches before execution.
+- `src/governed_autonomy/policy_registry.py` adds immutable semantic-version
+  publication records, authority signatures, lifecycle state, CAS activation,
+  rollback history, and integrity verification without altering prior versions.
 
 ### 7. Scope constraints: actor, tenant, size, TTL
 

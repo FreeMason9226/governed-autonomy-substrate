@@ -44,6 +44,21 @@ from .policy import (
     SignedPolicyManifest,
     signed_policy_manifest_from_dict,
 )
+from .policy_registry import (
+    DevelopmentPolicySigner,
+    FilePolicyStorage,
+    InMemoryPolicyStorage,
+    PolicyActivationConflictError,
+    PolicyActivationEvent,
+    PolicyIntegrityError,
+    PolicyLifecycle,
+    PolicyLifecycleError,
+    PolicySignatureError,
+    PolicyVerificationResult,
+    StaticPolicyVerifier,
+    TrustStorePolicyVerifier,
+    VersionedPolicyRegistry,
+)
 from .replay import ReplayLog, SQLiteReplayLog
 from .service import GovernedService
 from .signing import KMSSigner
@@ -59,6 +74,15 @@ __all__ = [
     "Policy",
     "SignedPolicyManifest",
     "signed_policy_manifest_from_dict",
+    "VersionedPolicyRegistry",
+    "FilePolicyStorage",
+    "InMemoryPolicyStorage",
+    "DevelopmentPolicySigner",
+    "StaticPolicyVerifier",
+    "TrustStorePolicyVerifier",
+    "PolicyLifecycle",
+    "PolicyActivationEvent",
+    "PolicyVerificationResult",
     "GovernanceRuleTranslator",
 
     # Platform & Mesh
@@ -130,4 +154,8 @@ __all__ = [
     "PolicyDeniedError",
     "GovernanceMeshError",
     "FederationError",
+    "PolicyActivationConflictError",
+    "PolicyIntegrityError",
+    "PolicyLifecycleError",
+    "PolicySignatureError",
 ]
