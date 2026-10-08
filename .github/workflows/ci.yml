@@ -46,6 +46,10 @@ jobs:
           src/governed_autonomy/health.py
           src/governed_autonomy/replay.py
           --ignore-missing-imports
+      - name: Verify mirrored workflow sources
+        run: |
+          cmp .github/workflows/attest.yml ci/attest.yml
+          cmp .github/workflows/policy-check.yml ci/policy-check.yml
       - name: Test
         run: >-
           python -m pytest
@@ -57,11 +61,12 @@ jobs:
       - name: Render Helm chart
         run: helm lint deploy/helm && helm template gas deploy/helm --set createBearerTokenSecret=true --set bearerToken=ci-token
       - name: Render Helm chart with KMS workload identity
-        run: >-
-          helm template gas deploy/helm
-          --set kms.enabled=true
-          --set kms.keyId=alias/gas-ci
-          --set serviceAccount.create=true
+        run: |
+          helm template gas deploy/helm \
+            --set kms.enabled=true \
+            --set kms.keyId=alias/gas-ci \
+            --set serviceAccount.create=true > "$RUNNER_TEMP/kms.yaml"
+          ! grep -q GAS_ISSUER_PRIVATE_KEY "$RUNNER_TEMP/kms.yaml"
       - name: Upload coverage
         if: matrix.python-version == '3.12'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

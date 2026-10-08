@@ -5,6 +5,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from .crypto import KeyPair
 from .engine import ExecutionBoundary
 from .issuer import AuthorizationIssuer
+from .mesh import GovernanceSourceRegistry
 from .platform import GovernancePlatform, RuntimeIdentity
 from .policy import Policy, PolicyRegistry
 from .replay import ReplayLog
@@ -42,7 +43,7 @@ def _runtime_signer(signer: Signer | None = None) -> Signer:
 
 def build_demo_service(
     *,
-    mesh_source_registry=None,
+    mesh_source_registry: GovernanceSourceRegistry | None = None,
 ) -> tuple[GovernedService, KeyPair, ReplayLog]:
     """Build a complete in-process composition for demos and integration tests."""
     issuer = KeyPair.generate("demo-issuer")
@@ -165,7 +166,7 @@ def build_platform_demo(
     environment: str = "prod",
     tenant_id: str | None = None,
     actor_id: str | None = None,
-    mesh_source_registry=None,
+    mesh_source_registry: GovernanceSourceRegistry | None = None,
 ) -> tuple[GovernancePlatform, GovernedService, KeyPair, ReplayLog]:
     """Build a platform-ready composition with runtime identity and runtime metadata."""
     service, issuer, replay_log = build_demo_service(mesh_source_registry=mesh_source_registry)

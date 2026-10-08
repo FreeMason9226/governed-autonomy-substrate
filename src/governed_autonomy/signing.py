@@ -10,7 +10,8 @@ from .canonical import b64encode
 
 
 class Signer(Protocol):
-    key_id: str
+    @property
+    def key_id(self) -> str: ...
 
     def sign(self, payload: bytes) -> str: ...
     def public_key_bytes(self) -> bytes: ...

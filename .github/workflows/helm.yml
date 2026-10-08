@@ -22,5 +22,9 @@ jobs:
       - name: Template with worker metrics and ServiceMonitor
         run: helm template gas deploy/helm --set worker.enabled=true --set worker.allowedImages=python:3.12-slim --set worker.metrics.serviceMonitor=true > /dev/null
       - name: Template with KMS workload identity
-        run: helm template gas deploy/helm --set kms.enabled=true --set kms.keyId=alias/gas-ci --set serviceAccount.create=true > /dev/null
-
+        run: |
+          helm template gas deploy/helm \
+            --set kms.enabled=true \
+            --set kms.keyId=alias/gas-ci \
+            --set serviceAccount.create=true > "$RUNNER_TEMP/kms.yaml"
+          ! grep -q GAS_ISSUER_PRIVATE_KEY "$RUNNER_TEMP/kms.yaml"
