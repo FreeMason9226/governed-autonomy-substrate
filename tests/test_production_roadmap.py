@@ -30,6 +30,23 @@ def test_independent_anchor_detects_rewritten_replay_history(tmp_path):
     assert replacement.head_hash != anchor.head_hash
 
 
+def test_anchor_verification_requires_trusted_matching_replay_state(tmp_path):
+    replay = ReplayLog()
+    replay.append("one", {"type": "authorization", "nonce": "nonce-1"})
+    signer = LocalEd25519Signer("audit-key")
+    anchor = replay.anchor(signer, JSONLAuditAnchorSink(tmp_path / "anchors.jsonl"))
+    public_key = Ed25519PublicKey.from_public_bytes(signer.public_key_bytes())
+
+    assert replay.verify_anchor(anchor, public_key)
+    assert not replay.verify_anchor(anchor, KeyPair.generate("other").public_key)
+
+    replay.append("two", {"type": "execution", "nonce": "nonce-1", "status": "completed"})
+    assert not replay.verify_anchor(anchor, public_key)
+
+    replay.frames[0].event["nonce"] = "tampered"
+    assert not replay.verify_anchor(anchor, public_key)
+
+
 def test_compliance_evidence_includes_soc2_and_iso_control_evidence():
     issuer = KeyPair.generate("evidence-issuer")
     trust = TrustStore()

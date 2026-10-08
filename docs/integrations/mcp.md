@@ -137,3 +137,11 @@ audit = gateway.audit_report()
 print(f"Total audit frames: {audit['audit_summary']['frame_count']}")
 print(f"Policy SHA-256: {audit['policy_digest']}")
 ```
+
+## Independent replay attestation
+
+After governed tool calls, checkpoint the gateway's shared `ReplayLog` with
+`replay.anchor(signer, sink)` and retain the resulting `AuditAnchor` in an
+independently administered sink. `replay.verify_anchor(anchor, public_key)`
+confirms that a trusted checkpoint matches the current valid replay state. See
+[production assurance evidence](../assurance-evidence.md) for retention guidance.

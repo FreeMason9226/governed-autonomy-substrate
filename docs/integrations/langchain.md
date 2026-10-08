@@ -83,3 +83,11 @@ handler = GASCallbackHandler(replay_log=replay, session_id="agent-run-8821")
 ```
 
 All tool activations, arguments, outputs, and errors will be hashed and sequenced into the immutable replay chain.
+
+## Independent replay attestation
+
+After governed tool calls, checkpoint the shared `ReplayLog` with
+`replay.anchor(signer, sink)` and retain the resulting `AuditAnchor` in an
+independently administered sink. `replay.verify_anchor(anchor, public_key)`
+confirms that a trusted checkpoint matches the current valid replay state. See
+[production assurance evidence](../assurance-evidence.md) for retention guidance.

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from governed_autonomy import (
+    JSONLAuditAnchorSink,
     KeyPair,
     ReplayLog,
     SignedApproval,
@@ -16,6 +18,7 @@ from governed_autonomy.mcp_gateway import (
     MCPToolDefinition,
     MCPToolResult,
 )
+from governed_autonomy.signing import LocalEd25519Signer
 
 
 @pytest.fixture
@@ -34,6 +37,7 @@ def test_setup() -> tuple[GASMCPGateway, KeyPair, TrustStore, ReplayLog]:
 
 def test_tool_decorator_and_successful_call(
     test_setup: tuple[GASMCPGateway, KeyPair, TrustStore, ReplayLog],
+    tmp_path,
 ) -> None:
     gateway, issuer_key, trust, replay = test_setup
 
@@ -71,6 +75,12 @@ def test_tool_decorator_and_successful_call(
     assert summary["frame_count"] == 2  # 1 authorization frame + 1 execution frame
     assert summary["execution_count"] == 1
     assert summary["success_count"] == 1
+    signer = LocalEd25519Signer("mcp-attestation")
+    sink = JSONLAuditAnchorSink(tmp_path / "mcp-anchors.jsonl")
+    anchor = replay.anchor(signer, sink)
+    public_key = Ed25519PublicKey.from_public_bytes(signer.public_key_bytes())
+    assert sink.anchors() == (anchor,)
+    assert replay.verify_anchor(anchor, public_key)
 
 
 def test_unknown_tool_raises_key_error(

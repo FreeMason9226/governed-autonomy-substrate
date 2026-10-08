@@ -94,3 +94,12 @@ print("Execution result:", result)
 | Delegator signature invalid | Raises `AuthorizationError("invalid delegator signature...")` |
 | Task action does not match GAA action | Raises `AuthorizationError("action mismatch...")` |
 | Nonce already consumed | Raises `AuthorizationError` (duplicate nonce prevention) |
+
+## Independent replay attestation
+
+After a guarded delegation completes, checkpoint the recipient's shared
+`ReplayLog` with `replay.anchor(signer, sink)` and retain the resulting
+`AuditAnchor` in an independently administered sink.
+`replay.verify_anchor(anchor, public_key)` confirms that a trusted checkpoint
+matches the current valid replay state. See
+[production assurance evidence](../assurance-evidence.md) for retention guidance.

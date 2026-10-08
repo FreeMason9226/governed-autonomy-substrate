@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from governed_autonomy import (
     AuthorizationIssuer,
     ExecutionBoundary,
+    JSONLAuditAnchorSink,
     KeyPair,
     Policy,
     PolicyRegistry,
@@ -19,6 +21,7 @@ from governed_autonomy.langchain_adapter import (
     GASToolOutput,
 )
 from governed_autonomy.policy import DeterministicArbiter
+from governed_autonomy.signing import LocalEd25519Signer
 
 
 @pytest.fixture
@@ -56,6 +59,7 @@ def langchain_setup() -> tuple[AuthorizationIssuer, ExecutionBoundary, Policy, R
 
 def test_tool_successful_execution(
     langchain_setup: tuple[AuthorizationIssuer, ExecutionBoundary, Policy, ReplayLog, KeyPair, TrustStore],
+    tmp_path,
 ) -> None:
     issuer, boundary, policy, replay, _, _ = langchain_setup
 
@@ -90,6 +94,12 @@ def test_tool_successful_execution(
     assert replay.verify_chain() is True
     # 3 tool calls = 3 authorization frames + 3 execution frames = 6 frames
     assert len(replay.frames) == 6
+    signer = LocalEd25519Signer("langchain-attestation")
+    sink = JSONLAuditAnchorSink(tmp_path / "langchain-anchors.jsonl")
+    anchor = replay.anchor(signer, sink)
+    public_key = Ed25519PublicKey.from_public_bytes(signer.public_key_bytes())
+    assert sink.anchors() == (anchor,)
+    assert replay.verify_anchor(anchor, public_key)
 
 
 def test_tool_policy_denial_unallowed_action(
