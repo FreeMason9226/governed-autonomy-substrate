@@ -1,0 +1,11 @@
+{
+  "actor": "ai-bot",
+  "approver": "alice@example.com",
+  "commit_sha": "abcdef123",
+  "policy_id": "policy-001",
+  "pr_id": 123,
+  "rationale": "Infra file changed; dependency bump; tests passed",
+  "risk_score": 8,
+  "signature": "mwNhN//bB3qLZ0GM0xUm/iJZ4eHmSPlJzKnEtLAGrVOKWIGQfmk2dC2vOvTZ9bZYNkNaH1KEyWi1FZ4Sl0FiB+YNpMHYlWr8w2NoKMt0oOR34Pic9SRSzot8JA1hmZJ96/YBAfiAqHJ8xnicZPaqbnl1PNe2CDiwAt9/KyH3hDnslG94a6MF+QiTTzqu7PiaLaVdav6tAWbbw0APxNc4lEDnQVkLoNZKwuHFK7Vx7zczftK3nhk0V/yMAUX4MtAzRp2pInMi+NYxBwYaIjy/3nxVJsy0uIyK/ISgoA8BXg8gDu5fhKR2lcXgPzN5UboKrzGBYiZ6jkbfTiiN6nc50Q==",
+  "timestamp": "2026-10-07T23:00:00Z"
+}
