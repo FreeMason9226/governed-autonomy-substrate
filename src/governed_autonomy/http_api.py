@@ -18,7 +18,7 @@ from http import HTTPStatus
 from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Protocol
-from urllib.parse import parse_qs, quote, urlencode, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 from .admin_ui import render_admin_css, render_admin_js, render_admin_ui
 from .auth.store import IdentityStore, PostgresIdentityStore, SQLiteIdentityStore
@@ -1068,11 +1068,11 @@ class AuthenticatedAPI:
 
             def _send(self, status: HTTPStatus, payload: dict[str, Any]) -> None:
                 encoded = json.dumps(payload, sort_keys=True).encode("utf-8")
-                self._rid = api._request_id(self)
+                self._rid = uuid.uuid4().hex
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(encoded)))
-                self.send_header("X-Request-ID", quote(self._rid, safe=""))
+                self.send_header("X-Request-ID", self._rid)
                 self.send_header("X-API-Version", API_VERSION)
                 trace_context = api._trace_context(self)
                 if trace_context is not None:
