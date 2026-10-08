@@ -6,6 +6,8 @@
 
 A cryptographic authorization barrier for AI agents: **no signed artifact, no action.** Every action must carry a short-lived, single-use, Ed25519-signed Governance Authorization Artifact (GAA) that matches an audited, hash-chained log entry and the current policy.
 
+Despite the repository name, this project currently implements a Python governance service and worker; it does not contain Polkadot/Substrate runtime pallets. OPA/Rego is used for pull-request risk scoring, while runtime action authorization is enforced by the Python policy engine.
+
 ## Try it
 
 - **Full pipeline walkthrough:** [request, policies, risk score, decision, execution, signed proof, audit trail](https://freemason9226.github.io/governed-autonomy-substrate/pipeline.html) (risk score is a demo heuristic); tick *Use the real server* to run approved `write_file` requests against the live sandbox below.

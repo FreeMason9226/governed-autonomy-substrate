@@ -6,7 +6,7 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 COPY pyproject.toml README.md ./
 COPY src ./src
-RUN pip install --no-cache-dir '.[postgres]'
+RUN pip install --no-cache-dir '.[aws,postgres]'
 USER 65532:65532
 ENV GOVERNED_AUTONOMY_HOST=0.0.0.0
 EXPOSE 8000
