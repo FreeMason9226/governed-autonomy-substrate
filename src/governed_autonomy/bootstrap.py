@@ -9,9 +9,35 @@ from .platform import GovernancePlatform, RuntimeIdentity
 from .policy import Policy, PolicyRegistry
 from .replay import ReplayLog
 from .service import GovernedService
-from .signing import Signer
+from .signing import KMSSigner, Signer
 from .storage import PostgresReplayLog, PostgresTrustStore
 from .trust import TrustStore
+
+
+def _runtime_signer(signer: Signer | None = None) -> Signer:
+    if signer is not None:
+        return signer
+    backend = os.environ.get("GAS_ISSUER_SIGNER", "local").lower()
+    if backend == "aws-kms":
+        key_id = os.environ.get("GAS_ISSUER_KMS_KEY_ID")
+        if not key_id:
+            raise RuntimeError("GAS_ISSUER_KMS_KEY_ID is required for the aws-kms signer")
+        try:
+            from .kms_backends import AwsKmsBackend
+
+            kms_backend = AwsKmsBackend(region_name=os.environ.get("AWS_REGION"))
+        except Exception as exc:
+            raise RuntimeError("unable to initialize the AWS KMS signer") from exc
+        return KMSSigner(key_id, kms_backend)
+    if backend != "local":
+        raise ValueError("GAS_ISSUER_SIGNER must be local or aws-kms")
+    key_id = os.environ.get("GAS_ISSUER_KEY_ID")
+    private_key = os.environ.get("GAS_ISSUER_PRIVATE_KEY")
+    if not key_id or not private_key:
+        raise RuntimeError(
+            "GAS_ISSUER_KEY_ID and GAS_ISSUER_PRIVATE_KEY are required for the local signer"
+        )
+    return KeyPair.from_private_key_b64(key_id, private_key)
 
 
 def build_demo_service(
@@ -80,19 +106,17 @@ def build_runtime_service(
         raise ValueError("GAS_RUNTIME_MODE must be postgres or memory")
 
     database_url = os.environ.get("DATABASE_URL")
-    key_id = os.environ.get("GAS_ISSUER_KEY_ID")
-    private_key = os.environ.get("GAS_ISSUER_PRIVATE_KEY")
-    if not database_url or signer is None and not all((key_id, private_key)):
+    if not database_url:
         raise RuntimeError(
-            "DATABASE_URL and either an injected signer or "
-            "GAS_ISSUER_KEY_ID/GAS_ISSUER_PRIVATE_KEY are required in postgres runtime mode"
+            "DATABASE_URL is required in postgres runtime mode"
         )
+    runtime_signer = _runtime_signer(signer)
     try:
         import psycopg
     except ImportError as exc:
         raise RuntimeError("install the postgres extra to use postgres runtime mode") from exc
 
-    issuer = signer or KeyPair.from_private_key_b64(key_id, private_key)
+    issuer = runtime_signer
     replay_log = PostgresReplayLog(psycopg.connect(database_url))
     trust_store = PostgresTrustStore(replay_log.connection)
     if trust_store.resolve(issuer.key_id) is None:

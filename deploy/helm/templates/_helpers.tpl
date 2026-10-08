@@ -4,6 +4,9 @@
 {{- define "governed-autonomy.fullname" -}}
 {{- if .Values.fullnameOverride }}{{ .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}{{ else }}{{ include "governed-autonomy.name" . }}{{ end }}
 {{- end }}
+{{- define "governed-autonomy.serviceAccountName" -}}
+{{- if .Values.serviceAccount.name }}{{ .Values.serviceAccount.name }}{{ else }}{{ include "governed-autonomy.fullname" . }}{{ end }}
+{{- end }}
 {{- define "governed-autonomy.labels" -}}
 app.kubernetes.io/name: {{ include "governed-autonomy.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
