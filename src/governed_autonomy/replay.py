@@ -213,24 +213,39 @@ class ReplayLog:
 
     def anchor(self, signer: Signer, sink: AuditAnchorSink) -> AuditAnchor:
         """Sign and persist the current verified head to an independent retention sink."""
+        anchor = self.create_anchor(signer)
+        sink.append(anchor)
+        return anchor
+
+    def create_anchor(self, signer: Signer) -> AuditAnchor:
+        """Sign the current verified head for independent retention."""
         from .audit import sign_audit_anchor
 
         with self._lock:
-            anchor = sign_audit_anchor(self.verify_integrity(), signer)
-            sink.append(anchor)
-            return anchor
+            return sign_audit_anchor(self.verify_integrity(), signer)
 
     def verify_anchor(self, anchor: AuditAnchor, public_key: Ed25519PublicKey) -> bool:
         """Verify a trusted checkpoint against this log's current valid integrity state."""
+        return bool(self.certify_anchor(anchor, public_key)["certified"])
+
+    def certify_anchor(
+        self, anchor: AuditAnchor, public_key: Ed25519PublicKey
+    ) -> dict[str, Any]:
+        """Return replay-integrity evidence for an independently retained anchor."""
         with self._lock:
             integrity = self.verify_integrity()
-            return (
+            certified = (
                 integrity["ok"] is True
                 and anchor.verify(public_key)
                 and anchor.replay_digest == integrity["replay_digest"]
                 and anchor.head_hash == integrity["head_hash"]
                 and anchor.frame_count == integrity["frame_count"]
             )
+            return {
+                "certified": certified,
+                "integrity": integrity,
+                "signer_key_id": anchor.signer_key_id,
+            }
 
 
 class SQLiteReplayLog(ReplayLog):

@@ -1,5 +1,6 @@
 import base64
 import os
+import uuid
 from pathlib import Path
 
 import pytest
@@ -57,3 +58,24 @@ def test_postgres_failure_does_not_report_a_successful_claim(postgres_url: str) 
     replay_log.connection.close()
     with pytest.raises(psycopg.Error):
         replay_log.claim_nonce("database-outage-nonce")
+
+
+def test_postgres_replay_integrity_refreshes_from_another_connection(postgres_url: str) -> None:
+    import psycopg
+
+    primary = PostgresReplayLog(psycopg.connect(postgres_url))
+    observer = PostgresReplayLog(psycopg.connect(postgres_url))
+    try:
+        before = observer.verify_integrity()["frame_count"]
+        primary.append(
+            f"refresh-{uuid.uuid4().hex}",
+            {"type": "governance", "event": "cross_connection_refresh"},
+        )
+
+        report = observer.verify_integrity()
+
+        assert report["ok"] is True
+        assert report["frame_count"] == before + 1
+    finally:
+        primary.close()
+        observer.close()

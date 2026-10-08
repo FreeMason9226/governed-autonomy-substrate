@@ -20,7 +20,11 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit
 from urllib.request import Request, urlopen
 
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+from .audit import AuditAnchor
 from .auth.entra import EntraDeviceAuthorizationClient
+from .canonical import b64decode
 from .identity import EntraOIDCConfig
 from .replay import ReplayLog
 
@@ -197,6 +201,17 @@ def build_parser() -> argparse.ArgumentParser:
     replay = sub.add_parser("replay").add_subparsers(dest="cmd", required=True)
     verify = replay.add_parser("verify", help="verify a local replay JSONL hash chain")
     verify.add_argument("path")
+    certify = replay.add_parser(
+        "certify",
+        help="certify a local replay JSONL state against an independently retained anchor",
+    )
+    certify.add_argument("path")
+    certify.add_argument("--anchor", required=True, help="path to an AuditAnchor JSON document")
+    certify.add_argument(
+        "--public-key",
+        required=True,
+        help="base64url-encoded raw Ed25519 public key retained with the anchor",
+    )
     return parser
 
 
@@ -318,8 +333,20 @@ def run(args: argparse.Namespace) -> int:
             _print(_request("GET", f"/admin/jobs/{quote(args.job_id, safe='')}"))
     elif args.group == "replay":
         report = ReplayLog.load_jsonl(args.path).verify_integrity()
-        _print(report)
-        return 0 if report["ok"] else 1
+        if args.cmd == "verify":
+            _print(report)
+            return 0 if report["ok"] else 1
+        try:
+            anchor_payload = json.loads(Path(args.anchor).read_text(encoding="utf-8"))
+            if not isinstance(anchor_payload, dict):
+                raise ValueError("anchor must be a JSON object")
+            anchor = AuditAnchor.from_dict(anchor_payload)
+            public_key = Ed25519PublicKey.from_public_bytes(b64decode(args.public_key))
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            raise CLIError("anchor and public key must be valid") from exc
+        certification = ReplayLog.load_jsonl(args.path).certify_anchor(anchor, public_key)
+        _print(certification)
+        return 0 if certification["certified"] else 1
     else:
         _print(_request("GET", _GET_ROUTES[args.group]))
     return 0

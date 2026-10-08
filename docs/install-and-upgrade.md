@@ -21,7 +21,8 @@ the OpenAPI document is served at `/openapi.json`.
    auto-migrate at startup). Migrations are additive.
 4. Upgrade: `helm upgrade gas deploy/helm -n gas --reuse-values --set image.tag=<new>`.
 5. Verify: `kubectl -n gas rollout status deploy/gas-governed-autonomy`, then
-   check `/readyz` and run `deploy/scripts/rollback-smoke.sh`.
+   check `/readyz`, run the deployed load smoke test with a retained replay
+   anchor, and run `deploy/scripts/rollback-smoke.sh`.
 6. Roll back with `helm rollback gas <revision> -n gas` if verification fails
    (restore the backup only if a migration must be reverted).
 
@@ -62,6 +63,12 @@ The configured AWS role must be scoped to the selected KMS key and signing
 operations. API and worker currently share this service account; separate
 least-privilege identities are a remaining hardening item. KMS mode does not
 provision keys or IAM permissions.
+
+Before switching KMS keys, archive the key ID and raw public key in the
+independent audit retention store, add the new public key to the runtime trust
+store, and deploy the new key ID. Keep the old issuer public key live through
+the maximum artifact lifetime, then revoke it for issuance while retaining its
+archived public key for historical replay-anchor verification.
 
 ### Microsoft Entra ID
 
