@@ -1,0 +1,14 @@
+{
+  "pull_request": {
+    "number": 1,
+    "title": "AI: widen default rate limit",
+    "user": {"login": "ai-agent-bot"},
+    "head": {"sha": "0123456789abcdef0123456789abcdef01234567"},
+    "base": {"ref": "main"},
+    "labels": [{"name": "ai-authored"}]
+  },
+  "files": [
+    {"filename": "src/governed_autonomy/policy.py", "additions": 12, "deletions": 3},
+    {"filename": "docs/demo-note.md", "additions": 4, "deletions": 0}
+  ]
+}

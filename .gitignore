@@ -55,3 +55,4 @@ gas_server.db
 .env
 .env.*
 !.env.example
+demo-out/
