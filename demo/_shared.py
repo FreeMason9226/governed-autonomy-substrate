@@ -86,7 +86,11 @@ class DemoRuntime:
             return result
 
         public_key = self.trust_store.resolve(artifact.issuer_key_id)
-        signature_valid = public_key is not None and artifact.verify(public_key)
+        signature_valid = public_key is not None and verify_signature(
+            public_key,
+            artifact.unsigned_payload(),
+            artifact.signature,
+        )
         execution_result = self.service.execute(artifact)
         authorization_frame = self.replay_log.get(artifact.replay_frame_ref)
         execution_frame = self.replay_log.get(f"execution:{artifact.nonce}")

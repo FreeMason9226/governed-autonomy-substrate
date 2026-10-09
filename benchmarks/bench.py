@@ -13,6 +13,7 @@ environment block in the output records what produced them.
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import platform
 import statistics
@@ -249,11 +250,97 @@ def render(title: str, rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def flatten_rows(section: str, rows: list[dict]) -> list[dict]:
+    flattened = []
+    for row in rows:
+        flattened.append(
+            {
+                "section": section,
+                "benchmark": row["name"],
+                "iterations": row.get("iterations", 0),
+                "ops_per_sec": row.get("ops_per_sec", 0),
+                "mean_us": row.get("mean_us"),
+                "p50_us": row.get("p50_us"),
+                "p95_us": row.get("p95_us"),
+                "p99_us": row.get("p99_us"),
+                "unit": row.get("unit", "ops/s"),
+            }
+        )
+    return flattened
+
+
+def write_csv(path: Path, env: dict, in_process: list[dict], http: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=[
+                "section",
+                "benchmark",
+                "iterations",
+                "ops_per_sec",
+                "mean_us",
+                "p50_us",
+                "p95_us",
+                "p99_us",
+                "unit",
+            ],
+        )
+        writer.writeheader()
+        for section, rows in (("environment", [{"section": "environment", "benchmark": k, "iterations": "", "ops_per_sec": "", "mean_us": "", "p50_us": "", "p95_us": "", "p99_us": "", "unit": v} for k, v in env.items()]), ("in_process", flatten_rows("in_process", in_process)), ("http", flatten_rows("http", http))):
+            writer.writerows(rows)
+
+
+def render_chart(rows: list[dict], *, key: str = "ops_per_sec") -> str:
+    if not rows:
+        return "_No benchmark data._"
+    max_value = max(float(row.get(key, 0) or 0) for row in rows)
+    if max_value <= 0:
+        return "_No positive throughput._"
+    lines = ["```text"]
+    for row in rows:
+        value = float(row.get(key, 0) or 0)
+        width = max(1, int(round((value / max_value) * 30)))
+        lines.append(f"{row['name']:<38} {'#' * width} {value:,.0f} {row.get('unit', 'ops/s')}")
+    lines.append("```")
+    return "\n".join(lines)
+
+
+def build_markdown_report(env: dict, in_process: list[dict], http: list[dict]) -> str:
+    lines = [
+        "# Benchmark Results",
+        "",
+        "## Environment",
+        "",
+    ]
+    for key, value in env.items():
+        lines.append(f"- **{key}**: {value}")
+    lines.extend([
+        "",
+        "## Throughput summary",
+        "",
+        render_chart(in_process + http),
+        "",
+        render("In-process barrier", in_process),
+        "",
+        render("HTTP API (one authorize + one execute per iteration)", http),
+        "",
+        "## Interpretation",
+        "",
+        "- The signed GAA barrier stays inexpensive in memory; the dominant operational cost is durable replay storage and HTTP serialization.",
+        "- The SQLite path is slower because every append and nonce claim is a transactional write. This is a good production signal for keeping the authorization log on a managed database or append-only store.",
+        "- The HTTP path scales to a few concurrent clients while showing tail latency growth; production deployments should run behind a load balancer and keep the benchmark environment close to the target deployment profile.",
+    ])
+    return "\n".join(lines)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--iterations", type=int, default=2000)
     parser.add_argument("--http-requests", type=int, default=800)
     parser.add_argument("--json", help="write machine-readable results to this path")
+    parser.add_argument("--csv", help="write CSV benchmark export to this path")
+    parser.add_argument("--markdown", help="write markdown summary to this path")
     args = parser.parse_args()
 
     in_process = bench_in_process(args.iterations)
@@ -266,11 +353,17 @@ def main() -> int:
     print(render("In-process barrier", in_process))
     print()
     print(render("HTTP API (one authorize + one execute per iteration)", http))
+    payload = {"environment": env, "in_process": in_process, "http": http}
     if args.json:
-        Path(args.json).write_text(
-            json.dumps({"environment": env, "in_process": in_process, "http": http}, indent=2),
-            encoding="utf-8",
-        )
+        path = Path(args.json)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    if args.csv:
+        write_csv(Path(args.csv), env, in_process, http)
+    if args.markdown:
+        path = Path(args.markdown)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(build_markdown_report(env, in_process, http), encoding="utf-8")
     return 0
 
 

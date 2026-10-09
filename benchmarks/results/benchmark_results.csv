@@ -1,0 +1,15 @@
+section,benchmark,iterations,ops_per_sec,mean_us,p50_us,p95_us,p99_us,unit
+environment,python,,,,,,,3.14.7
+environment,implementation,,,,,,,CPython
+environment,platform,,,,,,,Windows-11-10.0.26300-SP0
+environment,processor,,,,,,,"Intel64 Family 6 Model 154 Stepping 4, GenuineIntel"
+in_process,Ed25519 sign (512 B),400,18131.0,54.8,52.5,66.0,116.4,ops/s
+in_process,Ed25519 verify (512 B),400,6672.1,149.5,138.3,206.8,361.5,ops/s
+in_process,authorize (in-memory log),100,8092.1,123.3,114.6,164.9,264.4,ops/s
+in_process,authorize + execute (in-memory log),100,2250.5,444.0,344.6,524.9,2635.4,ops/s
+in_process,authorize + execute (SQLite log),200,33.7,29670.3,30856.3,39164.2,41696.9,ops/s
+in_process,replayed artifact rejected,100,2260.2,441.4,329.8,1039.7,2259.2,ops/s
+in_process,"verify 2,000-frame hash chain",1,15291.7,130790.1,,,,frames/sec
+http,"authorize + execute over HTTP, 1 client(s)",40,105.9,9411.2,9180.8,11164.8,11776.4,ops/s
+http,"authorize + execute over HTTP, 4 client(s)",40,165.4,23513.6,23894.0,27339.2,32187.1,ops/s
+http,"authorize + execute over HTTP, 16 client(s)",32,29.1,231410.4,53689.3,1041594.4,1056222.9,ops/s

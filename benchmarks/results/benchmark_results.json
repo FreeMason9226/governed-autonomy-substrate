@@ -1,0 +1,103 @@
+{
+  "environment": {
+    "python": "3.14.7",
+    "implementation": "CPython",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "processor": "Intel64 Family 6 Model 154 Stepping 4, GenuineIntel"
+  },
+  "in_process": [
+    {
+      "name": "Ed25519 sign (512 B)",
+      "iterations": 400,
+      "ops_per_sec": 18131.0,
+      "mean_us": 54.8,
+      "p50_us": 52.5,
+      "p95_us": 66.0,
+      "p99_us": 116.4
+    },
+    {
+      "name": "Ed25519 verify (512 B)",
+      "iterations": 400,
+      "ops_per_sec": 6672.1,
+      "mean_us": 149.5,
+      "p50_us": 138.3,
+      "p95_us": 206.8,
+      "p99_us": 361.5
+    },
+    {
+      "name": "authorize (in-memory log)",
+      "iterations": 100,
+      "ops_per_sec": 8092.1,
+      "mean_us": 123.3,
+      "p50_us": 114.6,
+      "p95_us": 164.9,
+      "p99_us": 264.4
+    },
+    {
+      "name": "authorize + execute (in-memory log)",
+      "iterations": 100,
+      "ops_per_sec": 2250.5,
+      "mean_us": 444.0,
+      "p50_us": 344.6,
+      "p95_us": 524.9,
+      "p99_us": 2635.4
+    },
+    {
+      "name": "authorize + execute (SQLite log)",
+      "iterations": 200,
+      "ops_per_sec": 33.7,
+      "mean_us": 29670.3,
+      "p50_us": 30856.3,
+      "p95_us": 39164.2,
+      "p99_us": 41696.9
+    },
+    {
+      "name": "replayed artifact rejected",
+      "iterations": 100,
+      "ops_per_sec": 2260.2,
+      "mean_us": 441.4,
+      "p50_us": 329.8,
+      "p95_us": 1039.7,
+      "p99_us": 2259.2
+    },
+    {
+      "name": "verify 2,000-frame hash chain",
+      "iterations": 1,
+      "ops_per_sec": 15291.7,
+      "mean_us": 130790.1,
+      "p50_us": null,
+      "p95_us": null,
+      "p99_us": null,
+      "unit": "frames/sec"
+    }
+  ],
+  "http": [
+    {
+      "name": "authorize + execute over HTTP, 1 client(s)",
+      "iterations": 40,
+      "ops_per_sec": 105.9,
+      "mean_us": 9411.2,
+      "p50_us": 9180.8,
+      "p95_us": 11164.8,
+      "p99_us": 11776.4
+    },
+    {
+      "name": "authorize + execute over HTTP, 4 client(s)",
+      "iterations": 40,
+      "ops_per_sec": 165.4,
+      "mean_us": 23513.6,
+      "p50_us": 23894.0,
+      "p95_us": 27339.2,
+      "p99_us": 32187.1
+    },
+    {
+      "name": "authorize + execute over HTTP, 16 client(s)",
+      "iterations": 32,
+      "ops_per_sec": 29.1,
+      "mean_us": 231410.4,
+      "p50_us": 53689.3,
+      "p95_us": 1041594.4,
+      "p99_us": 1056222.9
+    }
+  ]
+}
