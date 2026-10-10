@@ -153,7 +153,6 @@ def run_demo() -> tuple[DemoRuntime, dict[str, Any]]:
     return runtime, {
         "runs": [public_read, confidential_denied, delete_denied, share_denied],
         "providers": list(PROVIDERS),
-        "final_fixture_state": runtime.state,
         "audit": runtime.audit_report(),
     }
 

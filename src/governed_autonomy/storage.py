@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
-from typing import Protocol
+from typing import Any, Protocol
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
@@ -224,6 +224,15 @@ class PostgresReplayLog(ReplayLog):
 
     def verify_chain(self) -> bool:
         return super().verify_chain()
+
+    def verify_integrity(self) -> dict[str, Any]:
+        with self._lock:
+            cursor = self.connection.cursor()
+            try:
+                self._refresh(cursor)
+            finally:
+                cursor.close()
+            return super().verify_integrity()
 
     def append(
         self,

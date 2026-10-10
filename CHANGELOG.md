@@ -6,6 +6,20 @@ maintains a separate **GAS Protocol Version** for wire-format changes.
 
 ## [Unreleased]
 
+- Added trusted replay-anchor verification and documented independently retained
+  attestation evidence for LangChain, MCP, and A2A integrations.
+- Added replay integrity and anchor-certification APIs, an offline recovery
+  certification command, and optional anchor verification in deployment smoke
+  and rollback checks.
+- Added a signed immutable semantic-version policy registry with SHA-256 content
+  verification, lifecycle states, authorization-aware activation/rollback history,
+  compare-and-swap revisions, registry API/CLI commands, and local development
+  signer/verifier boundaries.
+- Added an AWS KMS runtime signer configuration using the AWS credential chain and Helm service-account workload identity; the KMS deployment path does not inject raw issuer private keys.
+- Pull requests now build and scan the package/container, audit installed project dependencies, and check source and container vulnerabilities. Added a 75% overall coverage floor.
+- Aligned the OPA pull-request risk policy with the Python/deployment layout and added a CI check to detect drift in mirrored workflow sources.
+- Added security reporting, ownership, dependency update, and issue-template metadata. Clarified that this repository currently provides a Python service rather than Substrate runtime pallets.
+
 - Added single-tenant Microsoft Entra ID API authentication using OIDC discovery, rotating JWKS validation, exact issuer/audience/tenant checks, and API-only federated authentication (`ENTRA_TENANT_ID`, `ENTRA_CLIENT_ID`); Helm accepts `oidc.tenantId` and `oidc.clientId`.
 
 - OIDC discovery now exposes validated authorization/token endpoints, JWKS URI, and advertised signing algorithms; discovery-based validators intersect provider algorithms with their configured allow-list.

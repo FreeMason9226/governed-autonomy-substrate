@@ -1,0 +1,16 @@
+name: Feature request
+description: Propose a change to the project
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed outcome
+      description: Describe the desired behavior without including secrets or sensitive data.
+    validations:
+      required: true

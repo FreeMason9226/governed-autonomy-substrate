@@ -33,6 +33,29 @@ def test_policy_digest_changes_when_constraints_change():
     assert base.digest() != changed.digest()
 
 
+def test_policy_to_dict_omits_empty_numeric_limits_and_preserves_configured_limits():
+    default_policy = Policy("files-v1", ("write_file",), {"write_file": ("path",)}, {})
+    limited_policy = Policy(
+        "files-v1",
+        ("read_file", "write_file"),
+        {"write_file": ("path",)},
+        {},
+        max_numeric_fields={
+            "write_file": {"z_size": 10, "a_size": 5},
+            "read_file": {"z_count": 20, "a_count": 15},
+        },
+    )
+
+    assert "max_numeric_fields" not in default_policy.to_dict()
+    numeric_limits = limited_policy.to_dict()["max_numeric_fields"]
+    assert list(numeric_limits) == ["read_file", "write_file"]
+    assert list(numeric_limits["read_file"]) == ["a_count", "z_count"]
+    assert numeric_limits == {
+        "read_file": {"a_count": 15, "z_count": 20},
+        "write_file": {"a_size": 5, "z_size": 10},
+    }
+
+
 def test_policy_rejects_unknown_action_and_reports_constraints():
     policy = Policy(
         policy_id="files-v1",

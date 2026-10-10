@@ -20,7 +20,11 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit
 from urllib.request import Request, urlopen
 
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+from .audit import AuditAnchor
 from .auth.entra import EntraDeviceAuthorizationClient
+from .canonical import b64decode
 from .identity import EntraOIDCConfig
 from .replay import ReplayLog
 
@@ -156,6 +160,36 @@ def build_parser() -> argparse.ArgumentParser:
     show = policy.add_parser("show", help="show one active policy")
     show.add_argument("policy_id")
 
+    registry = sub.add_parser("policy-registry").add_subparsers(dest="cmd", required=True)
+    registry_list = registry.add_parser(
+        "list", help="list immutable policy versions and lifecycle state"
+    )
+    registry_list.add_argument("policy_id")
+    registry_inspect = registry.add_parser("inspect", help="inspect an immutable policy version")
+    registry_inspect.add_argument("policy_id")
+    registry_inspect.add_argument("version")
+    registry_verify = registry.add_parser("verify", help="verify policy content and signature")
+    registry_verify.add_argument("policy_id")
+    registry_verify.add_argument("version")
+    registry_active = registry.add_parser("active", help="show the active immutable policy version")
+    registry_active.add_argument("policy_id")
+    registry_history = registry.add_parser("history", help="show activation and rollback history")
+    registry_history.add_argument("policy_id")
+    registry_publish = registry.add_parser("publish", help="publish a signed policy JSON document")
+    registry_publish.add_argument("policy", help="path to a policy JSON file")
+    for command_name, help_text in (
+        ("activate", "activate a verified policy version"),
+        ("rollback", "roll back to a previously published policy version"),
+        ("deprecate", "deprecate a non-active policy version"),
+        ("revoke", "revoke a policy version"),
+    ):
+        command = registry.add_parser(command_name, help=help_text)
+        command.add_argument("policy_id")
+        command.add_argument("version")
+        if command_name in {"activate", "rollback"}:
+            command.add_argument("--reason", required=True)
+            command.add_argument("--expected-revision", type=int, default=None)
+
     job = sub.add_parser("job").add_subparsers(dest="cmd", required=True)
     submit = job.add_parser("submit", help="enqueue a signed GAA for the worker")
     submit.add_argument("artifact", help="path to a GAA JSON file, or - for stdin")
@@ -167,6 +201,17 @@ def build_parser() -> argparse.ArgumentParser:
     replay = sub.add_parser("replay").add_subparsers(dest="cmd", required=True)
     verify = replay.add_parser("verify", help="verify a local replay JSONL hash chain")
     verify.add_argument("path")
+    certify = replay.add_parser(
+        "certify",
+        help="certify a local replay JSONL state against an independently retained anchor",
+    )
+    certify.add_argument("path")
+    certify.add_argument("--anchor", required=True, help="path to an AuditAnchor JSON document")
+    certify.add_argument(
+        "--public-key",
+        required=True,
+        help="base64url-encoded raw Ed25519 public key retained with the anchor",
+    )
     return parser
 
 
@@ -200,9 +245,7 @@ def run(args: argparse.Namespace) -> int:
                 ).acquire_token()
             except (RuntimeError, ValueError) as exc:
                 raise CLIError(str(exc)) from exc
-            path = save_entra_credentials(
-                args.api_url, config.tenant_id, config.client_id, scopes
-            )
+            path = save_entra_credentials(args.api_url, config.tenant_id, config.client_id, scopes)
         else:
             path = save_credentials(args.api_url, token)
         print(f"Saved credentials to {path}")
@@ -216,8 +259,8 @@ def run(args: argparse.Namespace) -> int:
             _print(_request("POST", "/admin/operator-keys", {"operator_id": args.operator_id}))
             print("Store the token now; it cannot be shown again.", file=sys.stderr)
         else:
-            path = f"/admin/operator-keys/{quote(args.key_id, safe='')}/revoke"
-            _print(_request("POST", path, {}))
+            revoke_path = f"/admin/operator-keys/{quote(args.key_id, safe='')}/revoke"
+            _print(_request("POST", revoke_path, {}))
     elif args.group == "policy":
         payload = _request("GET", "/admin/policies").get("policies", {})
         items = payload.get("policies", []) if isinstance(payload, dict) else []
@@ -226,30 +269,84 @@ def run(args: argparse.Namespace) -> int:
                 item
                 for item in items
                 if isinstance(item, dict)
-                and args.policy_id in (item.get("policy_id"), item.get("policy", {}).get("policy_id"))
+                and args.policy_id
+                in (item.get("policy_id"), item.get("policy", {}).get("policy_id"))
             ),
             None,
         )
         if found is None:
             raise CLIError(f"policy not found: {args.policy_id}")
         _print(found)
+    elif args.group == "policy-registry":
+        encoded_id = quote(args.policy_id, safe="") if hasattr(args, "policy_id") else ""
+        if args.cmd == "list":
+            _print(_request("GET", f"/admin/policy-registry/{encoded_id}"))
+        elif args.cmd == "inspect":
+            _print(
+                _request(
+                    "GET", f"/admin/policy-registry/{encoded_id}/{quote(args.version, safe='')}"
+                )
+            )
+        elif args.cmd == "verify":
+            result = _request(
+                "GET",
+                f"/admin/policy-registry/{encoded_id}/{quote(args.version, safe='')}/verify",
+            )
+            _print(result)
+            return 0 if result.get("valid") else 1
+        elif args.cmd == "active":
+            _print(_request("GET", f"/admin/policy-registry/{encoded_id}/active"))
+        elif args.cmd == "history":
+            _print(_request("GET", f"/admin/policy-registry/{encoded_id}/history"))
+        elif args.cmd == "publish":
+            try:
+                policy_payload = json.loads(Path(args.policy).read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise CLIError("policy must be a readable JSON document") from exc
+            if not isinstance(policy_payload, dict):
+                raise CLIError("policy must be a JSON object")
+            _print(_request("POST", "/admin/policy-registry/publish", {"policy": policy_payload}))
+        else:
+            body: dict[str, Any] = {"policy_id": args.policy_id, "version": args.version}
+            if args.cmd in {"activate", "rollback"}:
+                body["reason"] = args.reason
+                if args.expected_revision is not None:
+                    body["expected_revision"] = args.expected_revision
+            _print(_request("POST", f"/admin/policy-registry/{args.cmd}", body))
     elif args.group == "job":
         if args.cmd == "submit":
-            raw = sys.stdin.read() if args.artifact == "-" else Path(args.artifact).read_text("utf-8")
+            raw = (
+                sys.stdin.read() if args.artifact == "-" else Path(args.artifact).read_text("utf-8")
+            )
             artifact = json.loads(raw)
             if not isinstance(artifact, dict):
                 raise CLIError("artifact must be a JSON object")
-            key = args.idempotency_key or hashlib.sha256(
-                json.dumps(artifact, sort_keys=True, separators=(",", ":")).encode()
-            ).hexdigest()
+            key = (
+                args.idempotency_key
+                or hashlib.sha256(
+                    json.dumps(artifact, sort_keys=True, separators=(",", ":")).encode()
+                ).hexdigest()
+            )
             body = {"artifact": artifact, "idempotency_key": key, "max_attempts": args.max_attempts}
             _print(_request("POST", "/admin/jobs", body))
         else:
             _print(_request("GET", f"/admin/jobs/{quote(args.job_id, safe='')}"))
     elif args.group == "replay":
         report = ReplayLog.load_jsonl(args.path).verify_integrity()
-        _print(report)
-        return 0 if report["ok"] else 1
+        if args.cmd == "verify":
+            _print(report)
+            return 0 if report["ok"] else 1
+        try:
+            anchor_payload = json.loads(Path(args.anchor).read_text(encoding="utf-8"))
+            if not isinstance(anchor_payload, dict):
+                raise ValueError("anchor must be a JSON object")
+            anchor = AuditAnchor.from_dict(anchor_payload)
+            public_key = Ed25519PublicKey.from_public_bytes(b64decode(args.public_key))
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            raise CLIError("anchor and public key must be valid") from exc
+        certification = ReplayLog.load_jsonl(args.path).certify_anchor(anchor, public_key)
+        _print(certification)
+        return 0 if certification["certified"] else 1
     else:
         _print(_request("GET", _GET_ROUTES[args.group]))
     return 0

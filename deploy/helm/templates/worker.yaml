@@ -1,4 +1,7 @@
 {{- if .Values.worker.enabled }}
+{{- if and .Values.kms.enabled (not (or .Values.serviceAccount.create .Values.serviceAccount.name)) }}
+{{- fail "kms.enabled requires serviceAccount.create=true or serviceAccount.name for workload identity" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -20,7 +23,10 @@ spec:
         app.kubernetes.io/instance: {{ .Release.Name }}
         app.kubernetes.io/component: worker
     spec:
-      automountServiceAccountToken: false
+      {{- if or .Values.serviceAccount.create .Values.serviceAccount.name }}
+      serviceAccountName: {{ include "governed-autonomy.serviceAccountName" . }}
+      {{- end }}
+      automountServiceAccountToken: {{ .Values.kms.enabled }}
       securityContext:
         runAsNonRoot: true
         runAsUser: {{ .Values.worker.sandbox.runAsUser }}
@@ -37,12 +43,23 @@ spec:
               value: {{ .Values.runtimeMode | quote }}
             - name: GAS_WORKER_IMAGES
               value: {{ required "values.worker.allowedImages is required" .Values.worker.allowedImages | quote }}
+            {{- if .Values.kms.enabled }}
+            - name: GAS_ISSUER_SIGNER
+              value: "aws-kms"
+            - name: GAS_ISSUER_KMS_KEY_ID
+              value: {{ required "values.kms.keyId is required when kms.enabled is true" .Values.kms.keyId | quote }}
+            {{- if .Values.kms.region }}
+            - name: AWS_REGION
+              value: {{ .Values.kms.region | quote }}
+            {{- end }}
+            {{- else }}
             - name: GAS_ISSUER_KEY_ID
               valueFrom:
                 secretKeyRef: {name: {{ .Values.runtimeSecret }}, key: issuer-key-id}
             - name: GAS_ISSUER_PRIVATE_KEY
               valueFrom:
                 secretKeyRef: {name: {{ .Values.runtimeSecret }}, key: issuer-private-key}
+            {{- end }}
             - name: VAULT_ADDR
               value: {{ .Values.worker.vaultAddr | quote }}
             {{- if .Values.worker.vaultTokenSecret }}

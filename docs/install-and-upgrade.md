@@ -21,7 +21,8 @@ the OpenAPI document is served at `/openapi.json`.
    auto-migrate at startup). Migrations are additive.
 4. Upgrade: `helm upgrade gas deploy/helm -n gas --reuse-values --set image.tag=<new>`.
 5. Verify: `kubectl -n gas rollout status deploy/gas-governed-autonomy`, then
-   check `/readyz` and run `deploy/scripts/rollback-smoke.sh`.
+   check `/readyz`, run the deployed load smoke test with a retained replay
+   anchor, and run `deploy/scripts/rollback-smoke.sh`.
 6. Roll back with `helm rollback gas <revision> -n gas` if verification fails
    (restore the backup only if a migration must be reverted).
 
@@ -44,6 +45,30 @@ Flags override nothing implicitly; environment variables supply defaults.
 
 Run `gas-server --help` for the full flag list. Invalid configuration fails
 at startup, before the listener binds.
+
+### AWS KMS signing
+
+The AWS KMS signer can be selected with `GAS_ISSUER_SIGNER=aws-kms` and
+`GAS_ISSUER_KMS_KEY_ID=<key-id-or-arn>`. The runtime uses the AWS SDK default
+credential chain, so Kubernetes deployments should use workload identity (for
+example, EKS IRSA) rather than static AWS credentials. Install the `aws` extra;
+the provided container image includes it.
+
+For Helm, enable `kms.enabled`, set `kms.keyId`, and configure a service account
+using `serviceAccount.create` and `serviceAccount.annotations` for the cluster's
+workload-identity binding. Set `kms.region` when it cannot be inferred from the
+runtime environment. The chart mounts the service-account token only when KMS is
+enabled and omits the raw issuer-private-key environment variable in that mode.
+The configured AWS role must be scoped to the selected KMS key and signing
+operations. API and worker currently share this service account; separate
+least-privilege identities are a remaining hardening item. KMS mode does not
+provision keys or IAM permissions.
+
+Before switching KMS keys, archive the key ID and raw public key in the
+independent audit retention store, add the new public key to the runtime trust
+store, and deploy the new key ID. Keep the old issuer public key live through
+the maximum artifact lifetime, then revoke it for issuance while retaining its
+archived public key for historical replay-anchor verification.
 
 ### Microsoft Entra ID
 

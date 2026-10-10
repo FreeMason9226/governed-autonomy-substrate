@@ -2,9 +2,61 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
 
 from .service import GovernedService
+
+
+@dataclass(frozen=True)
+class TraceContext:
+    """Validated W3C trace context propagated across request boundaries."""
+
+    trace_id: str
+    parent_id: str
+    trace_flags: str = "01"
+
+    @classmethod
+    def from_traceparent(cls, value: str | None) -> TraceContext | None:
+        if value is None:
+            return None
+        parts = value.split("-")
+        if (
+            len(parts) != 4
+            or parts[0] != "00"
+            or len(parts[1]) != 32
+            or len(parts[2]) != 16
+            or len(parts[3]) != 2
+            or any(char not in "0123456789abcdef" for part in parts[1:] for char in part)
+            or set(parts[1]) == {"0"}
+            or set(parts[2]) == {"0"}
+        ):
+            return None
+        return cls(trace_id=parts[1], parent_id=parts[2], trace_flags=parts[3])
+
+    def traceparent(self) -> str:
+        return f"00-{self.trace_id}-{self.parent_id}-{self.trace_flags}"
+
+
+class TraceRecorder(Protocol):
+    """OpenTelemetry-compatible trace sink boundary."""
+
+    def record(self, name: str, attributes: dict[str, Any], context: TraceContext | None) -> None: ...
+
+
+class InMemoryTraceRecorder:
+    """Deterministic recorder useful for tests and simple collector adapters."""
+
+    def __init__(self) -> None:
+        self.events: list[dict[str, Any]] = []
+
+    def record(self, name: str, attributes: dict[str, Any], context: TraceContext | None) -> None:
+        self.events.append(
+            {
+                "name": name,
+                "attributes": dict(attributes),
+                "traceparent": context.traceparent() if context else None,
+            }
+        )
 
 
 @dataclass
@@ -55,10 +107,16 @@ class PlatformObservability:
     """Runtime monitoring for the governance barrier and platform shell."""
 
     def __init__(
-        self, *, service: GovernedService, service_name: str, environment: str = "dev"
+        self,
+        *,
+        service: GovernedService,
+        service_name: str,
+        environment: str = "dev",
+        tracer: TraceRecorder | None = None,
     ) -> None:
         self.service = service
         self.metrics = RuntimeMetrics(service=service_name, environment=environment)
+        self.tracer = tracer
 
     def record_authorized(self) -> None:
         self.metrics.record_authorized()
@@ -103,7 +161,14 @@ class PlatformObservability:
             )
         return "\n".join(lines) + "\n"
 
-    def trace_hook(self, event: str, attributes: dict[str, Any]) -> None:
-        """No-op OpenTelemetry-compatible hook for deployment instrumentation."""
+    def trace_hook(
+        self,
+        event: str,
+        attributes: dict[str, Any],
+        context: TraceContext | None = None,
+    ) -> None:
+        """Record bounded attributes through an OpenTelemetry-compatible adapter."""
         if not event or not isinstance(attributes, dict):
             raise ValueError("event and attributes are required")
+        if self.tracer is not None:
+            self.tracer.record(event, dict(attributes), context)

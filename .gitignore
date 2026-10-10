@@ -52,6 +52,8 @@ gas_server.db
 *.pem
 *.key
 *.p8
+!attest/demo_key.pem
 .env
 .env.*
 !.env.example
+demo-out/

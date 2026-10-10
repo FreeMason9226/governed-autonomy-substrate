@@ -210,4 +210,3 @@ def identity_context(subject: str, *, tenant: str = "gas-demo") -> dict[str, Any
         "roles": ["operator"],
         "environment": "dev",
     }
-

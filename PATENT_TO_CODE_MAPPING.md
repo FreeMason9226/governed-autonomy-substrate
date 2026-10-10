@@ -117,6 +117,9 @@ Implementation notes:
 - `PolicyRegistry.register()` rejects policy ID reuse with different digests.
 - `Policy.digest()` binds canonical policy contents to version/provenance.
 - `ExecutionBoundary` can optionally verify exact policy digest matches before execution.
+- `src/governed_autonomy/policy_registry.py` adds immutable semantic-version
+  publication records, authority signatures, lifecycle state, CAS activation,
+  rollback history, and integrity verification without altering prior versions.
 
 ### 7. Scope constraints: actor, tenant, size, TTL
 
@@ -207,7 +210,7 @@ To further align with the patent draft, the next strongest refinements would be:
 1. stronger governance-mesh node abstraction and weighted harmonization
 2. explicit GIR snapshot versioning and signed registry publication
 3. richer multi-org sync policy propagation with trust domains
-4. replay/rollback certification and verification endpoints
+4. automated cross-node replay certification orchestration
 5. a public `README` architecture diagram matching the patent figures
 
 The deployment boundary now also accepts a generic `Signer` in the PostgreSQL
@@ -256,13 +259,18 @@ Patent concepts:
 - auditable replay state certification
 
 Code:
-- `src/governed_autonomy/replay.py` - `ReplayLog.verify_integrity()`
+- `src/governed_autonomy/replay.py` - `ReplayLog.verify_integrity()` and
+  `ReplayLog.certify_anchor()`
+- `src/governed_autonomy/http_api.py` - `/audit/replay` and
+  `/audit/replay/certify`
 
 Implementation notes:
 - Recomputes every frame hash and previous-hash link without mutating the log.
 - Reports a stable replay digest, head hash, frame count, duplicate IDs, and first detected integrity error.
 - Audit event queries return detached copies so callers cannot mutate retained evidence through a returned object.
-- This is local integrity evidence; external WORM storage, signed attestations, and cross-node comparison remain deployment responsibilities.
+- A retained signed anchor can be certified through the audit API or the
+  offline `gas replay certify` command after rollback or restore.
+- Independent WORM retention and cross-node comparison remain deployment responsibilities.
 
 ### 9. Governance mesh insertion before authorization
 

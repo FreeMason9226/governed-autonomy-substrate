@@ -9,7 +9,8 @@ authorization, key rotation, and network policy remain deployment controls.
 
 ## Migrations, backup, and disaster recovery
 
-Apply `POSTGRES_NONCE_SCHEMA` and `POSTGRES_REPLAY_SCHEMA` through a reviewed,
+Apply `POSTGRES_NONCE_SCHEMA`, `POSTGRES_REPLAY_SCHEMA`, and
+`deploy/postgres/migrations/003_ha_sessions_rate_limit.sql` through a reviewed,
 versioned migration tool. Back up replay frames and policy/trust snapshots
 with encryption and retention controls. Restore into an isolated environment,
 verify the hash chain and signatures, then promote only after readiness checks.
@@ -76,9 +77,57 @@ conformance suite and load smoke test before promoting the recovered data.
 Record restore duration, replay-chain verification, and the first successful
 readiness timestamp as recovery objectives.
 
-The runtime Secret must provide `url`, `issuer-key-id`, and
-`issuer-private-key`. The issuer private key is raw 32-byte Ed25519 material
-encoded as URL-safe base64. Trust keys and revocations are stored in the
-PostgreSQL `trust_keys` table, so all replicas share rotation state. Rotate a
-key by provisioning the new key, rolling out the new Secret, and revoking the
-old key only after all old artifacts have expired.
+### Replay anchor retention and certification
+
+Use an S3 bucket with Object Lock in **COMPLIANCE** mode, owned by a separate
+audit account, for production anchors. The runtime database, application
+account, and its persistent volumes are not acceptable anchor stores.
+Configure the release writer only to add a new immutable object, and use a
+separate audit-reader identity with no delete or retention-bypass permission.
+
+Before a release or recovery drill, a platform administrator creates a
+checkpoint with `POST /admin/replay/anchor` and writes the returned JSON
+unchanged to the audit bucket. Record the object location with the release
+evidence. The anchor endpoint records its creation in the replay log before
+signing the checkpoint, so the returned anchor certifies that governance
+event as well.
+
+To certify a rollback, download the retained JSON object with the audit-reader
+identity and run:
+
+```bash
+REPLAY_ANCHOR_FILE=/secure/replay-anchor.json \
+GAS_URL=https://gas.example.com GAS_TOKEN=<auditor-access-token> \
+NAMESPACE=governed-autonomy RELEASE=governed-autonomy REVISION=<known-good> \
+bash deploy/scripts/rollback-smoke.sh
+```
+
+The script calls `POST /audit/replay/certify` after rollout and fails unless
+the trusted anchor exactly matches the restored replay digest, head hash, and
+frame count. For a disconnected recovery environment, retain the anchor
+signer's public key alongside the object and run:
+
+```bash
+gas replay certify restored-replay.jsonl \
+  --anchor /secure/replay-anchor.json \
+  --public-key <base64url-ed25519-public-key>
+```
+
+Set `GAS_REPLAY_ANCHOR_FILE` and
+`GAS_REQUIRE_REPLAY_CERTIFICATION=true` for the deployed load smoke check.
+The post-deploy token must have the `Auditor` role in OIDC-only deployments;
+the static health-probe token cannot certify replay state.
+
+With a local signer, the runtime Secret provides `url`, `issuer-key-id`, and
+`issuer-private-key`; the issuer private key is raw 32-byte Ed25519 material
+encoded as URL-safe base64. KMS mode provides `url` and uses workload identity
+instead of an issuer private key. Trust keys and revocations are stored in the
+PostgreSQL `trust_keys` table, so all replicas share rotation state.
+
+For KMS-backed issuance, archive each key ID and raw Ed25519 public key in the
+same independent Object Lock retention domain before switching the deployment
+to a new KMS key. Add the new public key to the live trust store, deploy the
+new `GAS_ISSUER_KMS_KEY_ID`, and retain the old live trust entry through the
+maximum artifact lifetime. Revoke the old issuer key once that lifetime has
+passed, but retain its archived public key for offline verification of
+historical anchors.

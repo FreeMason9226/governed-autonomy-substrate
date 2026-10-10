@@ -1,0 +1,10 @@
+{
+  "pr_id": 123,
+  "risk_score": 8,
+  "rules_triggered": [
+    "infra-path-change",
+    "dependency-bump"
+  ],
+  "rationale": "Infrastructure paths and dependency files changed.",
+  "timestamp": "2026-10-07T23:47:00Z"
+}

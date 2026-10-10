@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/FreeMason9226/governed-autonomy-substrate/schemas/policy-activation-event.schema.json",
+  "title": "Policy Activation Event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["policy_id", "previous_version", "selected_version", "requested_by", "reason", "timestamp", "revision", "operation"],
+  "properties": {
+    "policy_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"},
+    "previous_version": {"type": ["string", "null"]},
+    "selected_version": {"type": "string"},
+    "requested_by": {"type": "string", "minLength": 1, "maxLength": 256},
+    "reason": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "revision": {"type": "integer", "minimum": 1},
+    "operation": {"enum": ["activate", "rollback"]}
+  }
+}

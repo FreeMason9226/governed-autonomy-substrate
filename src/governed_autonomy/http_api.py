@@ -13,17 +13,24 @@ import threading
 import time
 import uuid
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from http import HTTPStatus
 from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from typing import Any, Protocol
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 from .admin_ui import render_admin_css, render_admin_js, render_admin_ui
+from .audit import AuditAnchor
 from .auth.store import IdentityStore, PostgresIdentityStore, SQLiteIdentityStore
 from .bootstrap import build_runtime_service
-from .deployment import BoundedRateLimiter, TLSConfig, security_headers
+from .deployment import (
+    BoundedRateLimiter,
+    PostgresRateLimiter,
+    RateLimiter,
+    TLSConfig,
+    security_headers,
+)
 from .errors import AuthorizationError
 from .health import health_report
 from .identity import (
@@ -41,16 +48,22 @@ from .issuer import PolicyDeniedError
 from .jobs import JobStoreError, JobSubmissionStore, SQLiteJobStore
 from .logging_config import configure_logging
 from .mesh import GovernanceInput
+from .observability import TraceContext, TraceRecorder
 from .operator_auth import OperatorKeyStore
 from .platform import RuntimeIdentity
 from .platform_admin import PolicyChangeManager, TrustChangeManager
 from .policy import policy_from_dict
+from .policy_registry import (
+    PolicySigner,
+    StoredPolicy,
+    VersionedPolicyRegistry,
+)
 from .rbac import Role
 from .service import GovernedService
 
 API_VERSION = "1"
 _VERSIONED_GET = frozenset(
-    {"/health", "/livez", "/readyz", "/startupz", "/audit", "/openapi.json"}
+    {"/health", "/livez", "/readyz", "/startupz", "/audit", "/audit/replay", "/openapi.json"}
 )
 
 
@@ -84,15 +97,161 @@ class _BrowserSession:
     expires_at: float
 
 
+class OIDCSessionRepository(Protocol):
+    """Shared storage for one-time OIDC state and browser sessions."""
+
+    def save_pending(self, state: str, pending: _PendingOIDCLogin) -> None: ...
+    def consume_pending(self, state: str, now: float) -> _PendingOIDCLogin | None: ...
+    def save_session(self, token: str, session: _BrowserSession) -> None: ...
+    def get_session(self, token: str, now: float) -> _BrowserSession | None: ...
+    def revoke_session(self, token: str) -> None: ...
+
+
+class PostgresOIDCSessionRepository:
+    """PostgreSQL session store for horizontally scaled OIDC browser sign-in."""
+
+    def __init__(self, connection: Any) -> None:
+        self.connection = connection
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS gas_oidc_sessions (
+                    token_hash TEXT PRIMARY KEY,
+                    record_type TEXT NOT NULL CHECK (record_type IN ('pending', 'session')),
+                    payload JSONB NOT NULL,
+                    expires_at TIMESTAMPTZ NOT NULL
+                )
+                """
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS gas_oidc_sessions_expiry_idx "
+                "ON gas_oidc_sessions(expires_at)"
+            )
+            self.connection.commit()
+        finally:
+            cursor.close()
+
+    @staticmethod
+    def _key(token: str) -> str:
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+    def save_pending(self, state: str, pending: _PendingOIDCLogin) -> None:
+        self._save(
+            state,
+            "pending",
+            {
+                "nonce": pending.nonce,
+                "code_verifier": pending.code_verifier,
+                "next_path": pending.next_path,
+            },
+            pending.expires_at,
+        )
+
+    def consume_pending(self, state: str, now: float) -> _PendingOIDCLogin | None:
+        payload = self._consume(state, "pending", now)
+        if payload is None:
+            return None
+        return _PendingOIDCLogin(
+            nonce=str(payload["nonce"]),
+            code_verifier=str(payload["code_verifier"]),
+            expires_at=now + 1,
+            next_path=str(payload["next_path"]),
+        )
+
+    def save_session(self, token: str, session: _BrowserSession) -> None:
+        self._save(token, "session", asdict(session.identity), session.expires_at)
+
+    def get_session(self, token: str, now: float) -> _BrowserSession | None:
+        payload = self._get(token, "session", now)
+        if payload is None:
+            return None
+        payload["roles"] = tuple(payload.get("roles", ()))
+        payload["groups"] = tuple(payload.get("groups", ()))
+        payload["scope"] = dict(payload.get("scope", {}))
+        return _BrowserSession(identity=RuntimeIdentity(**payload), expires_at=now + 1)
+
+    def revoke_session(self, token: str) -> None:
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute(
+                "DELETE FROM gas_oidc_sessions WHERE token_hash=%s AND record_type='session'",
+                (self._key(token),),
+            )
+            self.connection.commit()
+        except Exception:
+            self.connection.rollback()
+            raise
+        finally:
+            cursor.close()
+
+    def _save(
+        self, token: str, record_type: str, payload: dict[str, Any], expires_at: float
+    ) -> None:
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute(
+                "INSERT INTO gas_oidc_sessions(token_hash, record_type, payload, expires_at) "
+                "VALUES (%s, %s, %s::jsonb, to_timestamp(%s)) "
+                "ON CONFLICT(token_hash) DO UPDATE SET record_type=EXCLUDED.record_type, "
+                "payload=EXCLUDED.payload, expires_at=EXCLUDED.expires_at",
+                (self._key(token), record_type, json.dumps(payload), expires_at),
+            )
+            self.connection.commit()
+        except Exception:
+            self.connection.rollback()
+            raise
+        finally:
+            cursor.close()
+
+    def _get(self, token: str, record_type: str, now: float) -> dict[str, Any] | None:
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute(
+                "SELECT payload FROM gas_oidc_sessions "
+                "WHERE token_hash=%s AND record_type=%s AND expires_at > to_timestamp(%s)",
+                (self._key(token), record_type, now),
+            )
+            row = cursor.fetchone()
+            return dict(row[0]) if row is not None else None
+        finally:
+            cursor.close()
+
+    def _consume(self, token: str, record_type: str, now: float) -> dict[str, Any] | None:
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute(
+                "DELETE FROM gas_oidc_sessions "
+                "WHERE token_hash=%s AND record_type=%s AND expires_at > to_timestamp(%s) "
+                "RETURNING payload",
+                (self._key(token), record_type, now),
+            )
+            row = cursor.fetchone()
+            self.connection.commit()
+            return dict(row[0]) if row is not None else None
+        except Exception:
+            self.connection.rollback()
+            raise
+        finally:
+            cursor.close()
+
+
 class _OIDCSessionStore:
     """Process-local, bounded, single-use OAuth state and browser sessions."""
 
-    def __init__(self, *, clock: Any = time.time, max_entries: int = 10_000) -> None:
+    def __init__(
+        self,
+        *,
+        clock: Any = time.time,
+        max_entries: int = 10_000,
+        repository: OIDCSessionRepository | None = None,
+    ) -> None:
         self._clock = clock
         self._max_entries = max_entries
         self._lock = threading.RLock()
         self._pending: dict[str, _PendingOIDCLogin] = {}
         self._sessions: dict[str, _BrowserSession] = {}
+        self._repository = repository
 
     def begin_login(self, *, next_path: str) -> tuple[str, str, str]:
         now = self._clock()
@@ -109,6 +268,8 @@ class _OIDCSessionStore:
                 expires_at=now + _LOGIN_STATE_TTL_SECONDS,
                 next_path=next_path,
             )
+            if self._repository is not None:
+                self._repository.save_pending(state, self._pending.pop(state))
             challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest())
             return state, nonce, challenge.rstrip(b"=").decode("ascii")
 
@@ -116,7 +277,11 @@ class _OIDCSessionStore:
         now = self._clock()
         with self._lock:
             self._prune(now)
-            pending = self._pending.pop(state, None)
+            pending = (
+                self._repository.consume_pending(state, now)
+                if self._repository is not None
+                else self._pending.pop(state, None)
+            )
             if pending is None or now >= pending.expires_at:
                 raise IdentityValidationError("OIDC login state is invalid or expired")
             return pending
@@ -137,16 +302,22 @@ class _OIDCSessionStore:
             self._prune(now)
             if len(self._pending) + len(self._sessions) >= self._max_entries:
                 raise IdentityValidationError("OIDC session capacity is exhausted")
-            self._sessions[self._session_key(session_token)] = _BrowserSession(
+            session = _BrowserSession(
                 identity=core_identity,
                 expires_at=expires_at,
             )
+            if self._repository is not None:
+                self._repository.save_session(session_token, session)
+            else:
+                self._sessions[self._session_key(session_token)] = session
         return session_token, max(1, int(expires_at - now))
 
     def get_session(self, session_token: str) -> RuntimeIdentity | None:
         now = self._clock()
         key = self._session_key(session_token)
         with self._lock:
+            if self._repository is not None:
+                return self._repository.get_session(session_token, now)
             session = self._sessions.get(key)
             if session is None:
                 return None
@@ -157,7 +328,10 @@ class _OIDCSessionStore:
 
     def revoke_session(self, session_token: str) -> None:
         with self._lock:
-            self._sessions.pop(self._session_key(session_token), None)
+            if self._repository is not None:
+                self._repository.revoke_session(session_token)
+            else:
+                self._sessions.pop(self._session_key(session_token), None)
 
     def _prune(self, now: float) -> None:
         self._pending = {
@@ -183,13 +357,18 @@ class AuthenticatedAPI:
         oidc_auth_client: OIDCAuthCodeClient | None = None,
         oidc_login_validator: OIDCValidator | None = None,
         oidc_cookie_secure: bool = True,
+        oidc_session_repository: OIDCSessionRepository | None = None,
         operator_token: str | None = None,
         operator_role: str = "gas-admin",
         operator_key_store: OperatorKeyStore | None = None,
         identity_store: IdentityStore | None = None,
         job_store: JobSubmissionStore | None = None,
+        versioned_policy_registry: VersionedPolicyRegistry | None = None,
+        policy_registry_signer: PolicySigner | None = None,
         max_body_bytes: int = 64 * 1024,
         rate_limit: int = 120,
+        rate_limiter: RateLimiter | None = None,
+        tracer: TraceRecorder | None = None,
         cors_origins: Sequence[str] = (),
     ) -> None:
         if not bearer_token and oidc_validator is None:
@@ -209,15 +388,22 @@ class AuthenticatedAPI:
         self.oidc_auth_client = oidc_auth_client
         self.oidc_login_validator = oidc_login_validator
         self.oidc_cookie_secure = oidc_cookie_secure
-        self.oidc_sessions = _OIDCSessionStore() if oidc_auth_client is not None else None
+        self.oidc_sessions = (
+            _OIDCSessionStore(repository=oidc_session_repository)
+            if oidc_auth_client is not None
+            else None
+        )
         self.operator_token = operator_token
         self.operator_role = operator_role
         self.operator_key_store = operator_key_store
         self.identity_store = identity_store
         self.job_store = job_store
+        self.versioned_policy_registry = versioned_policy_registry
+        self.policy_registry_signer = policy_registry_signer
         self.max_body_bytes = max_body_bytes
         self.cors_origins = frozenset(o.rstrip("/") for o in cors_origins if o)
-        self.rate_limiter = BoundedRateLimiter(rate_limit)
+        self.rate_limiter = rate_limiter or BoundedRateLimiter(rate_limit)
+        self.tracer = tracer
         if (
             self.service.policy_change_manager is not None
             and self.service.policy_change_manager.actor_audit_hook is None
@@ -267,7 +453,7 @@ class AuthenticatedAPI:
                     return {}
                 return {
                     "Access-Control-Allow-Origin": origin,
-                    "Access-Control-Expose-Headers": "X-Request-ID",
+                    "Access-Control-Expose-Headers": "X-Request-ID, traceparent",
                     "Vary": "Origin",
                 }
 
@@ -284,7 +470,7 @@ class AuthenticatedAPI:
                 if cors:
                     self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
                     self.send_header(
-                        "Access-Control-Allow-Headers", "Authorization, Content-Type"
+                        "Access-Control-Allow-Headers", "Authorization, Content-Type, traceparent"
                     )
                     self.send_header("Access-Control-Max-Age", "600")
                 self.send_header("Content-Length", "0")
@@ -377,8 +563,14 @@ class AuthenticatedAPI:
                 if route == "/audit":
                     self._send(HTTPStatus.OK, api.service.audit_report())
                     return
+                if route == "/audit/replay":
+                    self._send(HTTPStatus.OK, {"integrity": api.replay_integrity()})
+                    return
                 if route == "/admin/policies":
                     self._send(HTTPStatus.OK, {"policies": api.service.policies.to_dict()})
+                    return
+                if route.startswith("/admin/policy-registry/"):
+                    self._handle_policy_registry_get(route)
                     return
                 if route == "/admin/proposals":
                     self._send(HTTPStatus.OK, api.list_proposals())
@@ -478,7 +670,9 @@ class AuthenticatedAPI:
                         self._send(HTTPStatus.FORBIDDEN, {"error": "invalid request origin"})
                         return
                     if self.headers.get("Content-Length", "0") != "0":
-                        self._send(HTTPStatus.BAD_REQUEST, {"error": "logout request must be empty"})
+                        self._send(
+                            HTTPStatus.BAD_REQUEST, {"error": "logout request must be empty"}
+                        )
                         return
                     api._revoke_browser_session(self)
                     self.send_response(HTTPStatus.NO_CONTENT)
@@ -486,9 +680,9 @@ class AuthenticatedAPI:
                     self.send_header("Content-Length", "0")
                     self.end_headers()
                     return
-                if getattr(self, "gas_session_authenticated", False) and not api._session_origin_allowed(
-                    self
-                ):
+                if getattr(
+                    self, "gas_session_authenticated", False
+                ) and not api._session_origin_allowed(self):
                     self._send(HTTPStatus.FORBIDDEN, {"error": "invalid request origin"})
                     return
                 if route.startswith("/admin") and not api._admin_authorized(
@@ -505,8 +699,44 @@ class AuthenticatedAPI:
                         {"error": "role authorization required"},
                     )
                     return
+                if route == "/audit/replay/certify":
+                    try:
+                        certification = api.certify_replay_anchor(api._read_json(self))
+                    except ValueError:
+                        self._send(HTTPStatus.BAD_REQUEST, {"error": "invalid replay anchor"})
+                        return
+                    except RuntimeError as exc:
+                        self._send(
+                            HTTPStatus.SERVICE_UNAVAILABLE,
+                            {"error": str(exc) or "replay certification unavailable"},
+                        )
+                        return
+                    self._send(
+                        HTTPStatus.OK if certification["certified"] else HTTPStatus.CONFLICT,
+                        certification,
+                    )
+                    return
+                if route == "/admin/replay/anchor":
+                    try:
+                        if api._read_json(self):
+                            raise ValueError("replay anchor requests must be empty")
+                        self._send(
+                            HTTPStatus.CREATED,
+                            api.create_replay_anchor(actor_id=api._actor_id(self)).to_dict(),
+                        )
+                    except (TypeError, ValueError):
+                        self._send(HTTPStatus.BAD_REQUEST, {"error": "invalid replay anchor request"})
+                    except RuntimeError as exc:
+                        self._send(
+                            HTTPStatus.SERVICE_UNAVAILABLE,
+                            {"error": str(exc) or "replay anchor unavailable"},
+                        )
+                    return
                 if route.startswith("/admin/proposals"):
                     self._handle_admin_proposals_post(route)
+                    return
+                if route.startswith("/admin/policy-registry"):
+                    self._handle_policy_registry_post(route)
                     return
                 if route == "/admin/identities/role-assignments":
                     if api.identity_store is None:
@@ -626,9 +856,7 @@ class AuthenticatedAPI:
                         payload = api._read_json(self)
                         self._send(
                             HTTPStatus.OK,
-                            api.submit_approval(
-                                parts[0], payload, actor_id=api._actor_id(self)
-                            ),
+                            api.submit_approval(parts[0], payload, actor_id=api._actor_id(self)),
                         )
                     elif len(parts) == 2 and parts[1] == "activate":
                         self._send(
@@ -642,6 +870,129 @@ class AuthenticatedAPI:
                     self._send(HTTPStatus.NOT_FOUND, {"error": message})
                 except (TypeError, ValueError) as exc:
                     self._send(HTTPStatus.BAD_REQUEST, {"error": str(exc) or "invalid request"})
+
+            def _handle_policy_registry_get(self, route: str) -> None:
+                registry = api.versioned_policy_registry
+                if registry is None:
+                    self._send(
+                        HTTPStatus.SERVICE_UNAVAILABLE,
+                        {"error": "versioned policy registry is not configured"},
+                    )
+                    return
+                match = re.fullmatch(
+                    r"/admin/policy-registry/([a-z0-9][a-z0-9._-]{0,127})"
+                    r"(?:/(versions|history|active|[^/]+)(?:/(verify))?)?",
+                    route,
+                )
+                if match is None:
+                    self._send(HTTPStatus.NOT_FOUND, {"error": "not found"})
+                    return
+                policy_id, selector, verification = match.groups()
+                try:
+                    if selector is None:
+                        self._send(
+                            HTTPStatus.OK,
+                            {
+                                "policy_id": policy_id,
+                                "versions": registry.list_versions(policy_id),
+                                "lifecycle": {
+                                    version: state.value
+                                    for version, state in registry.list_lifecycle(policy_id).items()
+                                },
+                            },
+                        )
+                    elif selector == "versions":
+                        self._send(HTTPStatus.OK, {"versions": registry.list_versions(policy_id)})
+                    elif selector == "history":
+                        self._send(
+                            HTTPStatus.OK,
+                            {
+                                "events": [
+                                    asdict(event)
+                                    for event in registry.activation_history(policy_id)
+                                ]
+                            },
+                        )
+                    elif selector == "active":
+                        self._send(
+                            HTTPStatus.OK,
+                            api._policy_record_payload(registry.get_active(policy_id)),
+                        )
+                    elif verification == "verify":
+                        self._send(HTTPStatus.OK, registry.verify(policy_id, selector).to_dict())
+                    else:
+                        self._send(
+                            HTTPStatus.OK,
+                            api._policy_record_payload(registry.get(policy_id, selector)),
+                        )
+                except KeyError as exc:
+                    self._send(HTTPStatus.NOT_FOUND, {"error": str(exc).strip("'\"")})
+                except ValueError as exc:
+                    self._send(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+
+            def _handle_policy_registry_post(self, route: str) -> None:
+                registry = api.versioned_policy_registry
+                if registry is None:
+                    self._send(
+                        HTTPStatus.SERVICE_UNAVAILABLE,
+                        {"error": "versioned policy registry is not configured"},
+                    )
+                    return
+                try:
+                    payload = api._read_json(self)
+                    actor_id = api._actor_id(self)
+                    if route == "/admin/policy-registry/publish":
+                        if api.policy_registry_signer is None:
+                            raise RuntimeError("policy registry signer is not configured")
+                        record = registry.publish(payload["policy"], api.policy_registry_signer)
+                        api.service.record_governance_event(
+                            "policy_registry.published",
+                            f"{record.id}@{record.version}",
+                            actor_id=actor_id,
+                        )
+                        self._send(HTTPStatus.CREATED, api._policy_record_payload(record))
+                        return
+                    policy_id, version = payload["policy_id"], payload["version"]
+                    if not isinstance(policy_id, str) or not isinstance(version, str):
+                        raise ValueError("policy_id and version must be strings")
+                    if route == "/admin/policy-registry/activate":
+                        event = registry.activate(
+                            policy_id,
+                            version,
+                            requested_by=actor_id,
+                            reason=payload["reason"],
+                            expected_revision=payload.get("expected_revision"),
+                        )
+                    elif route == "/admin/policy-registry/rollback":
+                        event = registry.rollback(
+                            policy_id,
+                            version,
+                            requested_by=actor_id,
+                            reason=payload["reason"],
+                            expected_revision=payload.get("expected_revision"),
+                        )
+                    elif route == "/admin/policy-registry/deprecate":
+                        registry.deprecate(policy_id, version)
+                        self._send(HTTPStatus.OK, {"lifecycle": "DEPRECATED"})
+                        return
+                    elif route == "/admin/policy-registry/revoke":
+                        registry.revoke(policy_id, version)
+                        self._send(HTTPStatus.OK, {"lifecycle": "REVOKED"})
+                        return
+                    else:
+                        self._send(HTTPStatus.NOT_FOUND, {"error": "not found"})
+                        return
+                    api.service.record_governance_event(
+                        f"policy_registry.{event.operation}",
+                        f"{event.policy_id}@{event.selected_version}",
+                        actor_id=actor_id,
+                    )
+                    self._send(HTTPStatus.OK, asdict(event))
+                except KeyError as exc:
+                    self._send(HTTPStatus.BAD_REQUEST, {"error": str(exc).strip("'\"")})
+                except (RuntimeError, TypeError, ValueError) as exc:
+                    self._send(HTTPStatus.BAD_REQUEST, {"error": str(exc) or "invalid request"})
+
             def _handle_admin_trust_post(self, route: str) -> None:
                 """Dispatch /admin/trust/keys[...] POST routes.
 
@@ -695,9 +1046,7 @@ class AuthenticatedAPI:
                 except (KeyError, TypeError, ValueError) as exc:
                     self._send(HTTPStatus.BAD_REQUEST, {"error": str(exc) or "invalid request"})
                 except (JobStoreError, sqlite3.Error):
-                    self._send(
-                        HTTPStatus.SERVICE_UNAVAILABLE, {"error": "job store unavailable"}
-                    )
+                    self._send(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "job store unavailable"})
 
             def _handle_admin_job_get(self, route: str) -> None:
                 if api.job_store is None:
@@ -716,9 +1065,7 @@ class AuthenticatedAPI:
                     self._send(HTTPStatus.NOT_FOUND, {"error": "unknown job"})
                     return
                 except (JobStoreError, sqlite3.Error):
-                    self._send(
-                        HTTPStatus.SERVICE_UNAVAILABLE, {"error": "job store unavailable"}
-                    )
+                    self._send(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "job store unavailable"})
                     return
                 self._send(
                     HTTPStatus.OK,
@@ -760,17 +1107,30 @@ class AuthenticatedAPI:
 
             def _send(self, status: HTTPStatus, payload: dict[str, Any]) -> None:
                 encoded = json.dumps(payload, sort_keys=True).encode("utf-8")
-                self._rid = api._request_id(self)
+                self._rid = uuid.uuid4().hex
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(encoded)))
                 self.send_header("X-Request-ID", self._rid)
                 self.send_header("X-API-Version", API_VERSION)
+                trace_context = api._trace_context(self)
+                if trace_context is not None:
+                    self.send_header("traceparent", trace_context.traceparent())
                 self._send_cors()
                 for k, v in security_headers().items():
                     self.send_header(k, v)
                 self.end_headers()
                 self.wfile.write(encoded)
+                api._record_trace(
+                    "gas.http.response",
+                    {
+                        "http.request.method": self.command,
+                        "url.path": urlsplit(self.path).path,
+                        "http.response.status_code": int(status),
+                        "request.id": self._rid,
+                    },
+                    trace_context,
+                )
 
             def _send_static(self, body: bytes, content_type: str) -> None:
                 """Serve a same-origin admin UI asset with a relaxed, still-strict CSP.
@@ -820,7 +1180,9 @@ class AuthenticatedAPI:
                 code_challenge=challenge,
             )
         except (IdentityValidationError, ValueError):
-            self._send_auth_error(request, HTTPStatus.SERVICE_UNAVAILABLE, "OIDC sign-in unavailable")
+            self._send_auth_error(
+                request, HTTPStatus.SERVICE_UNAVAILABLE, "OIDC sign-in unavailable"
+            )
             return
         request.send_response(HTTPStatus.FOUND)
         request.send_header("Location", location)
@@ -833,6 +1195,18 @@ class AuthenticatedAPI:
         for key, value in security_headers().items():
             request.send_header(key, value)
         request.end_headers()
+
+    def _trace_context(self, request: BaseHTTPRequestHandler) -> TraceContext | None:
+        return TraceContext.from_traceparent(request.headers.get("traceparent"))
+
+    def _record_trace(
+        self,
+        name: str,
+        attributes: dict[str, Any],
+        context: TraceContext | None,
+    ) -> None:
+        if self.tracer is not None:
+            self.tracer.record(name, attributes, context)
 
     def _handle_oidc_callback(self, request: BaseHTTPRequestHandler) -> None:
         if (
@@ -942,15 +1316,13 @@ class AuthenticatedAPI:
 
     def _session_cookie(self, token: str, *, max_age: int) -> str:
         cookie = (
-            f"{self.session_cookie_name}={token}; Path=/; HttpOnly; SameSite=Lax; "
-            f"Max-Age={max_age}"
+            f"{self.session_cookie_name}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}"
         )
         return f"{cookie}; Secure" if self.oidc_cookie_secure else cookie
 
     def _state_cookie(self, token: str, *, max_age: int) -> str:
         cookie = (
-            f"{self.state_cookie_name}={token}; Path=/; HttpOnly; SameSite=Lax; "
-            f"Max-Age={max_age}"
+            f"{self.state_cookie_name}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}"
         )
         return f"{cookie}; Secure" if self.oidc_cookie_secure else cookie
 
@@ -1086,7 +1458,9 @@ class AuthenticatedAPI:
 
     @staticmethod
     def _api_required_roles(method: str, route: str) -> frozenset[Role]:
-        if method == "GET" and route in {"/audit", "/api/v1/audit"}:
+        if method == "GET" and route in {"/audit", "/api/v1/audit", "/audit/replay"}:
+            return frozenset({Role.AUDITOR})
+        if method == "POST" and route == "/audit/replay/certify":
             return frozenset({Role.AUDITOR})
         if method == "POST" and route in {
             "/authorize",
@@ -1097,25 +1471,28 @@ class AuthenticatedAPI:
             return frozenset({Role.OPERATOR})
         return frozenset()
 
-    def _api_authorized(
-        self, request: BaseHTTPRequestHandler, *, method: str, route: str
-    ) -> bool:
+    def _api_authorized(self, request: BaseHTTPRequestHandler, *, method: str, route: str) -> bool:
         required = self._api_required_roles(method, route)
         if not required:
             return True
         runtime_identity = getattr(request, "gas_runtime_identity", None)
         if runtime_identity is None:
             return self.oidc_validator is None and not self.oidc_only
-        if method == "POST" and route in {
-            "/authorize",
-            "/execute",
-            "/api/v1/authorize",
-            "/api/v1/execute",
-        } and not (
-            runtime_identity.subject
-            and runtime_identity.tenant_id
-            and runtime_identity.issuer
-            and runtime_identity.identity_source
+        if (
+            method == "POST"
+            and route
+            in {
+                "/authorize",
+                "/execute",
+                "/api/v1/authorize",
+                "/api/v1/execute",
+            }
+            and not (
+                runtime_identity.subject
+                and runtime_identity.tenant_id
+                and runtime_identity.issuer
+                and runtime_identity.identity_source
+            )
         ):
             return False
         roles = set(runtime_identity.roles)
@@ -1127,11 +1504,11 @@ class AuthenticatedAPI:
     def _admin_required_roles(method: str, route: str) -> frozenset[Role]:
         if method == "GET":
             if route in {"/admin", "/admin/app.js", "/admin/app.css"}:
-                return frozenset(
-                    {Role.POLICY_ADMIN, Role.OPERATOR, Role.AUDITOR, Role.APPROVER}
-                )
+                return frozenset({Role.POLICY_ADMIN, Role.OPERATOR, Role.AUDITOR, Role.APPROVER})
             if route == "/admin/policies":
                 return frozenset({Role.POLICY_ADMIN, Role.OPERATOR, Role.AUDITOR})
+            if route.startswith("/admin/policy-registry/"):
+                return frozenset({Role.POLICY_ADMIN, Role.AUDITOR})
             if route == "/admin/proposals":
                 return frozenset({Role.POLICY_ADMIN, Role.APPROVER, Role.AUDITOR})
             if route == "/admin/trust":
@@ -1165,6 +1542,14 @@ class AuthenticatedAPI:
             return frozenset()
         if route in {"/admin/proposals/prepare", "/admin/proposals"}:
             return frozenset({Role.POLICY_ADMIN})
+        if route in {
+            "/admin/policy-registry/publish",
+            "/admin/policy-registry/activate",
+            "/admin/policy-registry/rollback",
+            "/admin/policy-registry/deprecate",
+            "/admin/policy-registry/revoke",
+        }:
+            return frozenset({Role.POLICY_ADMIN})
         if re.fullmatch(r"/admin/proposals/[^/]+/activate", route):
             return frozenset({Role.POLICY_ADMIN})
         if re.fullmatch(r"/admin/proposals/[^/]+/(?:prepare-approval|approve)", route):
@@ -1176,6 +1561,8 @@ class AuthenticatedAPI:
         ):
             return frozenset({Role.PLATFORM_ADMIN})
         if route == "/admin/identities/role-assignments":
+            return frozenset({Role.PLATFORM_ADMIN})
+        if route == "/admin/replay/anchor":
             return frozenset({Role.PLATFORM_ADMIN})
         if route == "/admin/jobs":
             return frozenset({Role.OPERATOR})
@@ -1218,10 +1605,14 @@ class AuthenticatedAPI:
             roles = set(runtime_identity.roles)
             if "platform_admin" in roles:
                 return True
-            needed = {Role.OPERATOR.value} if write else {
-                Role.OPERATOR.value,
-                Role.AUDITOR.value,
-            }
+            needed = (
+                {Role.OPERATOR.value}
+                if write
+                else {
+                    Role.OPERATOR.value,
+                    Role.AUDITOR.value,
+                }
+            )
             return bool(roles.intersection(needed))
         supplied = request.headers.get("Authorization", "")
         return self.operator_token is not None and hmac.compare_digest(
@@ -1333,23 +1724,18 @@ class AuthenticatedAPI:
         incidents = [
             {
                 "summary": event.get("error_type", "Authorization denied"),
-                "detail": event.get("error", "; ".join(event.get("decision", {}).get("reasons", []))),
-                "type": event.get("type"),
-                "severity": (
-                    "high"
-                    if event.get("type") == "execution"
-                    else "medium"
+                "detail": event.get(
+                    "error", "; ".join(event.get("decision", {}).get("reasons", []))
                 ),
+                "type": event.get("type"),
+                "severity": ("high" if event.get("type") == "execution" else "medium"),
             }
             for event in events
             if (event.get("type") == "execution" and event.get("status") == "failed")
             or (event.get("type") == "authorization" and event.get("issued") is False)
         ]
         execution_count = summary["execution_count"]
-        assets = [
-            {"asset_id": key, "policies": coverage[key]}
-            for key in sorted(coverage)
-        ]
+        assets = [{"asset_id": key, "policies": coverage[key]} for key in sorted(coverage)]
         graph_edges = [
             {"from": policy["id"], "to": action}
             for policy in policies
@@ -1362,7 +1748,8 @@ class AuthenticatedAPI:
             "executions": execution_count,
             "failures": summary["failure_count"],
             "success_rate": round(summary["success_count"] / execution_count * 100, 1)
-            if execution_count else None,
+            if execution_count
+            else None,
             "trusted_keys": len(trust["keys"]),
             "frames": summary["frame_count"],
         }
@@ -1371,9 +1758,7 @@ class AuthenticatedAPI:
             "assets": assets,
             "policies": policies,
             "graph": {"edges": graph_edges},
-            "approvals": [
-                p for p in proposals["proposals"] if p["status"] == "pending"
-            ],
+            "approvals": [p for p in proposals["proposals"] if p["status"] == "pending"],
             "incidents": incidents[-10:],
             "timeline": [
                 {
@@ -1431,6 +1816,47 @@ class AuthenticatedAPI:
         trust_store = self.service.boundary.trust_store
         return trust_store.to_dict() if trust_store is not None else {"keys": {}, "revoked": []}
 
+    def replay_integrity(self) -> dict[str, Any]:
+        return self.service.boundary.replay_log.verify_integrity()
+
+    def create_replay_anchor(self, *, actor_id: str) -> AuditAnchor:
+        signer = self.service.issuer.issuer
+        self.service.record_governance_event(
+            "replay.anchor_created",
+            signer.key_id,
+            actor_id=actor_id,
+        )
+        return self.service.boundary.replay_log.create_anchor(signer)
+
+    def certify_replay_anchor(self, payload: dict[str, Any]) -> dict[str, Any]:
+        anchor = AuditAnchor.from_dict(payload)
+        trust_store = self.service.boundary.trust_store
+        if trust_store is None:
+            raise RuntimeError("replay certification requires a trust store")
+        public_key = trust_store.resolve(anchor.signer_key_id)
+        if public_key is None:
+            return {
+                "certified": False,
+                "integrity": self.replay_integrity(),
+                "reason": "anchor_signer_untrusted",
+                "signer_key_id": anchor.signer_key_id,
+            }
+        certification = self.service.boundary.replay_log.certify_anchor(anchor, public_key)
+        if not certification["certified"]:
+            certification["reason"] = "replay_state_mismatch"
+        return certification
+
+    @staticmethod
+    def _policy_record_payload(record: StoredPolicy) -> dict[str, Any]:
+        return {
+            "policy_id": record.id,
+            "version": record.version,
+            "content_digest": record.content_hash,
+            "policy": record.policy,
+            "schema_version": record.schema_version,
+            "signature": asdict(record.signature) if record.signature is not None else None,
+        }
+
     def _require_operator_key_store(self) -> OperatorKeyStore:
         if self.operator_key_store is None:
             raise ValueError("operator API key management is not configured")
@@ -1439,9 +1865,7 @@ class AuthenticatedAPI:
     def list_operator_keys(self) -> dict[str, Any]:
         return {"keys": list(self._require_operator_key_store().list_keys())}
 
-    def create_operator_key(
-        self, payload: dict[str, Any], *, actor_id: str
-    ) -> dict[str, str]:
+    def create_operator_key(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, str]:
         key_store = self._require_operator_key_store()
         operator_id = payload.get("operator_id")
         if not isinstance(operator_id, str):
@@ -1483,9 +1907,7 @@ class AuthenticatedAPI:
 
     def revoke_operator_key(self, key_id: str, *, actor_id: str) -> None:
         self._require_operator_key_store().revoke(key_id)
-        self.service.record_governance_event(
-            "operator.key_revoked", key_id, actor_id=actor_id
-        )
+        self.service.record_governance_event("operator.key_revoked", key_id, actor_id=actor_id)
 
 
 def _env_flag(name: str) -> bool:
@@ -1567,11 +1989,16 @@ def create_server(
     oidc_auth_client: OIDCAuthCodeClient | None = None,
     oidc_login_validator: OIDCValidator | None = None,
     oidc_cookie_secure: bool = True,
+    oidc_session_repository: OIDCSessionRepository | None = None,
     operator_token: str | None = None,
     operator_role: str = "gas-admin",
     operator_key_store: OperatorKeyStore | None = None,
     identity_store: IdentityStore | None = None,
     job_store: JobSubmissionStore | None = None,
+    versioned_policy_registry: VersionedPolicyRegistry | None = None,
+    policy_registry_signer: PolicySigner | None = None,
+    rate_limiter: RateLimiter | None = None,
+    tracer: TraceRecorder | None = None,
     cors_origins: Sequence[str] = (),
 ) -> ThreadingHTTPServer:
     server = ThreadingHTTPServer(
@@ -1584,13 +2011,18 @@ def create_server(
             oidc_auth_client=oidc_auth_client,
             oidc_login_validator=oidc_login_validator,
             oidc_cookie_secure=oidc_cookie_secure,
+            oidc_session_repository=oidc_session_repository,
             operator_token=operator_token,
             operator_role=operator_role,
             operator_key_store=operator_key_store,
             identity_store=identity_store,
             job_store=job_store,
+            versioned_policy_registry=versioned_policy_registry,
+            policy_registry_signer=policy_registry_signer,
             max_body_bytes=max_body_bytes,
             rate_limit=rate_limit,
+            rate_limiter=rate_limiter,
+            tracer=tracer,
             cors_origins=cors_origins,
         ).handler(),
     )
@@ -1714,6 +2146,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         job_store = PostgresJobStore(job_connection)
     else:
         job_store = None
+    ha_connection = None
+    oidc_session_repository = None
+    rate_limiter = None
+    if os.environ.get("DATABASE_URL"):
+        try:
+            import psycopg
+        except ImportError as exc:
+            raise SystemExit("install the postgres extra: pip install .[postgres]") from exc
+        ha_connection = psycopg.connect(os.environ["DATABASE_URL"])
+        rate_limiter = PostgresRateLimiter(ha_connection, limit=args.rate_limit)
+        if oidc_auth_client is not None:
+            oidc_session_repository = PostgresOIDCSessionRepository(ha_connection)
     server = create_server(
         service,
         job_store=job_store,
@@ -1723,6 +2167,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         oidc_only=oidc_only,
         oidc_auth_client=oidc_auth_client,
         oidc_cookie_secure=not getattr(args, "oidc_cookie_insecure", False),
+        oidc_session_repository=oidc_session_repository,
         operator_token=args.operator_token,
         operator_role=args.operator_role,
         operator_key_store=operator_key_store,
@@ -1731,6 +2176,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         port=args.port,
         max_body_bytes=args.max_body_bytes,
         rate_limit=args.rate_limit,
+        rate_limiter=rate_limiter,
     )
     print(f"Serving Governed Autonomy HTTP API on http://{args.host}:{server.server_address[1]}")
     try:
@@ -1750,6 +2196,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 job_store.close()
             elif job_connection is not None:
                 job_connection.close()
+        if ha_connection is not None:
+            ha_connection.close()
     return 0
 
 
@@ -1807,6 +2255,33 @@ API_SCHEMA = {
                 "properties": {"ok": {"type": "boolean"}, "status": {"type": "string"}},
                 "additionalProperties": True,
             },
+            "ReplayAnchor": {
+                "type": "object",
+                "required": [
+                    "replay_digest",
+                    "head_hash",
+                    "frame_count",
+                    "signer_key_id",
+                    "signature",
+                ],
+                "properties": {
+                    "replay_digest": {"type": "string"},
+                    "head_hash": {"type": "string"},
+                    "frame_count": {"type": "integer", "minimum": 0},
+                    "signer_key_id": {"type": "string"},
+                    "signature": {"type": "string"},
+                },
+            },
+            "ReplayCertification": {
+                "type": "object",
+                "required": ["certified", "integrity", "signer_key_id"],
+                "properties": {
+                    "certified": {"type": "boolean"},
+                    "integrity": {"type": "object", "additionalProperties": True},
+                    "reason": {"type": "string"},
+                    "signer_key_id": {"type": "string"},
+                },
+            },
             "JobSubmission": {
                 "type": "object",
                 "required": ["artifact", "idempotency_key"],
@@ -1829,13 +2304,39 @@ API_SCHEMA = {
                 "security": [{"bearerAuth": []}],
                 "requestBody": {
                     "required": True,
-                    "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AuthorizeRequest"}}},
+                    "content": {
+                        "application/json": {
+                            "schema": {"$ref": "#/components/schemas/AuthorizeRequest"}
+                        }
+                    },
                 },
                 "responses": {
-                    "200": {"description": "Signed governance authorization artifact", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AuthorizationArtifact"}}}},
-                    "400": {"description": "Invalid request", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-                    "401": {"description": "Unauthorized", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-                    "403": {"description": "Policy denied", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+                    "200": {
+                        "description": "Signed governance authorization artifact",
+                        "content": {
+                            "application/json": {
+                                "schema": {"$ref": "#/components/schemas/AuthorizationArtifact"}
+                            }
+                        },
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "content": {
+                            "application/json": {"schema": {"$ref": "#/components/schemas/Error"}}
+                        },
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "content": {
+                            "application/json": {"schema": {"$ref": "#/components/schemas/Error"}}
+                        },
+                    },
+                    "403": {
+                        "description": "Policy denied",
+                        "content": {
+                            "application/json": {"schema": {"$ref": "#/components/schemas/Error"}}
+                        },
+                    },
                 },
             }
         },
@@ -1844,45 +2345,171 @@ API_SCHEMA = {
                 "security": [{"bearerAuth": []}],
                 "requestBody": {
                     "required": True,
-                    "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ExecuteRequest"}}},
+                    "content": {
+                        "application/json": {
+                            "schema": {"$ref": "#/components/schemas/ExecuteRequest"}
+                        }
+                    },
                 },
                 "responses": {
-                    "200": {"description": "Action result", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ExecuteResponse"}}}},
-                    "400": {"description": "Invalid request", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-                    "401": {"description": "Unauthorized", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+                    "200": {
+                        "description": "Action result",
+                        "content": {
+                            "application/json": {
+                                "schema": {"$ref": "#/components/schemas/ExecuteResponse"}
+                            }
+                        },
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "content": {
+                            "application/json": {"schema": {"$ref": "#/components/schemas/Error"}}
+                        },
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "content": {
+                            "application/json": {"schema": {"$ref": "#/components/schemas/Error"}}
+                        },
+                    },
                 },
             }
         },
         "/health": {
             "get": {
                 "responses": {
-                    "200": {"description": "Health report", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HealthReport"}}}}
+                    "200": {
+                        "description": "Health report",
+                        "content": {
+                            "application/json": {
+                                "schema": {"$ref": "#/components/schemas/HealthReport"}
+                            }
+                        },
+                    }
                 }
             }
         },
         "/readyz": {
             "get": {
                 "responses": {
-                    "200": {"description": "Readiness report", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HealthReport"}}}},
-                    "503": {"description": "Not ready", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HealthReport"}}}}
+                    "200": {
+                        "description": "Readiness report",
+                        "content": {
+                            "application/json": {
+                                "schema": {"$ref": "#/components/schemas/HealthReport"}
+                            }
+                        },
+                    },
+                    "503": {
+                        "description": "Not ready",
+                        "content": {
+                            "application/json": {
+                                "schema": {"$ref": "#/components/schemas/HealthReport"}
+                            }
+                        },
+                    },
                 }
             }
         },
         "/livez": {
             "get": {
                 "responses": {
-                    "200": {"description": "Liveness report", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HealthReport"}}}}
+                    "200": {
+                        "description": "Liveness report",
+                        "content": {
+                            "application/json": {
+                                "schema": {"$ref": "#/components/schemas/HealthReport"}
+                            }
+                        },
+                    }
                 }
             }
         },
         "/startupz": {
             "get": {
                 "responses": {
-                    "200": {"description": "Startup report", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HealthReport"}}}}
+                    "200": {
+                        "description": "Startup report",
+                        "content": {
+                            "application/json": {
+                                "schema": {"$ref": "#/components/schemas/HealthReport"}
+                            }
+                        },
+                    }
                 }
             }
         },
         "/audit": {"get": {"responses": {"200": {"description": "Audit summary"}}}},
+        "/audit/replay": {
+            "get": {
+                "security": [{"bearerAuth": []}],
+                "responses": {
+                    "200": {
+                        "description": "Current replay integrity evidence",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": ["integrity"],
+                                    "properties": {
+                                        "integrity": {
+                                            "type": "object",
+                                            "additionalProperties": True,
+                                        }
+                                    },
+                                }
+                            }
+                        },
+                    }
+                },
+            }
+        },
+        "/audit/replay/certify": {
+            "post": {
+                "security": [{"bearerAuth": []}],
+                "requestBody": {
+                    "required": True,
+                    "content": {
+                        "application/json": {"schema": {"$ref": "#/components/schemas/ReplayAnchor"}}
+                    },
+                },
+                "responses": {
+                    "200": {
+                        "description": "Anchor certifies the current replay state",
+                        "content": {
+                            "application/json": {
+                                "schema": {"$ref": "#/components/schemas/ReplayCertification"}
+                            }
+                        },
+                    },
+                    "400": {"description": "Invalid replay anchor"},
+                    "409": {"description": "Anchor does not certify the current replay state"},
+                    "503": {"description": "Replay trust store is unavailable"},
+                },
+            }
+        },
+        "/admin/replay/anchor": {
+            "post": {
+                "security": [{"bearerAuth": []}],
+                "description": "Create a signed replay checkpoint for independent retention.",
+                "requestBody": {
+                    "required": True,
+                    "content": {"application/json": {"schema": {"type": "object", "maxProperties": 0}}},
+                },
+                "responses": {
+                    "201": {
+                        "description": "Signed replay anchor; retain it outside the runtime system.",
+                        "content": {
+                            "application/json": {
+                                "schema": {"$ref": "#/components/schemas/ReplayAnchor"}
+                            }
+                        },
+                    },
+                    "400": {"description": "Invalid replay anchor request"},
+                    "503": {"description": "Replay anchor signer is unavailable"},
+                },
+            }
+        },
         "/admin/jobs": {
             "post": {
                 "security": [{"bearerAuth": []}],
@@ -1929,9 +2556,7 @@ API_SCHEMA = {
                         "schema": {"type": "string"},
                     }
                 ],
-                "responses": {
-                    "302": {"description": "Redirect to the discovered OpenID provider"}
-                },
+                "responses": {"302": {"description": "Redirect to the discovered OpenID provider"}},
             }
         },
         "/auth/callback": {
@@ -1944,9 +2569,7 @@ API_SCHEMA = {
             }
         },
         "/auth/logout": {
-            "post": {
-                "responses": {"204": {"description": "Local browser session revoked"}}
-            }
+            "post": {"responses": {"204": {"description": "Local browser session revoked"}}}
         },
         "/auth/me": {
             "get": {
@@ -2066,7 +2689,9 @@ API_SCHEMA = {
                 "/admin/identities/events": {
                     "get": {
                         "security": [{"bearerAuth": []}],
-                        "responses": {"200": {"description": "Identity and role-assignment events"}},
+                        "responses": {
+                            "200": {"description": "Identity and role-assignment events"}
+                        },
                     }
                 },
                 "responses": {
@@ -2193,7 +2818,15 @@ def _complete_schema(schema: dict[str, Any]) -> None:
                     responses.setdefault(
                         status, {"description": text, "content": json_ref("Error")}
                     )
-    for path in ("/health", "/livez", "/readyz", "/startupz", "/audit", "/openapi.json"):
+    for path in (
+        "/health",
+        "/livez",
+        "/readyz",
+        "/startupz",
+        "/audit",
+        "/audit/replay",
+        "/openapi.json",
+    ):
         schema["paths"].setdefault(f"/api/v1{path}", schema["paths"][path])
 
 

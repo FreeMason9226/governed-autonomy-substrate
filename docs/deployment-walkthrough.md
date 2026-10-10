@@ -101,7 +101,7 @@ helm upgrade --install gas deploy/helm -n gas \
 kubectl -n gas rollout status deploy/gas-governed-autonomy
 ```
 
-Use `externalSecrets.enabled=true` to sync secrets from your store, `oidc.*` for OIDC, and `postgres.enabled=true` for the bundled database (use a managed one in production). For Microsoft Entra ID, set `oidc.enabled=true`, `oidc.tenantId=<tenant-guid>`, and `oidc.clientId=<api-app-guid>`; the chart resolves discovery and JWKS automatically. To enable browser sign-in, also set `oidc.redirectUri=https://gas.example.com/auth/callback` and provision secret key `entra-client-secret` (optional for PKCE public clients) in `runtimeSecret` or `oidc.clientSecretSecret`. The chart pins the API to one replica while process-local browser sessions are enabled. The bearer-token secret is used only by Kubernetes health probes in Entra mode, not for API access. The worker is off by default; enable it in `values.yaml` once images and Vault are ready. Resource names depend on the release name; check with `kubectl -n gas get all`.
+Use `externalSecrets.enabled=true` to sync secrets from your store, `oidc.*` for OIDC, and `postgres.enabled=true` for the bundled database (use a managed one in production). For Microsoft Entra ID, set `oidc.enabled=true`, `oidc.tenantId=<tenant-guid>`, and `oidc.clientId=<api-app-guid>`; the chart resolves discovery and JWKS automatically. To enable browser sign-in, also set `oidc.redirectUri=https://gas.example.com/auth/callback` and provision secret key `entra-client-secret` (optional for PKCE public clients) in `runtimeSecret` or `oidc.clientSecretSecret`. With `DATABASE_URL`, browser OIDC state, sessions, and rate-limit windows use PostgreSQL, allowing the configured API replica count; apply migration `003_ha_sessions_rate_limit.sql` before rollout. The bearer-token secret is used only by Kubernetes health probes in Entra mode, not for API access. The worker is off by default; enable it in `values.yaml` once images and Vault are ready. Resource names depend on the release name; check with `kubectl -n gas get all`.
 
 ## Browser access (CORS)
 
@@ -112,6 +112,10 @@ CORS is off by default. To let a web page call the API, set `GOVERNED_AUTONOMY_C
 - `/livez`, `/readyz`, `/startupz` for probes; `/health` for replay and trust integrity.
 - `/admin/metrics` (Prometheus) feeds the ServiceMonitor and alerts in `deploy/observability/`.
 - `gas replay verify <file>` checks an exported log offline.
+- Retain `POST /admin/replay/anchor` output in the independent Object Lock
+  store, then use `POST /audit/replay/certify` (or `gas replay certify`) to
+  certify a rollback or restored replay state. See the operations runbook for
+  the required audit role and retention model.
 
 ## Troubleshooting
 

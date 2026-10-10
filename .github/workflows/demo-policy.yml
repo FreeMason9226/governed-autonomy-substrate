@@ -1,0 +1,53 @@
+# Mirror of demo/workflow.yml (keep in sync); see that file for the safety notes.
+name: demo-policy
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, labeled]
+    paths:
+      - "src/**"
+      - ".github/**"
+      - "deploy/**"
+      - "schemas/**"
+      - "docs/**"
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  policy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout base branch (trusted code only)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Fetch PR data as JSON (data only)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          API_URL: ${{ github.api_url }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          mkdir -p demo-out
+          curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "$API_URL/repos/$REPO/pulls/$PR_NUMBER" -o demo-out/pr.json
+          curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "$API_URL/repos/$REPO/pulls/$PR_NUMBER/files?per_page=100" -o demo-out/files.json
+          python3 -c "import json;print(json.dumps({'pull_request': json.load(open('demo-out/pr.json'))}))" > demo-out/event.json
+
+      - name: Evaluate policy (deterministic)
+        run: python3 demo/pr_policy.py --event demo-out/event.json --files demo-out/files.json --output demo-out/policy-result.json
+
+      - name: Summarize result
+        run: python3 -c "import json;r=json.load(open('demo-out/policy-result.json'));print('policy status:', r['status'])"
+
+      - name: Upload policy result
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: policy-result
+          path: demo-out/policy-result.json
+          if-no-files-found: error

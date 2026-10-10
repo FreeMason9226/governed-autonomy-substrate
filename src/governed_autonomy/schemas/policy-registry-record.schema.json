@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/FreeMason9226/governed-autonomy-substrate/schemas/policy-registry-record.schema.json",
+  "title": "Immutable Policy Registry Record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["content_hash", "policy", "schema_version", "signature"],
+  "properties": {
+    "content_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "policy": {"$ref": "policy.schema.json"},
+    "schema_version": {"const": "1.0"},
+    "signature": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["signer_id", "algorithm", "signature", "signed_at"],
+      "properties": {
+        "signer_id": {"type": "string", "minLength": 1, "maxLength": 256},
+        "algorithm": {"const": "ed25519"},
+        "signature": {"type": "string", "minLength": 1, "maxLength": 1024},
+        "signed_at": {"type": "string", "format": "date-time"}
+      }
+    }
+  }
+}

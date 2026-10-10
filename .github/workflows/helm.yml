@@ -1,4 +1,4 @@
-﻿name: Helm
+name: Helm
 
 on:
   workflow_dispatch:
@@ -16,10 +16,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: azure/setup-helm@b9e51907a09c216f16ebe8536097933489208112 # v4.3.0
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
       - run: helm lint deploy/helm
       - run: helm template gas deploy/helm > /dev/null
       - name: Template with worker metrics and ServiceMonitor
         run: helm template gas deploy/helm --set worker.enabled=true --set worker.allowedImages=python:3.12-slim --set worker.metrics.serviceMonitor=true > /dev/null
-
-
+      - name: Template with KMS workload identity
+        run: |
+          helm template gas deploy/helm \
+            --set kms.enabled=true \
+            --set kms.keyId=alias/gas-ci \
+            --set serviceAccount.create=true > "$RUNNER_TEMP/kms.yaml"
+          ! grep -q GAS_ISSUER_PRIVATE_KEY "$RUNNER_TEMP/kms.yaml"

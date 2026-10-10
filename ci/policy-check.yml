@@ -1,0 +1,45 @@
+name: PR policy risk check
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  policy-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Install OPA and jq
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes jq
+          curl --fail --silent --show-error --location \
+            https://openpolicyagent.org/downloads/v1.10.1/opa_linux_amd64_static \
+            --output "$RUNNER_TEMP/opa"
+          chmod +x "$RUNNER_TEMP/opa"
+          sudo install "$RUNNER_TEMP/opa" /usr/local/bin/opa
+      - name: Test policy
+        run: opa test policy/regos policy/tests
+      - name: Evaluate PR policy risk
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_REF: ${{ github.event.pull_request.base.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.sha }}
+        run: |
+          ./scripts/policy_check.sh run \
+            --pr "$PR_NUMBER" \
+            --base-ref "$BASE_REF" \
+            --head-ref "$HEAD_REF" \
+            --out "$RUNNER_TEMP/policy_result.json" \
+            --threshold 7
+      - name: Upload policy result
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: policy-result
+          path: ${{ runner.temp }}/policy_result.json
+          if-no-files-found: warn

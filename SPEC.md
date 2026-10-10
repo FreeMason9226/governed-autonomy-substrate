@@ -250,11 +250,16 @@ A `Policy` is a data-only, deterministic policy input for authorization.
   "exact_context":      { "<field>": <value>, ... },
   "max_request_bytes":  <integer>,
   "max_ttl_seconds":    <integer>,
-  "required_approvals": { "<action>": <integer>, ... }
+  "required_approvals": { "<action>": <integer>, ... },
+  "max_numeric_fields": { "<action>": { "<field>": <number>, ... }, ... }
 }
 ```
 
 `required_approvals` MAY be omitted; it defaults to `{}`.
+`max_numeric_fields` MAY be omitted; it defaults to `{}`. For each configured
+action and field, the request value MUST be a finite number no greater than the
+configured maximum. When empty, `max_numeric_fields` MUST be omitted from the
+canonical policy object.
 
 ### 6.2 Invariants
 
@@ -263,6 +268,7 @@ A `Policy` is a data-only, deterministic policy input for authorization.
 - `required_context` MUST be sorted lexicographically.
 - `max_request_bytes` and `max_ttl_seconds` MUST be positive integers.
 - `required_approvals` values MUST be non-negative integers.
+- `max_numeric_fields` values MUST be finite numbers.
 
 ### 6.3 Policy Digest
 
@@ -307,6 +313,25 @@ authority.
   is identical (idempotent re-registration).
 - A registry MUST reject a manifest whose signature does not verify against a
   trusted issuer key.
+
+### 7.4 Immutable semantic-version registry
+
+The optional policy-document registry uses the strict JSON policy schema and
+Semantic Versioning 2.0. A published `(policy_id, version)` pair is write-once:
+duplicate publication MUST fail, and changing content requires a new version.
+The registry computes SHA-256 over Canonical JSON policy content and MUST verify
+that digest each time it loads a record.
+
+The publication signature covers canonical policy content, policy ID, semantic
+version, content digest, record schema version, signer identity, algorithm, and
+UTC signing timestamp; the signature field itself is excluded. Version records
+support `DRAFT`, `PUBLISHED`, `ACTIVE`, `DEPRECATED`, and `REVOKED` lifecycle
+states. A registry MUST verify a trusted supported signature before activating a
+`PUBLISHED` version, reject a revoked version, and record each activation or
+rollback as an append-only event with prior/selected version, actor, reason,
+timestamp, operation, and monotonically increasing revision. Implementations
+MAY require a compare-and-swap expected revision to prevent conflicting
+activation requests.
 
 ---
 

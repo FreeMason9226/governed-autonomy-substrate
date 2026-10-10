@@ -59,6 +59,7 @@ omit = ["*/demo.py"]
 
 [tool.coverage.report]
 show_missing = true
+fail_under = 75
 
 [tool.mypy]
 python_version = "3.11"
